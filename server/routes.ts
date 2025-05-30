@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertVendorSchema, insertInquirySchema, insertPriceResponseSchema, insertBotConfigSchema } from "@shared/schema";
 import { z } from "zod";
+import { whatsappBot } from "./bot/whatsapp";
 
 // API key validation middleware
 const validateApiKey = async (req: any, res: any, next: any) => {
@@ -23,6 +24,35 @@ const validateApiKey = async (req: any, res: any, next: any) => {
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
+
+  // Start WhatsApp bot
+  await whatsappBot.start();
+  
+  // WhatsApp webhook endpoint for incoming messages
+  app.post("/webhook/whatsapp", async (req, res) => {
+    try {
+      const { From, Body } = req.body;
+      
+      if (From && Body) {
+        await whatsappBot.handleIncomingMessage(From, Body);
+      }
+      
+      res.status(200).send('OK');
+    } catch (error) {
+      console.error('WhatsApp webhook error:', error);
+      res.status(500).send('Error processing message');
+    }
+  });
+
+  // WhatsApp bot status endpoint
+  app.get("/api/admin/whatsapp-status", async (req, res) => {
+    try {
+      const status = whatsappBot.getStatus();
+      res.json(status);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get WhatsApp bot status" });
+    }
+  });
   
   // Dashboard metrics endpoint
   app.get("/api/metrics", async (req, res) => {

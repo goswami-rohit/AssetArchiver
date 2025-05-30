@@ -1,16 +1,22 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Sidebar from "@/components/sidebar";
 import MetricsCards from "@/components/metrics-cards";
 import InquiriesTable from "@/components/inquiries-table";
 import VendorsTable from "@/components/vendors-table";
 import BotConfig from "@/components/bot-config";
 import ApiDocs from "@/components/api-docs";
-import { Bell, User } from "lucide-react";
+import { Bell, User, MessageCircle } from "lucide-react";
 
 type TabType = "dashboard" | "inquiries" | "vendors" | "analytics" | "bot-config" | "api";
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>("dashboard");
+
+  const { data: whatsappStatus } = useQuery({
+    queryKey: ["/api/admin/whatsapp-status"],
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
 
   const tabTitles = {
     dashboard: "Dashboard Overview",
@@ -138,10 +144,24 @@ export default function Dashboard() {
               <p className="text-sm text-slate-600 mt-1">{tabDescriptions[activeTab]}</p>
             </div>
             <div className="flex items-center space-x-4">
-              {/* Bot Status */}
+              {/* WhatsApp Bot Status */}
+              <div className="flex items-center space-x-2">
+                <MessageCircle className="w-4 h-4 text-green-600" />
+                <div className="flex items-center space-x-1">
+                  <div className={`w-2 h-2 rounded-full ${whatsappStatus?.isActive ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`}></div>
+                  <span className="text-sm text-slate-600">
+                    WhatsApp {whatsappStatus?.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                  {whatsappStatus?.activeSessions > 0 && (
+                    <span className="text-xs text-slate-500">({whatsappStatus.activeSessions} chats)</span>
+                  )}
+                </div>
+              </div>
+              
+              {/* General Bot Status */}
               <div className="flex items-center space-x-2">
                 <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-sm text-slate-600">Bot Active</span>
+                <span className="text-sm text-slate-600">System Active</span>
               </div>
               
               {/* Notifications */}
