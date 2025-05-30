@@ -21,12 +21,12 @@ export default function InquiriesTable({ limit, showHeader = false, title = "All
     queryKey: ["/api/admin/inquiries", { limit }],
   });
 
-  const filteredInquiries = inquiries?.filter((inquiry: any) => {
+  const filteredInquiries = (inquiries || []).filter((inquiry: any) => {
     const matchesSearch = inquiry.userName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          inquiry.material.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCity = !cityFilter || inquiry.city === cityFilter;
+    const matchesCity = !cityFilter || cityFilter === "all" || inquiry.city === cityFilter;
     return matchesSearch && matchesCity;
-  }) || [];
+  });
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -85,7 +85,7 @@ export default function InquiriesTable({ limit, showHeader = false, title = "All
                   <SelectValue placeholder="All Cities" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Cities</SelectItem>
+                  <SelectItem value="all">All Cities</SelectItem>
                   <SelectItem value="Guwahati">Guwahati</SelectItem>
                   <SelectItem value="Mumbai">Mumbai</SelectItem>
                   <SelectItem value="Delhi">Delhi</SelectItem>
@@ -175,7 +175,7 @@ export default function InquiriesTable({ limit, showHeader = false, title = "All
           <div className="px-6 py-4 border-t border-slate-200">
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-600">
-                Showing {filteredInquiries.length} of {inquiries?.length || 0} inquiries
+                Showing {filteredInquiries.length} of {(inquiries || []).length} inquiries
               </p>
               <div className="flex items-center space-x-2">
                 <Button variant="outline" size="sm" disabled>Previous</Button>

@@ -72,8 +72,8 @@ export default function VendorsTable() {
   const filteredVendors = vendors?.filter((vendor: any) => {
     const matchesSearch = vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          vendor.phone.includes(searchTerm);
-    const matchesCity = !cityFilter || vendor.city === cityFilter;
-    const matchesMaterial = !materialFilter || vendor.materials.includes(materialFilter);
+    const matchesCity = !cityFilter || cityFilter === "all" || vendor.city === cityFilter;
+    const matchesMaterial = !materialFilter || materialFilter === "all" || vendor.materials.includes(materialFilter);
     return matchesSearch && matchesCity && matchesMaterial;
   }) || [];
 
@@ -118,7 +118,7 @@ export default function VendorsTable() {
                 <SelectValue placeholder="City" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Cities</SelectItem>
+                <SelectItem value="all">All Cities</SelectItem>
                 <SelectItem value="Guwahati">Guwahati</SelectItem>
                 <SelectItem value="Mumbai">Mumbai</SelectItem>
                 <SelectItem value="Delhi">Delhi</SelectItem>
@@ -129,7 +129,7 @@ export default function VendorsTable() {
                 <SelectValue placeholder="Material" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">All Materials</SelectItem>
+                <SelectItem value="all">All Materials</SelectItem>
                 <SelectItem value="cement">Cement</SelectItem>
                 <SelectItem value="tmt">TMT Bar</SelectItem>
               </SelectContent>

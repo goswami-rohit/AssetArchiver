@@ -209,6 +209,9 @@ Thanks!`,
     const inquiry: Inquiry = {
       id,
       ...insertInquiry,
+      userPhone: insertInquiry.userPhone ?? null,
+      brand: insertInquiry.brand ?? null,
+      quantity: insertInquiry.quantity ?? null,
       responseCount: insertInquiry.responseCount ?? 0,
       status: insertInquiry.status ?? "pending",
       timestamp: new Date()
@@ -317,7 +320,7 @@ Thanks!`,
 
   async validateApiKey(keyValue: string): Promise<boolean> {
     const apiKey = Array.from(this.apiKeys.values()).find(k => k.keyValue === keyValue);
-    return apiKey ? apiKey.isActive : false;
+    return apiKey ? Boolean(apiKey.isActive) : false;
   }
 
   async getDashboardMetrics() {
