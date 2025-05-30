@@ -42,6 +42,12 @@ export interface IStorage {
   createPriceResponse(response: InsertPriceResponse): Promise<PriceResponse>;
   getLatestPrices(city?: string, material?: string, limit?: number): Promise<PriceResponse[]>;
 
+  // Vendor Rates
+  getVendorRates(vendorId?: string, city?: string, material?: string): Promise<VendorRate[]>;
+  createVendorRate(rate: InsertVendorRate): Promise<VendorRate>;
+  updateVendorRate(id: number, rate: Partial<VendorRate>): Promise<VendorRate | undefined>;
+  getLatestVendorRates(city?: string, material?: string, limit?: number): Promise<VendorRate[]>;
+
   // Bot Config
   getBotConfig(): Promise<BotConfig | undefined>;
   updateBotConfig(config: Partial<BotConfig>): Promise<BotConfig>;
@@ -196,6 +202,56 @@ export class DatabaseStorage implements IStorage {
     return filtered.slice(0, limit);
   }
 
+  async getVendorRates(vendorId?: string, city?: string, material?: string): Promise<VendorRate[]> {
+    let query = db.select().from(vendorRates).orderBy(desc(vendorRates.submittedAt));
+    
+    const conditions = [];
+    if (vendorId) conditions.push(eq(vendorRates.vendorId, vendorId));
+    if (city) conditions.push(eq(vendorRates.city, city));
+    if (material) conditions.push(eq(vendorRates.material, material));
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    
+    return await query;
+  }
+
+  async createVendorRate(insertRate: InsertVendorRate): Promise<VendorRate> {
+    const [rate] = await db
+      .insert(vendorRates)
+      .values(insertRate)
+      .returning();
+    return rate;
+  }
+
+  async updateVendorRate(id: number, rate: Partial<VendorRate>): Promise<VendorRate | undefined> {
+    const [updated] = await db
+      .update(vendorRates)
+      .set({ ...rate, updatedAt: new Date() })
+      .where(eq(vendorRates.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getLatestVendorRates(city?: string, material?: string, limit = 20): Promise<VendorRate[]> {
+    let query = db
+      .select()
+      .from(vendorRates)
+      .orderBy(desc(vendorRates.submittedAt))
+      .limit(limit);
+    
+    const conditions = [];
+    if (city) conditions.push(eq(vendorRates.city, city));
+    if (material) conditions.push(eq(vendorRates.material, material));
+    
+    if (conditions.length > 0) {
+      query = query.where(and(...conditions));
+    }
+    
+    return await query;
+  }
+
   async getBotConfig(): Promise<BotConfig | undefined> {
     const [config] = await db.select().from(botConfig).limit(1);
     return config || undefined;
@@ -215,7 +271,9 @@ export class DatabaseStorage implements IStorage {
       const [created] = await db
         .insert(botConfig)
         .values({
-          messageTemplate: config.messageTemplate || "",
+          messageTemplate: config.messageTemplate || "Hi [Vendor Name], I'm [User Name] from [City]. I'm looking for today's rate for [Material]. Can you please share: Latest Rate, GST %, Delivery Charges (if any). Thanks!",
+          vendorRateRequestTemplate: config.vendorRateRequestTemplate || "Hi [Vendor Name], please share your current rates for [Material] in [City]. Include: Rate per unit, GST %, Delivery charges, Brand details. Reply in format: RATE [Material] [Brand] [Rate] [Unit] [GST%] [DeliveryCharges]",
+          vendorInquiryTemplate: config.vendorInquiryTemplate || "Hi [Vendor Name], I'm [User Name] from [City]. I'm looking for today's rate for [Material]. Can you please share: Latest Rate, GST %, Delivery Charges (if any). Thanks!",
           maxVendorsPerInquiry: config.maxVendorsPerInquiry ?? 3,
           messagesPerMinute: config.messagesPerMinute ?? 20,
           autoResponseEnabled: config.autoResponseEnabled ?? true,
@@ -282,6 +340,7 @@ export class MemStorage implements IStorage {
   private vendors: Map<number, Vendor>;
   private inquiries: Map<number, Inquiry>;
   private priceResponses: Map<number, PriceResponse>;
+  private vendorRates: Map<number, VendorRate>;
   private botConfigs: Map<number, BotConfig>;
   private apiKeys: Map<number, ApiKey>;
   private currentId: number;
@@ -290,6 +349,7 @@ export class MemStorage implements IStorage {
     this.vendors = new Map();
     this.inquiries = new Map();
     this.priceResponses = new Map();
+    this.vendorRates = new Map();
     this.botConfigs = new Map();
     this.apiKeys = new Map();
     this.currentId = 1;
