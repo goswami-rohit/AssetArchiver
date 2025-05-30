@@ -15,6 +15,8 @@ import {
   type ApiKey,
   type InsertApiKey
 } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   // Vendors
@@ -55,6 +57,222 @@ export interface IStorage {
     todayInquiries: number;
     citiesCovered: number;
   }>;
+}
+
+export class DatabaseStorage implements IStorage {
+  async getVendor(id: number): Promise<Vendor | undefined> {
+    const [vendor] = await db.select().from(vendors).where(eq(vendors.id, id));
+    return vendor || undefined;
+  }
+
+  async getVendorByVendorId(vendorId: string): Promise<Vendor | undefined> {
+    const [vendor] = await db.select().from(vendors).where(eq(vendors.vendorId, vendorId));
+    return vendor || undefined;
+  }
+
+  async createVendor(insertVendor: InsertVendor): Promise<Vendor> {
+    const [vendor] = await db
+      .insert(vendors)
+      .values(insertVendor)
+      .returning();
+    return vendor;
+  }
+
+  async updateVendor(id: number, vendor: Partial<Vendor>): Promise<Vendor | undefined> {
+    const [updated] = await db
+      .update(vendors)
+      .set(vendor)
+      .where(eq(vendors.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getVendors(city?: string, material?: string): Promise<Vendor[]> {
+    let query = db.select().from(vendors);
+    
+    // Note: Complex filtering with city and material would require proper SQL conditions
+    // For now, we'll get all vendors and filter in memory
+    const allVendors = await query;
+    
+    let filtered = allVendors;
+    if (city) {
+      filtered = filtered.filter(v => v.city.toLowerCase() === city.toLowerCase());
+    }
+    if (material) {
+      filtered = filtered.filter(v => v.materials.includes(material.toLowerCase()));
+    }
+    
+    return filtered.sort((a, b) => (b.responseCount || 0) - (a.responseCount || 0));
+  }
+
+  async getTopVendors(limit = 10, material?: string): Promise<Vendor[]> {
+    const vendors = await this.getVendors(undefined, material);
+    return vendors.slice(0, limit);
+  }
+
+  async getInquiry(id: number): Promise<Inquiry | undefined> {
+    const [inquiry] = await db.select().from(inquiries).where(eq(inquiries.id, id));
+    return inquiry || undefined;
+  }
+
+  async getInquiryByInquiryId(inquiryId: string): Promise<Inquiry | undefined> {
+    const [inquiry] = await db.select().from(inquiries).where(eq(inquiries.inquiryId, inquiryId));
+    return inquiry || undefined;
+  }
+
+  async createInquiry(insertInquiry: InsertInquiry): Promise<Inquiry> {
+    const [inquiry] = await db
+      .insert(inquiries)
+      .values(insertInquiry)
+      .returning();
+    return inquiry;
+  }
+
+  async updateInquiry(id: number, inquiry: Partial<Inquiry>): Promise<Inquiry | undefined> {
+    const [updated] = await db
+      .update(inquiries)
+      .set(inquiry)
+      .where(eq(inquiries.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async getInquiries(limit = 50): Promise<Inquiry[]> {
+    let query = db.select().from(inquiries);
+    
+    const results = await query;
+    const sorted = results.sort((a, b) => 
+      new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+    );
+    
+    return limit ? sorted.slice(0, limit) : sorted;
+  }
+
+  async getPriceResponses(inquiryId?: string, vendorId?: string): Promise<PriceResponse[]> {
+    let query = db.select().from(priceResponses);
+    
+    // For complex filtering, we'd need to build proper WHERE conditions
+    const results = await query;
+    
+    let filtered = results;
+    if (inquiryId) {
+      filtered = filtered.filter(r => r.inquiryId === inquiryId);
+    }
+    if (vendorId) {
+      filtered = filtered.filter(r => r.vendorId === vendorId);
+    }
+    
+    return filtered.sort((a, b) => 
+      new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+    );
+  }
+
+  async createPriceResponse(insertResponse: InsertPriceResponse): Promise<PriceResponse> {
+    const [response] = await db
+      .insert(priceResponses)
+      .values(insertResponse)
+      .returning();
+    return response;
+  }
+
+  async getLatestPrices(city?: string, material?: string, limit = 20): Promise<PriceResponse[]> {
+    const responses = await this.getPriceResponses();
+    
+    let filtered = responses;
+    if (material) {
+      filtered = filtered.filter(r => r.material.toLowerCase() === material.toLowerCase());
+    }
+    
+    // Filter by city through vendor lookup
+    if (city) {
+      const cityVendors = await this.getVendors(city);
+      const vendorIds = cityVendors.map(v => v.vendorId);
+      filtered = filtered.filter(r => vendorIds.includes(r.vendorId));
+    }
+    
+    return filtered.slice(0, limit);
+  }
+
+  async getBotConfig(): Promise<BotConfig | undefined> {
+    const [config] = await db.select().from(botConfig).limit(1);
+    return config || undefined;
+  }
+
+  async updateBotConfig(config: Partial<BotConfig>): Promise<BotConfig> {
+    const existing = await this.getBotConfig();
+    
+    if (existing) {
+      const [updated] = await db
+        .update(botConfig)
+        .set(config)
+        .where(eq(botConfig.id, existing.id))
+        .returning();
+      return updated;
+    } else {
+      const [created] = await db
+        .insert(botConfig)
+        .values({
+          messageTemplate: config.messageTemplate || "",
+          maxVendorsPerInquiry: config.maxVendorsPerInquiry ?? 3,
+          messagesPerMinute: config.messagesPerMinute ?? 20,
+          autoResponseEnabled: config.autoResponseEnabled ?? true,
+          botActive: config.botActive ?? true
+        })
+        .returning();
+      return created;
+    }
+  }
+
+  async getApiKeys(): Promise<ApiKey[]> {
+    const keys = await db.select().from(apiKeys);
+    return keys.filter(k => k.isActive);
+  }
+
+  async createApiKey(insertApiKey: InsertApiKey): Promise<ApiKey> {
+    const [apiKey] = await db
+      .insert(apiKeys)
+      .values(insertApiKey)
+      .returning();
+    return apiKey;
+  }
+
+  async validateApiKey(keyValue: string): Promise<boolean> {
+    const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyValue, keyValue));
+    return apiKey ? Boolean(apiKey.isActive) : false;
+  }
+
+  async getDashboardMetrics() {
+    const allInquiries = await db.select().from(inquiries);
+    const allVendors = await db.select().from(vendors);
+    const allResponses = await db.select().from(priceResponses);
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const todayInquiries = allInquiries.filter(i => 
+      new Date(i.timestamp || 0) >= today
+    ).length;
+    
+    const activeVendors = allVendors.filter(v => v.isActive).length;
+    
+    const totalInquiries = allInquiries.length;
+    const totalResponses = allResponses.length;
+    const responseRate = totalInquiries > 0 ? Math.round((totalResponses / totalInquiries) * 100) : 0;
+    
+    const messagesSent = totalInquiries * 3;
+    
+    const cities = new Set(allVendors.map(v => v.city));
+    const citiesCovered = cities.size;
+    
+    return {
+      totalInquiries,
+      activeVendors,
+      responseRate,
+      messagesSent,
+      todayInquiries,
+      citiesCovered
+    };
+  }
 }
 
 export class MemStorage implements IStorage {
@@ -396,4 +614,4 @@ Thanks!`,
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();

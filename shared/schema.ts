@@ -1,4 +1,5 @@
 import { pgTable, text, serial, integer, boolean, timestamp, decimal } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -85,6 +86,27 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
   id: true,
   createdAt: true,
 });
+
+// Types
+// Relations
+export const vendorsRelations = relations(vendors, ({ many }) => ({
+  priceResponses: many(priceResponses),
+}));
+
+export const inquiriesRelations = relations(inquiries, ({ many }) => ({
+  priceResponses: many(priceResponses),
+}));
+
+export const priceResponsesRelations = relations(priceResponses, ({ one }) => ({
+  vendor: one(vendors, {
+    fields: [priceResponses.vendorId],
+    references: [vendors.vendorId],
+  }),
+  inquiry: one(inquiries, {
+    fields: [priceResponses.inquiryId],
+    references: [inquiries.inquiryId],
+  }),
+}));
 
 // Types
 export type Vendor = typeof vendors.$inferSelect;
