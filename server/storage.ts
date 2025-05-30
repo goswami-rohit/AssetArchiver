@@ -112,6 +112,45 @@ export class MemStorage implements IStorage {
 
     sampleVendors.forEach(vendor => this.createVendor(vendor));
 
+    // Initialize with sample inquiries
+    const sampleInquiries: InsertInquiry[] = [
+      {
+        inquiryId: "INQ-001",
+        userName: "Rajesh Kumar",
+        userPhone: "+91 98765 43213",
+        city: "Guwahati",
+        material: "cement",
+        brand: "ACC",
+        quantity: "50 bags",
+        vendorsContacted: ["vendor_001"],
+        responseCount: 1,
+        status: "responded"
+      },
+      {
+        inquiryId: "INQ-002", 
+        userName: "Priya Sharma",
+        userPhone: "+91 98765 43214",
+        city: "Mumbai",
+        material: "tmt",
+        brand: "Tata Steel",
+        quantity: "2 tons",
+        vendorsContacted: ["vendor_002"],
+        responseCount: 0,
+        status: "pending"
+      },
+      {
+        inquiryId: "INQ-003",
+        userName: "Amit Singh",
+        city: "Delhi", 
+        material: "cement",
+        vendorsContacted: ["vendor_003"],
+        responseCount: 1,
+        status: "completed"
+      }
+    ];
+
+    sampleInquiries.forEach(inquiry => this.createInquiry(inquiry));
+
     // Initialize bot config
     this.updateBotConfig({
       messageTemplate: `Hi [Vendor Name], I'm [User Name] from [City].

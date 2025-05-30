@@ -69,13 +69,13 @@ export default function VendorsTable() {
     }
   });
 
-  const filteredVendors = vendors?.filter((vendor: any) => {
+  const filteredVendors = (vendors || []).filter((vendor: any) => {
     const matchesSearch = vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          vendor.phone.includes(searchTerm);
     const matchesCity = !cityFilter || cityFilter === "all" || vendor.city === cityFilter;
     const matchesMaterial = !materialFilter || materialFilter === "all" || vendor.materials.includes(materialFilter);
     return matchesSearch && matchesCity && matchesMaterial;
-  }) || [];
+  });
 
   const onSubmit = (data: VendorFormData) => {
     createVendorMutation.mutate({
