@@ -6,13 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { Bot, MessageSquare, Settings, AlertCircle } from "lucide-react";
+import { Bot, MessageSquare, Settings, AlertCircle, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 export default function BotConfig() {
   const [config, setConfig] = useState<any>(null);
+  const [rateRequestCity, setRateRequestCity] = useState("");
+  const [rateRequestMaterial, setRateRequestMaterial] = useState("");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -38,6 +40,23 @@ export default function BotConfig() {
     }
   });
 
+  const sendRateRequestsMutation = useMutation({
+    mutationFn: (data: any) => apiRequest("POST", "/api/admin/request-vendor-rates", data),
+    onSuccess: (response: any) => {
+      toast({
+        title: "Rate Requests Sent",
+        description: response.message
+      });
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to send rate requests",
+        variant: "destructive"
+      });
+    }
+  });
+
   useEffect(() => {
     if (botConfig) {
       setConfig(botConfig);
@@ -50,10 +69,18 @@ export default function BotConfig() {
     }
   };
 
+  const handleSendRateRequests = () => {
+    sendRateRequestsMutation.mutate({
+      city: rateRequestCity || undefined,
+      material: rateRequestMaterial || undefined
+    });
+  };
+
   const handleReset = () => {
-    setConfig({
-      ...botConfig,
-      messageTemplate: `Hi [Vendor Name], I'm [User Name] from [City].
+    if (botConfig) {
+      setConfig({
+        ...botConfig,
+        messageTemplate: `Hi [Vendor Name], I'm [User Name] from [City].
 
 I'm looking for today's rate for [Material].
 Can you please share:
@@ -62,7 +89,8 @@ Can you please share:
 - Delivery Charges (if any)
 
 Thanks!`
-    });
+      });
+    }
   };
 
   if (isLoading) {
@@ -241,36 +269,58 @@ Thanks!`
             </div>
           </div>
 
-          {/* Bot Commands */}
+          {/* Vendor Rate Requests */}
           <div>
-            <h4 className="text-sm font-semibold text-slate-800 mb-3">Bot Commands</h4>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+            <h4 className="text-sm font-semibold text-slate-800 mb-3">Automated Rate Requests</h4>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <p className="text-sm font-medium text-slate-900">/start</p>
-                  <p className="text-xs text-slate-500">Initialize bot conversation</p>
+                  <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                    City
+                  </Label>
+                  <select 
+                    className="w-full p-2 border border-slate-300 rounded-md text-sm"
+                    value={rateRequestCity}
+                    onChange={(e) => setRateRequestCity(e.target.value)}
+                  >
+                    <option value="">All Cities</option>
+                    <option value="guwahati">Guwahati</option>
+                    <option value="mumbai">Mumbai</option>
+                    <option value="delhi">Delhi</option>
+                  </select>
                 </div>
-                <Button variant="ghost" size="sm" className="text-primary">
-                  Edit
-                </Button>
+                <div>
+                  <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                    Material
+                  </Label>
+                  <select 
+                    className="w-full p-2 border border-slate-300 rounded-md text-sm"
+                    value={rateRequestMaterial}
+                    onChange={(e) => setRateRequestMaterial(e.target.value)}
+                  >
+                    <option value="">All Materials</option>
+                    <option value="cement">Cement</option>
+                    <option value="tmt">TMT Bars</option>
+                  </select>
+                </div>
+                <div className="flex items-end">
+                  <Button 
+                    onClick={() => handleSendRateRequests()}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                  >
+                    Send Rate Requests
+                  </Button>
+                </div>
               </div>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">/help</p>
-                  <p className="text-xs text-slate-500">Show help information</p>
-                </div>
-                <Button variant="ghost" size="sm" className="text-primary">
-                  Edit
-                </Button>
-              </div>
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                <div>
-                  <p className="text-sm font-medium text-slate-900">/status</p>
-                  <p className="text-xs text-slate-500">Check inquiry status</p>
-                </div>
-                <Button variant="ghost" size="sm" className="text-primary">
-                  Edit
-                </Button>
+              
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h5 className="text-sm font-medium text-blue-800 mb-2">How it works:</h5>
+                <ul className="text-xs text-blue-700 space-y-1">
+                  <li>• Sends WhatsApp messages to vendors asking for current rates</li>
+                  <li>• Uses the "Vendor Rate Request Template" from above</li>
+                  <li>• Vendors can reply with: RATE cement UltraTech 420 bag 18 50</li>
+                  <li>• All vendor responses are automatically saved to database</li>
+                </ul>
               </div>
             </div>
           </div>

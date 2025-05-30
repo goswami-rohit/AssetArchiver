@@ -226,6 +226,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Send rate requests to vendors
+  app.post("/api/admin/request-vendor-rates", async (req, res) => {
+    try {
+      const { vendorIds, material, city } = req.body;
+      
+      const config = await storage.getBotConfig();
+      if (!config?.vendorRateRequestTemplate) {
+        return res.status(400).json({ error: "Rate request template not configured" });
+      }
+
+      let vendors;
+      if (vendorIds?.length > 0) {
+        // Request from specific vendors
+        vendors = await Promise.all(
+          vendorIds.map(id => storage.getVendorByVendorId(id))
+        );
+        vendors = vendors.filter(Boolean);
+      } else {
+        // Request from all vendors in city/material
+        vendors = await storage.getVendors(city, material);
+      }
+
+      const results = [];
+      for (const vendor of vendors) {
+        try {
+          const message = config.vendorRateRequestTemplate
+            .replace(/\[Vendor Name\]/g, vendor.name)
+            .replace(/\[Material\]/g, material || "all materials")
+            .replace(/\[City\]/g, vendor.city);
+
+          await whatsappBot.sendMessage(`whatsapp:${vendor.phone}`, message);
+          results.push({ vendor: vendor.name, status: "sent" });
+          
+          // Add small delay to avoid rate limiting
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        } catch (error) {
+          results.push({ vendor: vendor.name, status: "failed", error: error.message });
+        }
+      }
+
+      res.json({ 
+        message: `Rate requests sent to ${results.filter(r => r.status === "sent").length} vendors`,
+        results 
+      });
+    } catch (error) {
+      console.error("Error sending rate requests:", error);
+      res.status(500).json({ error: "Failed to send rate requests" });
+    }
+  });
+
+  // Get vendor rate requests history
+  app.get("/api/admin/rate-requests", async (req, res) => {
+    try {
+      // This would fetch from a rate_requests table if we had one
+      // For now, return empty array
+      res.json([]);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch rate requests" });
+    }
+  });
+
   // Get API keys
   app.get("/api/admin/api-keys", async (req, res) => {
     try {
