@@ -138,20 +138,52 @@ Thanks!`
           <p className="text-sm text-slate-600">Manage bot settings and message templates</p>
         </CardHeader>
         <CardContent className="space-y-6">
-          {/* Message Template */}
-          <div>
-            <Label className="text-sm font-medium text-slate-700 mb-2 block">
-              Message Template
-            </Label>
-            <Textarea
-              value={config?.messageTemplate || ""}
-              onChange={(e) => setConfig({ ...config, messageTemplate: e.target.value })}
-              className="min-h-[120px] resize-none"
-              placeholder="Enter message template..."
-            />
-            <p className="text-xs text-slate-500 mt-2">
-              Use variables: [Vendor Name], [User Name], [City], [Material], [Brand], [Quantity]
-            </p>
+          {/* Message Templates */}
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                Customer Inquiry Template
+              </Label>
+              <Textarea
+                value={config?.vendorInquiryTemplate || ""}
+                onChange={(e) => setConfig({ ...config, vendorInquiryTemplate: e.target.value })}
+                className="min-h-[120px] resize-none"
+                placeholder="Template for customer inquiries to vendors..."
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Used when customers send pricing inquiries to vendors
+              </p>
+            </div>
+            
+            <div>
+              <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                Vendor Rate Request Template
+              </Label>
+              <Textarea
+                value={config?.vendorRateRequestTemplate || ""}
+                onChange={(e) => setConfig({ ...config, vendorRateRequestTemplate: e.target.value })}
+                className="min-h-[120px] resize-none"
+                placeholder="Template for requesting vendor rates..."
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Used when requesting vendors to submit their current rates
+              </p>
+            </div>
+            
+            <div>
+              <Label className="text-sm font-medium text-slate-700 mb-2 block">
+                General Message Template
+              </Label>
+              <Textarea
+                value={config?.messageTemplate || ""}
+                onChange={(e) => setConfig({ ...config, messageTemplate: e.target.value })}
+                className="min-h-[120px] resize-none"
+                placeholder="General message template..."
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Use variables: [Vendor Name], [User Name], [City], [Material], [Brand], [Quantity]
+              </p>
+            </div>
           </div>
 
           {/* Settings Grid */}
