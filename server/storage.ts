@@ -4,6 +4,7 @@ import {
   priceResponses, 
   botConfig, 
   apiKeys,
+  vendorRates,
   type Vendor, 
   type InsertVendor,
   type Inquiry,
@@ -13,10 +14,12 @@ import {
   type BotConfig,
   type InsertBotConfig,
   type ApiKey,
-  type InsertApiKey
+  type InsertApiKey,
+  type VendorRate,
+  type InsertVendorRate
 } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, desc, and, sql, count, avg } from "drizzle-orm";
 
 export interface IStorage {
   // Vendors
