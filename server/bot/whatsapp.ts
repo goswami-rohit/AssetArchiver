@@ -10,7 +10,7 @@ export interface WhatsAppBotConfig {
 export class WhatsAppBot {
   private client: twilio.Twilio;
   private phoneNumber: string;
-  private isActive: boolean = false;
+  private isActive: boolean = true;
   private userSessions: Map<string, any> = new Map();
 
   constructor(config: WhatsAppBotConfig) {
@@ -276,7 +276,7 @@ Inquiry ID: ${inquiryId}`;
 
 // Export singleton instance using environment variables
 export const whatsappBot = new WhatsAppBot({
-  accountSid: "AC61ece3d30c27c35b0a48753f4f01bfff",
-  authToken: "19cd5d6d262c26803c988bb054e6a060", 
-  phoneNumber: "14155238886"
+  accountSid: process.env.TWILIO_ACCOUNT_SID!,
+  authToken: process.env.TWILIO_AUTH_TOKEN!,
+  phoneNumber: process.env.TWILIO_PHONE_NUMBER!
 });

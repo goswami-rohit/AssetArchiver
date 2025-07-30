@@ -42,7 +42,12 @@ export async function setupVite(app: Express, server: Server) {
 
   app.use(vite.middlewares);
   app.use("*", async (req, res, next) => {
-    const url = req.originalUrl;
+  // Skip API routes - let Express handle them
+  if (req.originalUrl.startsWith('/api') || req.originalUrl.startsWith('/webhook')) {
+    return next();
+  }
+  
+  const url = req.originalUrl;
 
     try {
       const clientTemplate = path.resolve(

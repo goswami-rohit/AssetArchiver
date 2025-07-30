@@ -1,15 +1,17 @@
 import { cn } from "@/lib/utils";
 import { 
+  LayoutDashboard,
+  MessageSquare,
+  Users,
   BarChart3, 
-  Search, 
-  Store, 
-  ChartBar, 
   Settings, 
-  Code,
-  Bot
+  Book,
+  Key,
+  Bot,
+  Building2  // ← Added this import
 } from "lucide-react";
 
-type TabType = "dashboard" | "inquiries" | "vendors" | "analytics" | "bot-config" | "api";
+type TabType = "dashboard" | "inquiries" | "vendors" | "analytics" | "bot-config" | "api-keys" | "api" | "office-management";  // ← Added office-management
 
 interface SidebarProps {
   activeTab: TabType;
@@ -18,31 +20,35 @@ interface SidebarProps {
 
 export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "inquiries", label: "Inquiries", icon: Search },
-    { id: "vendors", label: "Vendors", icon: Store },
-    { id: "analytics", label: "Analytics", icon: ChartBar },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "inquiries", label: "Inquiries", icon: MessageSquare },
+    { id: "vendors", label: "Employees", icon: Users },
+    { id: "office-management", label: "Office Management", icon: Building2 },  // ← Added this line
+    { id: "analytics", label: "Attendance Reports", icon: BarChart3 },
     { id: "bot-config", label: "Bot Config", icon: Settings },
-    { id: "api", label: "API Docs", icon: Code },
+    { id: "api-keys", label: "API Keys", icon: Key },
+    { id: "api", label: "API Docs", icon: Book },
   ] as const;
 
   return (
-    <div className="w-64 bg-white shadow-lg border-r border-slate-200">
+     <div className="w-64 bg-white shadow-lg border-r border-slate-200 h-screen flex flex-col fixed">
       {/* Logo */}
-      <div className="p-6 border-b border-slate-200">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-slate-900">PriceBot</h1>
-            <p className="text-xs text-slate-500">Admin Dashboard</p>
-          </div>
-        </div>
-      </div>
+<div className="p-6 border-b border-slate-200">
+  <div className="flex items-center space-x-3">
+    <img 
+      src="/BEST Cement Logo on Black Background.png" 
+      alt="Best Cement Logo" 
+      className="w-12 h-12 rounded-xl shadow-lg object-cover"
+    />
+    <div>
+      <h1 className="text-lg font-semibold text-slate-900">Best Cement</h1>
+      <p className="text-xs text-slate-500">Employee Management</p>
+    </div>
+  </div>
+</div>
       
       {/* Navigation */}
-      <nav className="p-4 space-y-2">
+       <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -66,14 +72,14 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
       </nav>
       
       {/* User Profile */}
-      <div className="absolute bottom-4 left-4 right-4">
+       <div className="p-4 border-t border-slate-200 mt-auto">
         <div className="flex items-center space-x-3 p-3 bg-slate-100 rounded-lg">
           <div className="w-8 h-8 bg-slate-400 rounded-full flex items-center justify-center">
             <span className="text-white text-sm font-medium">A</span>
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-slate-900">Admin User</p>
-            <p className="text-xs text-slate-500 truncate">admin@pricebot.com</p>
+            <p className="text-xs text-slate-500 truncate">admin@BESTCEMENT</p>
           </div>
         </div>
       </div>

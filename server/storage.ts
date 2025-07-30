@@ -1,679 +1,777 @@
 import { 
-  vendors, 
-  inquiries, 
-  priceResponses, 
-  botConfig, 
-  apiKeys,
-  vendorRates,
-  type Vendor, 
-  type InsertVendor,
-  type Inquiry,
-  type InsertInquiry,
-  type PriceResponse,
-  type InsertPriceResponse,
-  type BotConfig,
-  type InsertBotConfig,
-  type ApiKey,
-  type InsertApiKey,
-  type VendorRate,
-  type InsertVendorRate
-} from "@shared/schema";
+  users, 
+  companies,
+  dailyVisitReports,
+  technicalVisitReports,
+  permanentJourneyPlans,
+  dealers,
+  salesmanAttendance,
+  salesmanLeaveApplications,
+  clientReports,
+  competitionReports,
+  geoTracking,
+  dailyTasks,
+  type User, 
+  type InsertUser,
+  type Company,
+  type InsertCompany,
+  type DailyVisitReport,
+  type InsertDailyVisitReport,
+  type TechnicalVisitReport,
+  type InsertTechnicalVisitReport,
+  type PermanentJourneyPlan,
+  type InsertPermanentJourneyPlan,
+  type Dealer,
+  type InsertDealer,
+  type SalesmanAttendance,
+  type InsertSalesmanAttendance,
+  type SalesmanLeaveApplication,
+  type InsertSalesmanLeaveApplication,
+  type ClientReport,
+  type InsertClientReport,
+  type CompetitionReport,
+  type InsertCompetitionReport,
+  type GeoTracking,
+  type InsertGeoTracking,
+  type DailyTask,
+  type InsertDailyTask
+} from "../shared/schema";
 import { db } from "./db";
-import { eq, desc, and, sql, count, avg } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
 
 export interface IStorage {
-  // Vendors
-  getVendors(city?: string, material?: string): Promise<Vendor[]>;
-  getVendor(id: number): Promise<Vendor | undefined>;
-  getVendorByVendorId(vendorId: string): Promise<Vendor | undefined>;
-  createVendor(vendor: InsertVendor): Promise<Vendor>;
-  updateVendor(id: number, vendor: Partial<Vendor>): Promise<Vendor | undefined>;
-  getTopVendors(limit?: number, material?: string): Promise<Vendor[]>;
+  // Company operations
+  getCompany(id: number): Promise<Company | undefined>;
+  getCompanyByAdminUserId(adminUserId: string): Promise<Company | undefined>;
+  createCompany(insertCompany: InsertCompany): Promise<Company>;
+  updateCompany(id: number, updates: Partial<InsertCompany>): Promise<Company>;
 
-  // Inquiries
-  getInquiries(limit?: number): Promise<Inquiry[]>;
-  getInquiry(id: number): Promise<Inquiry | undefined>;
-  getInquiryByInquiryId(inquiryId: string): Promise<Inquiry | undefined>;
-  createInquiry(inquiry: InsertInquiry): Promise<Inquiry>;
-  updateInquiry(id: number, inquiry: Partial<Inquiry>): Promise<Inquiry | undefined>;
+  // User operations
+  getUser(id: number): Promise<User | undefined>;
+  getUserByWorkosUserId(workosUserId: string): Promise<User | undefined>;
+  getUsersByCompanyId(companyId: number): Promise<User[]>;
+  createUser(insertUser: InsertUser): Promise<User>;
+  updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
 
-  // Price Responses
-  getPriceResponses(inquiryId?: string, vendorId?: string): Promise<PriceResponse[]>;
-  createPriceResponse(response: InsertPriceResponse): Promise<PriceResponse>;
-  getLatestPrices(city?: string, material?: string, limit?: number): Promise<PriceResponse[]>;
+  // Daily Visit Report operations
+  getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined>;
+  getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]>;
+  getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]>;
+  createDailyVisitReport(insertReport: InsertDailyVisitReport): Promise<DailyVisitReport>;
+  updateDailyVisitReport(id: string, updates: Partial<InsertDailyVisitReport>): Promise<DailyVisitReport>;
 
-  // Vendor Rates
-  getVendorRates(vendorId?: string, city?: string, material?: string): Promise<VendorRate[]>;
-  createVendorRate(rate: InsertVendorRate): Promise<VendorRate>;
-  updateVendorRate(id: number, rate: Partial<VendorRate>): Promise<VendorRate | undefined>;
-  getLatestVendorRates(city?: string, material?: string, limit?: number): Promise<VendorRate[]>;
+  // Technical Visit Report operations
+  getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined>;
+  getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]>;
+  createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport>;
+  updateTechnicalVisitReport(id: string, updates: Partial<InsertTechnicalVisitReport>): Promise<TechnicalVisitReport>;
 
-  // Bot Config
-  getBotConfig(): Promise<BotConfig | undefined>;
-  updateBotConfig(config: Partial<BotConfig>): Promise<BotConfig>;
+  // Permanent Journey Plan operations
+  getPermanentJourneyPlan(id: string): Promise<PermanentJourneyPlan | undefined>;
+  getPermanentJourneyPlansByUserId(userId: number): Promise<PermanentJourneyPlan[]>;
+  createPermanentJourneyPlan(insertPlan: InsertPermanentJourneyPlan): Promise<PermanentJourneyPlan>;
+  updatePermanentJourneyPlan(id: string, updates: Partial<InsertPermanentJourneyPlan>): Promise<PermanentJourneyPlan>;
 
-  // API Keys
-  getApiKeys(): Promise<ApiKey[]>;
-  createApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
-  validateApiKey(keyValue: string): Promise<boolean>;
+  // Dealer operations
+  getDealer(id: string): Promise<Dealer | undefined>;
+  getDealersByUserId(userId: number): Promise<Dealer[]>;
+  createDealer(insertDealer: InsertDealer): Promise<Dealer>;
+  updateDealer(id: string, updates: Partial<InsertDealer>): Promise<Dealer>;
 
-  // Analytics
-  getDashboardMetrics(): Promise<{
-    totalInquiries: number;
-    activeVendors: number;
-    responseRate: number;
-    messagesSent: number;
-    todayInquiries: number;
-    citiesCovered: number;
-  }>;
+  // Salesman Attendance operations
+  getSalesmanAttendance(id: string): Promise<SalesmanAttendance | undefined>;
+  getSalesmanAttendanceByUserId(userId: number): Promise<SalesmanAttendance[]>;
+  getSalesmanAttendanceByDate(userId: number, date: Date): Promise<SalesmanAttendance | undefined>;
+  createSalesmanAttendance(insertAttendance: InsertSalesmanAttendance): Promise<SalesmanAttendance>;
+  updateSalesmanAttendance(id: string, updates: Partial<InsertSalesmanAttendance>): Promise<SalesmanAttendance>;
+
+  // Salesman Leave Application operations
+  getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined>;
+  getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]>;
+  createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication>;
+  updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication>;
+
+  // Client Report operations
+  getClientReport(id: string): Promise<ClientReport | undefined>;
+  getClientReportsByUserId(userId: number): Promise<ClientReport[]>;
+  createClientReport(insertReport: InsertClientReport): Promise<ClientReport>;
+  updateClientReport(id: string, updates: Partial<InsertClientReport>): Promise<ClientReport>;
+
+  // Competition Report operations
+  getCompetitionReport(id: string): Promise<CompetitionReport | undefined>;
+  getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]>;
+  createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport>;
+  updateCompetitionReport(id: string, updates: Partial<InsertCompetitionReport>): Promise<CompetitionReport>;
+
+  // Geo Tracking operations
+  getGeoTrackingRecords(userId: number, limit?: number): Promise<GeoTracking[]>;
+  getGeoTrackingByDateRange(userId: number, startDate: Date, endDate: Date): Promise<GeoTracking[]>;
+  createGeoTrackingRecord(insertRecord: InsertGeoTracking): Promise<GeoTracking>;
+
+  // Daily Task operations
+  getDailyTask(id: string): Promise<DailyTask | undefined>;
+  getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]>;
+  getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]>;
+  createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask>;
+  updateDailyTask(id: string, updates: Partial<InsertDailyTask>): Promise<DailyTask>;
+
+  // Enhanced business methods
+  authenticateUser(salesmanLoginId: string, password: string): Promise<User | null>;
+  getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | null>;
+  trackLocation(userId: number, latitude: number, longitude: number): Promise<GeoTracking>;
+  getLocationAnalytics(userId: number, period: string): Promise<any>;
+  calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getVendor(id: number): Promise<Vendor | undefined> {
-    const [vendor] = await db.select().from(vendors).where(eq(vendors.id, id));
-    return vendor || undefined;
+  // Company operations
+  async getCompany(id: number): Promise<Company | undefined> {
+    const [company] = await db.select().from(companies).where(eq(companies.id, id));
+    return company || undefined;
   }
 
-  async getVendorByVendorId(vendorId: string): Promise<Vendor | undefined> {
-    const [vendor] = await db.select().from(vendors).where(eq(vendors.vendorId, vendorId));
-    return vendor || undefined;
+  async getCompanyByAdminUserId(adminUserId: string): Promise<Company | undefined> {
+    const [company] = await db.select().from(companies).where(eq(companies.adminUserId, adminUserId));
+    return company || undefined;
   }
 
-  async createVendor(insertVendor: InsertVendor): Promise<Vendor> {
-    const [vendor] = await db
-      .insert(vendors)
-      .values(insertVendor)
-      .returning();
-    return vendor;
+  async createCompany(insertCompany: InsertCompany): Promise<Company> {
+    const [company] = await db.insert(companies).values(insertCompany).returning();
+    return company;
   }
 
-  async updateVendor(id: number, vendor: Partial<Vendor>): Promise<Vendor | undefined> {
-    const [updated] = await db
-      .update(vendors)
-      .set(vendor)
-      .where(eq(vendors.id, id))
-      .returning();
-    return updated || undefined;
+  async updateCompany(id: number, updates: Partial<InsertCompany>): Promise<Company> {
+    const [company] = await db.update(companies).set(updates).where(eq(companies.id, id)).returning();
+    return company;
   }
 
-  async getVendors(city?: string, material?: string): Promise<Vendor[]> {
-    let query = db.select().from(vendors);
-    
-    // Note: Complex filtering with city and material would require proper SQL conditions
-    // For now, we'll get all vendors and filter in memory
-    const allVendors = await query;
-    
-    let filtered = allVendors;
-    if (city) {
-      filtered = filtered.filter(v => v.city.toLowerCase() === city.toLowerCase());
-    }
-    if (material) {
-      filtered = filtered.filter(v => v.materials.includes(material.toLowerCase()));
-    }
-    
-    return filtered.sort((a, b) => (b.responseCount || 0) - (a.responseCount || 0));
+  // User operations
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
-  async getTopVendors(limit = 10, material?: string): Promise<Vendor[]> {
-    const vendors = await this.getVendors(undefined, material);
-    return vendors.slice(0, limit);
+  async getUserByWorkosUserId(workosUserId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.workosUserId, workosUserId));
+    return user || undefined;
   }
 
-  async getInquiry(id: number): Promise<Inquiry | undefined> {
-    const [inquiry] = await db.select().from(inquiries).where(eq(inquiries.id, id));
-    return inquiry || undefined;
+  async getUsersByCompanyId(companyId: number): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.companyId, companyId));
   }
 
-  async getInquiryByInquiryId(inquiryId: string): Promise<Inquiry | undefined> {
-    const [inquiry] = await db.select().from(inquiries).where(eq(inquiries.inquiryId, inquiryId));
-    return inquiry || undefined;
+  async createUser(insertUser: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    return user;
   }
 
-  async createInquiry(insertInquiry: InsertInquiry): Promise<Inquiry> {
-    const [inquiry] = await db
-      .insert(inquiries)
-      .values(insertInquiry)
-      .returning();
-    return inquiry;
+  async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
+    const [user] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return user;
   }
 
-  async updateInquiry(id: number, inquiry: Partial<Inquiry>): Promise<Inquiry | undefined> {
-    const [updated] = await db
-      .update(inquiries)
-      .set(inquiry)
-      .where(eq(inquiries.id, id))
-      .returning();
-    return updated || undefined;
+  // Daily Visit Report operations
+  async getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined> {
+    const [report] = await db.select().from(dailyVisitReports).where(eq(dailyVisitReports.id, id));
+    return report || undefined;
   }
 
-  async getInquiries(limit = 50): Promise<Inquiry[]> {
-    let query = db.select().from(inquiries);
-    
-    const results = await query;
-    const sorted = results.sort((a, b) => 
-      new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-    );
-    
-    return limit ? sorted.slice(0, limit) : sorted;
+  async getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]> {
+    return await db.select().from(dailyVisitReports).where(eq(dailyVisitReports.userId, userId)).orderBy(desc(dailyVisitReports.reportDate));
   }
 
-  async getPriceResponses(inquiryId?: string, vendorId?: string): Promise<PriceResponse[]> {
-    let query = db.select().from(priceResponses);
-    
-    // For complex filtering, we'd need to build proper WHERE conditions
-    const results = await query;
-    
-    let filtered = results;
-    if (inquiryId) {
-      filtered = filtered.filter(r => r.inquiryId === inquiryId);
-    }
-    if (vendorId) {
-      filtered = filtered.filter(r => r.vendorId === vendorId);
-    }
-    
-    return filtered.sort((a, b) => 
-      new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
-    );
+  async getDailyVisitReportsByCompanyDateRange(companyId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
+    return await db.select().from(dailyVisitReports)
+      .innerJoin(users, eq(dailyVisitReports.userId, users.id))
+      .where(and(
+        eq(users.companyId, companyId),
+        gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
+        lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
+      ))
+      .orderBy(desc(dailyVisitReports.reportDate));
   }
 
-  async createPriceResponse(insertResponse: InsertPriceResponse): Promise<PriceResponse> {
-    const [response] = await db
-      .insert(priceResponses)
-      .values(insertResponse)
-      .returning();
-    return response;
+  async createDailyVisitReport(insertReport: InsertDailyVisitReport): Promise<DailyVisitReport> {
+    const [report] = await db.insert(dailyVisitReports).values(insertReport).returning();
+    return report;
   }
 
-  async getLatestPrices(city?: string, material?: string, limit = 20): Promise<PriceResponse[]> {
-    const responses = await this.getPriceResponses();
-    
-    let filtered = responses;
-    if (material) {
-      filtered = filtered.filter(r => r.material.toLowerCase() === material.toLowerCase());
-    }
-    
-    // Filter by city through vendor lookup
-    if (city) {
-      const cityVendors = await this.getVendors(city);
-      const vendorIds = cityVendors.map(v => v.vendorId);
-      filtered = filtered.filter(r => vendorIds.includes(r.vendorId));
-    }
-    
-    return filtered.slice(0, limit);
+  async updateDailyVisitReport(id: string, updates: Partial<InsertDailyVisitReport>): Promise<DailyVisitReport> {
+    const [report] = await db.update(dailyVisitReports).set(updates).where(eq(dailyVisitReports.id, id)).returning();
+    return report;
   }
 
-  async getVendorRates(vendorId?: string, city?: string, material?: string): Promise<VendorRate[]> {
-    let query = db.select().from(vendorRates).orderBy(desc(vendorRates.submittedAt));
-    
-    const conditions = [];
-    if (vendorId) conditions.push(eq(vendorRates.vendorId, vendorId));
-    if (city) conditions.push(eq(vendorRates.city, city));
-    if (material) conditions.push(eq(vendorRates.material, material));
-    
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-    
-    return await query;
+  // Technical Visit Report operations
+  async getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined> {
+    const [report] = await db.select().from(technicalVisitReports).where(eq(technicalVisitReports.id, id));
+    return report || undefined;
   }
 
-  async createVendorRate(insertRate: InsertVendorRate): Promise<VendorRate> {
-    const [rate] = await db
-      .insert(vendorRates)
-      .values(insertRate)
-      .returning();
-    return rate;
+  async getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]> {
+    return await db.select().from(technicalVisitReports).where(eq(technicalVisitReports.userId, userId)).orderBy(desc(technicalVisitReports.reportDate));
   }
 
-  async updateVendorRate(id: number, rate: Partial<VendorRate>): Promise<VendorRate | undefined> {
-    const [updated] = await db
-      .update(vendorRates)
-      .set({ ...rate, updatedAt: new Date() })
-      .where(eq(vendorRates.id, id))
-      .returning();
-    return updated || undefined;
+  async createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport> {
+    const [report] = await db.insert(technicalVisitReports).values(insertReport).returning();
+    return report;
   }
 
-  async getLatestVendorRates(city?: string, material?: string, limit = 20): Promise<VendorRate[]> {
-    let query = db
-      .select()
-      .from(vendorRates)
-      .orderBy(desc(vendorRates.submittedAt))
+  async updateTechnicalVisitReport(id: string, updates: Partial<InsertTechnicalVisitReport>): Promise<TechnicalVisitReport> {
+    const [report] = await db.update(technicalVisitReports).set(updates).where(eq(technicalVisitReports.id, id)).returning();
+    return report;
+  }
+
+  // Permanent Journey Plan operations
+  async getPermanentJourneyPlan(id: string): Promise<PermanentJourneyPlan | undefined> {
+    const [plan] = await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.id, id));
+    return plan || undefined;
+  }
+
+  async getPermanentJourneyPlansByUserId(userId: number): Promise<PermanentJourneyPlan[]> {
+    return await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.userId, userId)).orderBy(desc(permanentJourneyPlans.planDate));
+  }
+
+  async createPermanentJourneyPlan(insertPlan: InsertPermanentJourneyPlan): Promise<PermanentJourneyPlan> {
+    const [plan] = await db.insert(permanentJourneyPlans).values(insertPlan).returning();
+    return plan;
+  }
+
+  async updatePermanentJourneyPlan(id: string, updates: Partial<InsertPermanentJourneyPlan>): Promise<PermanentJourneyPlan> {
+    const [plan] = await db.update(permanentJourneyPlans).set(updates).where(eq(permanentJourneyPlans.id, id)).returning();
+    return plan;
+  }
+
+  // Dealer operations
+  async getDealer(id: string): Promise<Dealer | undefined> {
+    const [dealer] = await db.select().from(dealers).where(eq(dealers.id, id));
+    return dealer || undefined;
+  }
+
+  async getDealersByUserId(userId: number): Promise<Dealer[]> {
+    return await db.select().from(dealers).where(eq(dealers.userId, userId)).orderBy(asc(dealers.name));
+  }
+
+  async createDealer(insertDealer: InsertDealer): Promise<Dealer> {
+    const [dealer] = await db.insert(dealers).values(insertDealer).returning();
+    return dealer;
+  }
+
+  async updateDealer(id: string, updates: Partial<InsertDealer>): Promise<Dealer> {
+    const [dealer] = await db.update(dealers).set(updates).where(eq(dealers.id, id)).returning();
+    return dealer;
+  }
+
+  // Salesman Attendance operations
+  async getSalesmanAttendance(id: string): Promise<SalesmanAttendance | undefined> {
+    const [attendance] = await db.select().from(salesmanAttendance).where(eq(salesmanAttendance.id, id));
+    return attendance || undefined;
+  }
+
+  async getSalesmanAttendanceByUserId(userId: number): Promise<SalesmanAttendance[]> {
+    return await db.select().from(salesmanAttendance).where(eq(salesmanAttendance.userId, userId)).orderBy(desc(salesmanAttendance.attendanceDate));
+  }
+
+  async getSalesmanAttendanceByDate(userId: number, date: Date): Promise<SalesmanAttendance | undefined> {
+    const [attendance] = await db.select().from(salesmanAttendance)
+      .where(and(
+        eq(salesmanAttendance.userId, userId),
+        eq(salesmanAttendance.attendanceDate, date.toISOString().split('T')[0])
+      ));
+    return attendance || undefined;
+  }
+
+  async createSalesmanAttendance(insertAttendance: InsertSalesmanAttendance): Promise<SalesmanAttendance> {
+    const [attendance] = await db.insert(salesmanAttendance).values(insertAttendance).returning();
+    return attendance;
+  }
+
+  async updateSalesmanAttendance(id: string, updates: Partial<InsertSalesmanAttendance>): Promise<SalesmanAttendance> {
+    const [attendance] = await db.update(salesmanAttendance).set(updates).where(eq(salesmanAttendance.id, id)).returning();
+    return attendance;
+  }
+
+  // Salesman Leave Application operations
+  async getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined> {
+    const [application] = await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.id, id));
+    return application || undefined;
+  }
+
+  async getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]> {
+    return await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.userId, userId)).orderBy(desc(salesmanLeaveApplications.createdAt));
+  }
+
+  async createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication> {
+    const [application] = await db.insert(salesmanLeaveApplications).values(insertApplication).returning();
+    return application;
+  }
+
+  async updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication> {
+    const [application] = await db.update(salesmanLeaveApplications).set(updates).where(eq(salesmanLeaveApplications.id, id)).returning();
+    return application;
+  }
+
+  // Client Report operations
+  async getClientReport(id: string): Promise<ClientReport | undefined> {
+    const [report] = await db.select().from(clientReports).where(eq(clientReports.id, id));
+    return report || undefined;
+  }
+
+  async getClientReportsByUserId(userId: number): Promise<ClientReport[]> {
+    return await db.select().from(clientReports).where(eq(clientReports.userId, userId)).orderBy(desc(clientReports.createdAt));
+  }
+
+  async createClientReport(insertReport: InsertClientReport): Promise<ClientReport> {
+    const [report] = await db.insert(clientReports).values(insertReport).returning();
+    return report;
+  }
+
+  async updateClientReport(id: string, updates: Partial<InsertClientReport>): Promise<ClientReport> {
+    const [report] = await db.update(clientReports).set(updates).where(eq(clientReports.id, id)).returning();
+    return report;
+  }
+
+  // Competition Report operations
+  async getCompetitionReport(id: string): Promise<CompetitionReport | undefined> {
+    const [report] = await db.select().from(competitionReports).where(eq(competitionReports.id, id));
+    return report || undefined;
+  }
+
+  async getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]> {
+    return await db.select().from(competitionReports).where(eq(competitionReports.userId, userId)).orderBy(desc(competitionReports.reportDate));
+  }
+
+  async createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport> {
+    const [report] = await db.insert(competitionReports).values(insertReport).returning();
+    return report;
+  }
+
+  async updateCompetitionReport(id: string, updates: Partial<InsertCompetitionReport>): Promise<CompetitionReport> {
+    const [report] = await db.update(competitionReports).set(updates).where(eq(competitionReports.id, id)).returning();
+    return report;
+  }
+
+  // Geo Tracking operations
+  async getGeoTrackingRecords(userId: number, limit: number = 100): Promise<GeoTracking[]> {
+    return await db.select().from(geoTracking)
+      .where(eq(geoTracking.userId, userId))
+      .orderBy(desc(geoTracking.recordedAt))
       .limit(limit);
-    
-    const conditions = [];
-    if (city) conditions.push(eq(vendorRates.city, city));
-    if (material) conditions.push(eq(vendorRates.material, material));
-    
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
+  }
+
+  async getGeoTrackingByDateRange(userId: number, startDate: Date, endDate: Date): Promise<GeoTracking[]> {
+    return await db.select().from(geoTracking)
+      .where(and(
+        eq(geoTracking.userId, userId),
+        gte(geoTracking.recordedAt, startDate),
+        lte(geoTracking.recordedAt, endDate)
+      ))
+      .orderBy(desc(geoTracking.recordedAt));
+  }
+
+  async createGeoTrackingRecord(insertRecord: InsertGeoTracking): Promise<GeoTracking> {
+    const [record] = await db.insert(geoTracking).values(insertRecord).returning();
+    return record;
+  }
+
+  // Daily Task operations
+  async getDailyTask(id: string): Promise<DailyTask | undefined> {
+    const [task] = await db.select().from(dailyTasks).where(eq(dailyTasks.id, id));
+    return task || undefined;
+  }
+
+  async getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]> {
+    return await db.select().from(dailyTasks).where(eq(dailyTasks.userId, userId)).orderBy(desc(dailyTasks.taskDate));
+  }
+
+  async getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]> {
+    return await db.select().from(dailyTasks).where(eq(dailyTasks.assignedByUserId, userId)).orderBy(desc(dailyTasks.taskDate));
+  }
+
+  async createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask> {
+    const [task] = await db.insert(dailyTasks).values(insertTask).returning();
+    return task;
+  }
+
+  async updateDailyTask(id: string, updates: Partial<InsertDailyTask>): Promise<DailyTask> {
+    const [task] = await db.update(dailyTasks).set(updates).where(eq(dailyTasks.id, id)).returning();
+    return task;
+  }
+
+  // ========================================
+  // ENHANCED BUSINESS MANAGEMENT METHODS
+  // ========================================
+
+  // User Authentication for Salesman App
+  async authenticateUser(salesmanLoginId: string, password: string): Promise<User | null> {
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(
+          and(
+            eq(users.salesmanLoginId, salesmanLoginId),
+            eq(users.hashedPassword, password), // In production, use proper password hashing
+            eq(users.status, "active")
+          )
+        )
+        .limit(1);
+      return user || null;
+    } catch (error) {
+      console.error('Error authenticating user:', error);
+      throw error;
     }
-    
-    return await query;
   }
 
-  async getBotConfig(): Promise<BotConfig | undefined> {
-    const [config] = await db.select().from(botConfig).limit(1);
-    return config || undefined;
+  async getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | null> {
+    try {
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(eq(users.salesmanLoginId, salesmanLoginId))
+        .limit(1);
+      return user || null;
+    } catch (error) {
+      console.error('Error fetching user by salesman login ID:', error);
+      throw error;
+    }
   }
 
-  async updateBotConfig(config: Partial<BotConfig>): Promise<BotConfig> {
-    const existing = await this.getBotConfig();
-    
-    if (existing) {
-      const [updated] = await db
-        .update(botConfig)
-        .set(config)
-        .where(eq(botConfig.id, existing.id))
-        .returning();
-      return updated;
-    } else {
-      const [created] = await db
-        .insert(botConfig)
-        .values({
-          messageTemplate: config.messageTemplate || "Hi [Vendor Name], I'm [User Name] from [City]. I'm looking for today's rate for [Material]. Can you please share: Latest Rate, GST %, Delivery Charges (if any). Thanks!",
-          vendorRateRequestTemplate: config.vendorRateRequestTemplate || "Hi [Vendor Name], please share your current rates for [Material] in [City]. Include: Rate per unit, GST %, Delivery charges, Brand details. Reply in format: RATE [Material] [Brand] [Rate] [Unit] [GST%] [DeliveryCharges]",
-          vendorInquiryTemplate: config.vendorInquiryTemplate || "Hi [Vendor Name], I'm [User Name] from [City]. I'm looking for today's rate for [Material]. Can you please share: Latest Rate, GST %, Delivery Charges (if any). Thanks!",
-          maxVendorsPerInquiry: config.maxVendorsPerInquiry ?? 3,
-          messagesPerMinute: config.messagesPerMinute ?? 20,
-          autoResponseEnabled: config.autoResponseEnabled ?? true,
-          botActive: config.botActive ?? true
+  // ========================================
+  // ATTENDANCE ENHANCEMENT METHODS
+  // ========================================
+
+  async punchIn(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance> {
+    try {
+      // Check if already punched in today
+      const today = new Date().toISOString().split('T')[0];
+      const [existingAttendance] = await db
+        .select()
+        .from(salesmanAttendance)
+        .where(
+          and(
+            eq(salesmanAttendance.userId, userId),
+            eq(salesmanAttendance.attendanceDate, today)
+          )
+        )
+        .limit(1);
+
+      if (existingAttendance && existingAttendance.inTimeTimestamp) {
+        throw new Error('Already punched in today');
+      }
+
+      const attendanceRecord = await this.createSalesmanAttendance({
+        userId,
+        attendanceDate: today,
+        locationName: "Field Location", // Can be enhanced with reverse geocoding
+        inTimeTimestamp: new Date(),
+        outTimeTimestamp: null,
+        inTimeImageCaptured: !!photoUrl,
+        outTimeImageCaptured: false,
+        inTimeImageUrl: photoUrl,
+        outTimeImageUrl: null,
+        inTimeLatitude: latitude.toString(),
+        inTimeLongitude: longitude.toString(),
+        inTimeAccuracy: null,
+        inTimeSpeed: null,
+        inTimeHeading: null,
+        inTimeAltitude: null,
+        outTimeLatitude: null,
+        outTimeLongitude: null,
+        outTimeAccuracy: null,
+        outTimeSpeed: null,
+        outTimeHeading: null,
+        outTimeAltitude: null,
+      });
+
+      return attendanceRecord;
+    } catch (error) {
+      console.error('Error punching in:', error);
+      throw error;
+    }
+  }
+
+  async punchOut(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance> {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const [attendanceRecord] = await db
+        .select()
+        .from(salesmanAttendance)
+        .where(
+          and(
+            eq(salesmanAttendance.userId, userId),
+            eq(salesmanAttendance.attendanceDate, today)
+          )
+        )
+        .limit(1);
+
+      if (!attendanceRecord || !attendanceRecord.inTimeTimestamp) {
+        throw new Error('No punch in record found for today');
+      }
+
+      const [updatedRecord] = await db
+        .update(salesmanAttendance)
+        .set({
+          outTimeTimestamp: new Date(),
+          outTimeLatitude: latitude.toString(),
+          outTimeLongitude: longitude.toString(),
+          outTimeImageCaptured: !!photoUrl,
+          outTimeImageUrl: photoUrl,
         })
+        .where(eq(salesmanAttendance.id, attendanceRecord.id))
         .returning();
-      return created;
+
+      return updatedRecord;
+    } catch (error) {
+      console.error('Error punching out:', error);
+      throw error;
     }
   }
 
-  async getApiKeys(): Promise<ApiKey[]> {
-    const keys = await db.select().from(apiKeys);
-    return keys.filter(k => k.isActive);
+  // ========================================
+  // LOCATION TRACKING METHODS
+  // ========================================
+
+  async trackLocation(userId: number, latitude: number, longitude: number): Promise<GeoTracking> {
+    try {
+      const locationRecord = await this.createGeoTrackingRecord({
+        userId,
+        latitude: latitude.toString(),
+        longitude: longitude.toString(),
+        recordedAt: new Date(),
+        accuracy: null,
+        speed: null,
+        heading: null,
+        altitude: null,
+        locationType: "GPS",
+        activityType: null,
+        appState: "foreground",
+        batteryLevel: null,
+        isCharging: null,
+        networkStatus: null,
+        ipAddress: null,
+        siteName: null,
+        checkInTime: null,
+        checkOutTime: null,
+        totalDistanceTravelled: null,
+      });
+
+      return locationRecord;
+    } catch (error) {
+      console.error('Error tracking location:', error);
+      throw error;
+    }
   }
 
-  async createApiKey(insertApiKey: InsertApiKey): Promise<ApiKey> {
-    const [apiKey] = await db
-      .insert(apiKeys)
-      .values(insertApiKey)
-      .returning();
-    return apiKey;
-  }
+  async getLocationAnalytics(userId: number, period: string): Promise<any> {
+    try {
+      let dateFilter;
+      const now = new Date();
 
-  async validateApiKey(keyValue: string): Promise<boolean> {
-    const [apiKey] = await db.select().from(apiKeys).where(eq(apiKeys.keyValue, keyValue));
-    return apiKey ? Boolean(apiKey.isActive) : false;
-  }
-
-  async getDashboardMetrics() {
-    const allInquiries = await db.select().from(inquiries);
-    const allVendors = await db.select().from(vendors);
-    const allResponses = await db.select().from(priceResponses);
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayInquiries = allInquiries.filter(i => 
-      new Date(i.timestamp || 0) >= today
-    ).length;
-    
-    const activeVendors = allVendors.filter(v => v.isActive).length;
-    
-    const totalInquiries = allInquiries.length;
-    const totalResponses = allResponses.length;
-    const responseRate = totalInquiries > 0 ? Math.round((totalResponses / totalInquiries) * 100) : 0;
-    
-    const messagesSent = totalInquiries * 3;
-    
-    const cities = new Set(allVendors.map(v => v.city));
-    const citiesCovered = cities.size;
-    
-    return {
-      totalInquiries,
-      activeVendors,
-      responseRate,
-      messagesSent,
-      todayInquiries,
-      citiesCovered
-    };
-  }
-}
-
-export class MemStorage implements IStorage {
-  private vendors: Map<number, Vendor>;
-  private inquiries: Map<number, Inquiry>;
-  private priceResponses: Map<number, PriceResponse>;
-  private vendorRates: Map<number, VendorRate>;
-  private botConfigs: Map<number, BotConfig>;
-  private apiKeys: Map<number, ApiKey>;
-  private currentId: number;
-
-  constructor() {
-    this.vendors = new Map();
-    this.inquiries = new Map();
-    this.priceResponses = new Map();
-    this.vendorRates = new Map();
-    this.botConfigs = new Map();
-    this.apiKeys = new Map();
-    this.currentId = 1;
-    this.initializeData();
-  }
-
-  private initializeData() {
-    // Initialize with sample vendors
-    const sampleVendors: InsertVendor[] = [
-      {
-        vendorId: "vendor_001",
-        name: "Kumar Construction Supplies",
-        phone: "+91 98765 43210",
-        city: "Guwahati",
-        materials: ["cement", "tmt"],
-        responseCount: 47,
-        responseRate: "92.5",
-        rank: 1
-      },
-      {
-        vendorId: "vendor_002", 
-        name: "Mumbai Steel Center",
-        phone: "+91 98765 43211",
-        city: "Mumbai",
-        materials: ["tmt"],
-        responseCount: 35,
-        responseRate: "78.2",
-        rank: 2
-      },
-      {
-        vendorId: "vendor_003",
-        name: "Delhi Building Materials",
-        phone: "+91 98765 43212", 
-        city: "Delhi",
-        materials: ["cement", "tmt"],
-        responseCount: 28,
-        responseRate: "85.1",
-        rank: 3
+      switch (period) {
+        case 'today':
+          dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          dateFilter = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case 'month':
+          dateFilter = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        default:
+          dateFilter = new Date(now.getTime() - 24 * 60 * 60 * 1000);
       }
-    ];
 
-    sampleVendors.forEach(vendor => this.createVendor(vendor));
+      const locations = await db
+        .select()
+        .from(geoTracking)
+        .where(
+          and(
+            eq(geoTracking.userId, userId),
+            gte(geoTracking.recordedAt, dateFilter)
+          )
+        )
+        .orderBy(desc(geoTracking.recordedAt));
 
-    // Initialize with sample inquiries
-    const sampleInquiries: InsertInquiry[] = [
-      {
-        inquiryId: "INQ-001",
-        userName: "Rajesh Kumar",
-        userPhone: "+91 98765 43213",
-        city: "Guwahati",
-        material: "cement",
-        brand: "ACC",
-        quantity: "50 bags",
-        vendorsContacted: ["vendor_001"],
-        responseCount: 1,
-        status: "responded"
-      },
-      {
-        inquiryId: "INQ-002", 
-        userName: "Priya Sharma",
-        userPhone: "+91 98765 43214",
-        city: "Mumbai",
-        material: "tmt",
-        brand: "Tata Steel",
-        quantity: "2 tons",
-        vendorsContacted: ["vendor_002"],
-        responseCount: 0,
-        status: "pending"
-      },
-      {
-        inquiryId: "INQ-003",
-        userName: "Amit Singh",
-        city: "Delhi", 
-        material: "cement",
-        vendorsContacted: ["vendor_003"],
-        responseCount: 1,
-        status: "completed"
-      }
-    ];
+      // Calculate analytics
+      const totalDistance = locations.reduce((sum, loc, index) => {
+        if (index === 0) return sum;
+        const prev = locations[index - 1];
+        return sum + this.calculateDistance(
+          parseFloat(prev.latitude), 
+          parseFloat(prev.longitude), 
+          parseFloat(loc.latitude), 
+          parseFloat(loc.longitude)
+        );
+      }, 0);
 
-    sampleInquiries.forEach(inquiry => this.createInquiry(inquiry));
-
-    // Initialize bot config
-    this.updateBotConfig({
-      messageTemplate: `Hi [Vendor Name], I'm [User Name] from [City].
-
-I'm looking for today's rate for [Material].
-Can you please share:
-- Latest Rate
-- GST %  
-- Delivery Charges (if any)
-
-Thanks!`,
-      maxVendorsPerInquiry: 3,
-      messagesPerMinute: 20,
-      autoResponseEnabled: true,
-      botActive: true
-    });
-
-    // Initialize API keys
-    this.createApiKey({
-      keyName: "Production API",
-      keyValue: "pk_live_1234567890abcdef",
-      isActive: true
-    });
-  }
-
-  async getVendors(city?: string, material?: string): Promise<Vendor[]> {
-    let vendors = Array.from(this.vendors.values());
-    
-    if (city) {
-      vendors = vendors.filter(v => v.city.toLowerCase() === city.toLowerCase());
-    }
-    
-    if (material) {
-      vendors = vendors.filter(v => v.materials.includes(material.toLowerCase()));
-    }
-    
-    return vendors.sort((a, b) => (b.responseCount || 0) - (a.responseCount || 0));
-  }
-
-  async getVendor(id: number): Promise<Vendor | undefined> {
-    return this.vendors.get(id);
-  }
-
-  async getVendorByVendorId(vendorId: string): Promise<Vendor | undefined> {
-    return Array.from(this.vendors.values()).find(v => v.vendorId === vendorId);
-  }
-
-  async createVendor(insertVendor: InsertVendor): Promise<Vendor> {
-    const id = this.currentId++;
-    const vendor: Vendor = {
-      id,
-      ...insertVendor,
-      lastQuoted: null,
-      isActive: insertVendor.isActive ?? true,
-      responseCount: insertVendor.responseCount ?? 0,
-      responseRate: insertVendor.responseRate ?? "0",
-      rank: insertVendor.rank ?? 0,
-      createdAt: new Date()
-    };
-    this.vendors.set(id, vendor);
-    return vendor;
-  }
-
-  async updateVendor(id: number, update: Partial<Vendor>): Promise<Vendor | undefined> {
-    const vendor = this.vendors.get(id);
-    if (!vendor) return undefined;
-    
-    const updated = { ...vendor, ...update };
-    this.vendors.set(id, updated);
-    return updated;
-  }
-
-  async getTopVendors(limit = 10, material?: string): Promise<Vendor[]> {
-    const vendors = await this.getVendors(undefined, material);
-    return vendors.slice(0, limit);
-  }
-
-  async getInquiries(limit = 50): Promise<Inquiry[]> {
-    const inquiries = Array.from(this.inquiries.values())
-      .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-    
-    return limit ? inquiries.slice(0, limit) : inquiries;
-  }
-
-  async getInquiry(id: number): Promise<Inquiry | undefined> {
-    return this.inquiries.get(id);
-  }
-
-  async getInquiryByInquiryId(inquiryId: string): Promise<Inquiry | undefined> {
-    return Array.from(this.inquiries.values()).find(i => i.inquiryId === inquiryId);
-  }
-
-  async createInquiry(insertInquiry: InsertInquiry): Promise<Inquiry> {
-    const id = this.currentId++;
-    const inquiry: Inquiry = {
-      id,
-      ...insertInquiry,
-      userPhone: insertInquiry.userPhone ?? null,
-      brand: insertInquiry.brand ?? null,
-      quantity: insertInquiry.quantity ?? null,
-      responseCount: insertInquiry.responseCount ?? 0,
-      status: insertInquiry.status ?? "pending",
-      timestamp: new Date()
-    };
-    this.inquiries.set(id, inquiry);
-    return inquiry;
-  }
-
-  async updateInquiry(id: number, update: Partial<Inquiry>): Promise<Inquiry | undefined> {
-    const inquiry = this.inquiries.get(id);
-    if (!inquiry) return undefined;
-    
-    const updated = { ...inquiry, ...update };
-    this.inquiries.set(id, updated);
-    return updated;
-  }
-
-  async getPriceResponses(inquiryId?: string, vendorId?: string): Promise<PriceResponse[]> {
-    let responses = Array.from(this.priceResponses.values());
-    
-    if (inquiryId) {
-      responses = responses.filter(r => r.inquiryId === inquiryId);
-    }
-    
-    if (vendorId) {
-      responses = responses.filter(r => r.vendorId === vendorId);
-    }
-    
-    return responses.sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
-  }
-
-  async createPriceResponse(insertResponse: InsertPriceResponse): Promise<PriceResponse> {
-    const id = this.currentId++;
-    const response: PriceResponse = {
-      id,
-      ...insertResponse,
-      deliveryCharge: insertResponse.deliveryCharge ?? "0",
-      timestamp: new Date()
-    };
-    this.priceResponses.set(id, response);
-    return response;
-  }
-
-  async getLatestPrices(city?: string, material?: string, limit = 20): Promise<PriceResponse[]> {
-    let responses = Array.from(this.priceResponses.values());
-    
-    if (material) {
-      responses = responses.filter(r => r.material.toLowerCase() === material.toLowerCase());
-    }
-    
-    // Filter by city through vendor lookup
-    if (city) {
-      const vendors = await this.getVendors(city);
-      const vendorIds = vendors.map(v => v.vendorId);
-      responses = responses.filter(r => vendorIds.includes(r.vendorId));
-    }
-    
-    return responses
-      .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-      .slice(0, limit);
-  }
-
-  async getBotConfig(): Promise<BotConfig | undefined> {
-    const configs = Array.from(this.botConfigs.values());
-    return configs[0];
-  }
-
-  async updateBotConfig(config: Partial<BotConfig>): Promise<BotConfig> {
-    const existing = await this.getBotConfig();
-    
-    if (existing) {
-      const updated = { ...existing, ...config };
-      this.botConfigs.set(existing.id, updated);
-      return updated;
-    } else {
-      const id = this.currentId++;
-      const newConfig: BotConfig = {
-        id,
-        messageTemplate: config.messageTemplate || "",
-        maxVendorsPerInquiry: config.maxVendorsPerInquiry ?? 3,
-        messagesPerMinute: config.messagesPerMinute ?? 20,
-        autoResponseEnabled: config.autoResponseEnabled ?? true,
-        botActive: config.botActive ?? true
+      return {
+        period,
+        totalLocations: locations.length,
+        totalDistance,
+        locations: locations.slice(0, 50), // Return latest 50 for performance
+        averageAccuracy: locations.reduce((sum, loc) => sum + (parseFloat(loc.accuracy || "0")), 0) / locations.length
       };
-      this.botConfigs.set(id, newConfig);
-      return newConfig;
+    } catch (error) {
+      console.error('Error getting location analytics:', error);
+      throw error;
     }
   }
 
-  async getApiKeys(): Promise<ApiKey[]> {
-    return Array.from(this.apiKeys.values()).filter(k => k.isActive);
+  // ========================================
+  // UTILITY METHODS
+  // ========================================
+
+  calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = lat1 * Math.PI / 180;
+    const φ2 = lat2 * Math.PI / 180;
+    const Δφ = (lat2 - lat1) * Math.PI / 180;
+    const Δλ = (lon2 - lon1) * Math.PI / 180;
+
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) *
+      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
   }
 
-  async createApiKey(insertApiKey: InsertApiKey): Promise<ApiKey> {
-    const id = this.currentId++;
-    const apiKey: ApiKey = {
-      id,
-      ...insertApiKey,
-      isActive: insertApiKey.isActive ?? true,
-      lastUsed: null,
-      createdAt: new Date()
-    };
-    this.apiKeys.set(id, apiKey);
-    return apiKey;
+  // ========================================
+  // ENHANCED REPORTING METHODS
+  // ========================================
+
+  async getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
+    try {
+      return await db.select().from(dailyVisitReports)
+        .where(and(
+          eq(dailyVisitReports.userId, userId),
+          gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
+          lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
+        ))
+        .orderBy(desc(dailyVisitReports.reportDate));
+    } catch (error) {
+      console.error('Error getting daily visit reports by date range:', error);
+      throw error;
+    }
   }
 
-  async validateApiKey(keyValue: string): Promise<boolean> {
-    const apiKey = Array.from(this.apiKeys.values()).find(k => k.keyValue === keyValue);
-    return apiKey ? Boolean(apiKey.isActive) : false;
+  async getBusinessMetrics(companyId: number): Promise<any> {
+    try {
+      // Get total users
+      const totalUsers = await db
+        .select({ count: sql`count(*)` })
+        .from(users)
+        .where(eq(users.companyId, companyId));
+
+      // Get total daily visit reports
+      const totalReports = await db
+        .select({ count: sql`count(*)` })
+        .from(dailyVisitReports)
+        .innerJoin(users, eq(dailyVisitReports.userId, users.id))
+        .where(eq(users.companyId, companyId));
+
+      // Get active dealers
+      const activeDealers = await db
+        .select({ count: sql`count(*)` })
+        .from(dealers)
+        .innerJoin(users, eq(dealers.userId, users.id))
+        .where(eq(users.companyId, companyId));
+
+      // Get attendance records for current month
+      const currentMonth = new Date();
+      const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
+      
+      const monthlyAttendance = await db
+        .select({ count: sql`count(*)` })
+        .from(salesmanAttendance)
+        .innerJoin(users, eq(salesmanAttendance.userId, users.id))
+        .where(
+          and(
+            eq(users.companyId, companyId),
+            gte(salesmanAttendance.attendanceDate, firstDayOfMonth.toISOString().split('T')[0])
+          )
+        );
+
+      return {
+        totalUsers: Number(totalUsers[0]?.count || 0),
+        totalReports: Number(totalReports[0]?.count || 0),
+        activeDealers: Number(activeDealers[0]?.count || 0),
+        monthlyAttendance: Number(monthlyAttendance[0]?.count || 0),
+      };
+    } catch (error) {
+      console.error('Error getting business metrics:', error);
+      throw error;
+    }
   }
 
-  async getDashboardMetrics() {
-    const allInquiries = Array.from(this.inquiries.values());
-    const allVendors = Array.from(this.vendors.values());
-    const allResponses = Array.from(this.priceResponses.values());
-    
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayInquiries = allInquiries.filter(i => 
-      new Date(i.timestamp || 0) >= today
-    ).length;
-    
-    const activeVendors = allVendors.filter(v => v.isActive).length;
-    
-    const totalInquiries = allInquiries.length;
-    const totalResponses = allResponses.length;
-    const responseRate = totalInquiries > 0 ? Math.round((totalResponses / totalInquiries) * 100) : 0;
-    
-    const messagesSent = totalInquiries * 3; // Assuming 3 vendors contacted per inquiry
-    
-    const cities = new Set(allVendors.map(v => v.city));
-    const citiesCovered = cities.size;
-    
-    return {
-      totalInquiries,
-      activeVendors,
-      responseRate,
-      messagesSent,
-      todayInquiries,
-      citiesCovered
-    };
+  // ========================================
+  // TASK MANAGEMENT ENHANCEMENTS
+  // ========================================
+
+  async assignTaskToUser(taskData: InsertDailyTask): Promise<DailyTask> {
+    try {
+      const task = await this.createDailyTask(taskData);
+      
+      // You could add notification logic here
+      console.log(`Task assigned to user ${taskData.userId} by user ${taskData.assignedByUserId}`);
+      
+      return task;
+    } catch (error) {
+      console.error('Error assigning task to user:', error);
+      throw error;
+    }
+  }
+
+  async getTasksByStatus(status: string, companyId: number): Promise<DailyTask[]> {
+    try {
+      const results = await db
+        .select({
+          id: dailyTasks.id,
+          createdAt: dailyTasks.createdAt,
+          updatedAt: dailyTasks.updatedAt,
+          status: dailyTasks.status,
+          userId: dailyTasks.userId,
+          visitType: dailyTasks.visitType,
+          description: dailyTasks.description,
+          siteName: dailyTasks.siteName,
+          assignedByUserId: dailyTasks.assignedByUserId,
+          taskDate: dailyTasks.taskDate,
+          relatedDealerId: dailyTasks.relatedDealerId,
+          pjpId: dailyTasks.pjpId
+        })
+        .from(dailyTasks)
+        .innerJoin(users, eq(dailyTasks.userId, users.id))
+        .where(
+          and(
+            eq(dailyTasks.status, status),
+            eq(users.companyId, companyId)
+          )
+        )
+        .orderBy(desc(dailyTasks.taskDate));
+      
+      return results;
+    } catch (error) {
+      console.error('Error getting tasks by status:', error);
+      throw error;
+    }
+  }
+
+  async updateTaskStatus(taskId: string, status: string): Promise<DailyTask> {
+    try {
+      const [task] = await db
+        .update(dailyTasks)
+        .set({ 
+          status,
+          updatedAt: new Date()
+        })
+        .where(eq(dailyTasks.id, taskId))
+        .returning();
+      
+      return task;
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      throw error;
+    }
   }
 }
 

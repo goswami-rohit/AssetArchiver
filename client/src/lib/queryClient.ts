@@ -18,9 +18,8 @@ export async function apiRequest(
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
-
-  await throwIfResNotOk(res);
-  return res;
+  await throwIfResponseNotOk(res);
+  return res.json(); // ← This is the key fix!
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
