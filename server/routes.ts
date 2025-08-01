@@ -1349,7 +1349,7 @@ export function setupWebRoutes(app: Express) {
       res.json({
         success: true,
         data: result[0],
-        message: 'Journey stopped successfully!'
+        message: 'Journey stopped successfully! Yeah There you go'
       });
 
     } catch (error: unknown) {
