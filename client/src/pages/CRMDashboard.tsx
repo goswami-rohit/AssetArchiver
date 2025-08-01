@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Clock, 
-  MapPin, 
-  Users, 
-  CheckCircle, 
-  Play, 
+import {
+  Clock,
+  MapPin,
+  Users,
+  CheckCircle,
+  Play,
   Square,
   Calendar,
   Building2,
@@ -34,7 +34,7 @@ interface User {
 export default function CRMDashboard() {
   const [user, setUser] = useState<User | null>(null);
   const [isJourneyActive, setIsJourneyActive] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [chatContext, setChatContext] = useState<string>('dashboard');
 
   useEffect(() => {
@@ -74,9 +74,45 @@ export default function CRMDashboard() {
     setChatContext('dealers');
   };
 
-  const handleStartJourney = () => {
-    setIsJourneyActive(true);
-    setChatContext('journey_active');
+  const handleStartJourney = async () => {
+    // Add null check for user
+    if (!user) {
+      alert('User not loaded. Please refresh the page.');
+      return;
+    }
+    if (!currentLocation) {
+      alert('Location not available. Please enable location services.');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/journey/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          latitude: currentLocation.lat,
+          longitude: currentLocation.lng,
+          journeyType: 'simple',
+          siteName: 'Journey started from PWA'
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setIsJourneyActive(true);
+        setChatContext('journey_active');
+        alert('Journey started successfully!');
+      } else {
+        alert('Error starting journey: ' + data.error);
+      }
+    } catch (error) {
+      console.error('Error starting journey:', error);
+      alert('Failed to start journey');
+    }
   };
 
   const handleLocationPunch = () => {
@@ -130,7 +166,7 @@ export default function CRMDashboard() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col p-4 pb-24"> {/* Bottom padding for chat */}
-        
+
         {/* Quick Actions Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <Button
@@ -141,7 +177,7 @@ export default function CRMDashboard() {
             <Clock className="w-6 h-6 text-blue-600" />
             <span className="text-sm">Attendance</span>
           </Button>
-          
+
           <Button
             onClick={handleTasks}
             variant="outline"
@@ -150,7 +186,7 @@ export default function CRMDashboard() {
             <CheckCircle className="w-6 h-6 text-green-600" />
             <span className="text-sm">Tasks</span>
           </Button>
-          
+
           <Button
             onClick={handleJourneyPlan}
             variant="outline"
@@ -159,7 +195,7 @@ export default function CRMDashboard() {
             <Calendar className="w-6 h-6 text-purple-600" />
             <span className="text-sm">PJP</span>
           </Button>
-          
+
           <Button
             onClick={handleDealers}
             variant="outline"
@@ -180,7 +216,7 @@ export default function CRMDashboard() {
             <Play className="w-5 h-5 mr-2" />
             {isJourneyActive ? 'Journey In Progress' : 'Start Journey'}
           </Button>
-          
+
           <Button
             onClick={handleLocationPunch}
             variant="outline"
@@ -200,7 +236,7 @@ export default function CRMDashboard() {
             <MessageCircle className="w-5 h-5 mr-2" />
             Submit DVR (Chat)
           </Button>
-          
+
           <Button
             onClick={handleTVRSubmit}
             variant="outline"
@@ -213,7 +249,7 @@ export default function CRMDashboard() {
 
         {/* Journey Tracker Component */}
         {isJourneyActive && (
-          <JourneyTracker 
+          <JourneyTracker
             userId={user.id}
             onJourneyEnd={() => setIsJourneyActive(false)}
           />
@@ -260,7 +296,7 @@ export default function CRMDashboard() {
       </div>
 
       {/* Fixed Chat Interface at Bottom */}
-      <ChatInterface 
+      <ChatInterface
         context={chatContext}
         currentLocation={currentLocation}
         userId={user.id}

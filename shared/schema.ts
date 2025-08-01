@@ -198,7 +198,7 @@ export const competitionReports = pgTable("competition_reports", {
 
 // Geo Tracking table
 export const geoTracking = pgTable("geo_tracking", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()), // Changed from text to varchar
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
   longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
@@ -218,6 +218,7 @@ export const geoTracking = pgTable("geo_tracking", {
   checkInTime: timestamp("check_in_time", { withTimezone: true, precision: 6 }),
   checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }),
   totalDistanceTravelled: decimal("total_distance_travelled", { precision: 10, scale: 3 }),
+  sessionId: varchar("session_id", { length: 255 }), // ADD THIS FIELD - it's missing and critical
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });

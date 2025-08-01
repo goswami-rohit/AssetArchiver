@@ -930,7 +930,9 @@ export function setupWebRoutes(app: Express) {
         return res.status(400).json({ error: 'Missing required fields: userId, latitude, longitude' });
       }
 
-      // Check for existing active journey
+      console.log('Checking for active journey for userId:', parseInt(userId));
+
+      // Check for existing active journey - FIXED
       const activeJourney = await db.query.geoTracking.findFirst({
         where: and(
           eq(geoTracking.userId, parseInt(userId)),
@@ -938,11 +940,21 @@ export function setupWebRoutes(app: Express) {
           isNull(geoTracking.checkOutTime)
         )
       });
+      console.log('Active journey found:', activeJourney);
 
       if (activeJourney) {
-        return res.status(400).json({ error: 'Active journey already exists', activeJourneyId: activeJourney.id, startedAt: activeJourney.checkInTime });
+        console.log('Active journey details:', {
+          id: activeJourney.id,
+          checkInTime: activeJourney.checkInTime,
+          checkOutTime: activeJourney.checkOutTime,
+          locationType: activeJourney.locationType
+        });
+        return res.status(400).json({
+          error: 'Active journey already exists',
+          activeJourneyId: activeJourney.id,
+          startedAt: activeJourney.checkInTime
+        });
       }
-
       // Generate session ID for tracking
       const sessionId = crypto.randomUUID();
 
@@ -956,9 +968,11 @@ export function setupWebRoutes(app: Express) {
       }
 
       // Create the new journey record
+      // Create the new journey record - FIXED
       const newJourney = await db.insert(geoTracking).values({
         id: sessionId,
         userId: parseInt(userId),
+        sessionId: sessionId,
         latitude: latitude?.toString(),
         longitude: longitude?.toString(),
         locationType: 'journey_start',
@@ -975,6 +989,7 @@ export function setupWebRoutes(app: Express) {
         siteName: siteName || (dealersToVisit.length > 0 ? `Visiting ${dealersToVisit.map(d => d.name).join(', ')}` : 'Simple Journey'),
         checkInTime: new Date(),
         checkOutTime: null,
+        totalDistanceTravelled: "0.000", // ADD THIS LINE
         createdAt: new Date(),
         updatedAt: new Date()
       }).returning();
@@ -1150,7 +1165,7 @@ export function setupWebRoutes(app: Express) {
         siteName: `${dealer.name} - ${dealer.type} (${dealer.region})`,
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled) + (distanceFromStart / 1000)).toFixed(3)
+        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled || '0') + (distanceFromStart / 1000)).toFixed(3)
       };
 
       const result = await db.insert(geoTracking).values(dealerCheckinData).returning();
@@ -1183,7 +1198,9 @@ export function setupWebRoutes(app: Express) {
             sessionId: activeJourney.sessionId,
             totalJourneyDistance: result[0].totalDistanceTravelled,
             journeyStartTime: activeJourney.checkInTime,
-            elapsedTime: `${Math.round((new Date().getTime() - new Date(activeJourney.checkInTime).getTime()) / 60000)} minutes`
+            elapsedTime: activeJourney.checkInTime ?
+              `${Math.round((new Date().getTime() - new Date(activeJourney.checkInTime).getTime()) / 60000)} minutes` :
+              'Unknown'
           }
         }
       });
@@ -1233,7 +1250,8 @@ export function setupWebRoutes(app: Express) {
       });
 
       // Calculate visit duration
-      const visitDuration = new Date().getTime() - new Date(activeCheckin.checkInTime).getTime();
+      const visitDuration = activeCheckin.checkInTime ?
+        new Date().getTime() - new Date(activeCheckin.checkInTime).getTime() : 0;
 
       // Update check-in record with checkout time
       await db.update(geoTracking)
@@ -1302,60 +1320,109 @@ export function setupWebRoutes(app: Express) {
   });
 
   // 5. End Journey (Enhanced)
-  app.patch('/api/journey/end', async (req: Request, res: Response) => {
+  // 5. End Journey
+  app.post('/api/journey/end', async (req: Request, res: Response) => {
     try {
-      // Correctly get the journey ID from the request body
-      const { id, latitude, longitude, accuracy, batteryLevel, isCharging, networkStatus, ipAddress, totalDistanceTravelled } = req.body;
+      const {
+        userId,
+        latitude,
+        longitude,
+        accuracy,
+        batteryLevel,
+        networkStatus,
+        journeyNotes
+      } = req.body;
 
-      if (!id) {
-        return res.status(400).json({ error: 'Journey ID is required' });
-      }
-
-      const existingJourney = await db.query.geoTracking.findFirst({
-        where: eq(geoTracking.id, id),
-        columns: {
-          id: true,
-          checkOutTime: true,
-          userId: true
-        }
+      // Find active journey
+      const activeJourney = await db.query.geoTracking.findFirst({
+        where: and(
+          eq(geoTracking.userId, parseInt(userId)),
+          eq(geoTracking.locationType, 'journey_start'),
+          isNull(geoTracking.checkOutTime)
+        )
       });
 
-      if (!existingJourney) {
-        return res.status(404).json({ error: 'Journey not found' });
+      if (!activeJourney) {
+        return res.status(400).json({
+          error: 'No active journey found'
+        });
       }
 
-      if (existingJourney.checkOutTime) {
-        return res.status(400).json({ error: 'Journey already stopped' });
+      // Check if checkInTime exists
+      if (!activeJourney.checkInTime) {
+        return res.status(400).json({
+          error: 'Invalid journey data - no check-in time found'
+        });
       }
 
-      const result = await db.update(geoTracking)
+      // Calculate total journey time - NOW SAFE
+      const journeyDuration = new Date().getTime() - new Date(activeJourney.checkInTime).getTime();
+      const durationMinutes = Math.round(journeyDuration / 60000);
+
+      // Calculate final distance if coordinates provided
+      let finalDistance = parseFloat(activeJourney.totalDistanceTravelled || '0');
+      if (latitude && longitude) {
+        const distanceFromStart = calculatePreciseDistance(
+          parseFloat(activeJourney.latitude),
+          parseFloat(activeJourney.longitude),
+          parseFloat(latitude),
+          parseFloat(longitude)
+        );
+        finalDistance += (distanceFromStart / 1000);
+      }
+
+      // Update the journey start record with end time
+      const updatedJourney = await db.update(geoTracking)
         .set({
           checkOutTime: new Date(),
-          latitude: latitude?.toString() || null,
-          longitude: longitude?.toString() || null,
-          locationType: 'journey_end',
-          recordedAt: new Date(),
-          accuracy: accuracy?.toString() || null,
-          batteryLevel: batteryLevel?.toString() || null,
-          isCharging: isCharging || null,
-          networkStatus: networkStatus || null,
-          ipAddress: ipAddress || null,
-          totalDistanceTravelled: totalDistanceTravelled?.toString() || null,
+          totalDistanceTravelled: finalDistance.toFixed(3),
           updatedAt: new Date()
         })
-        .where(eq(geoTracking.id, id))
+        .where(eq(geoTracking.id, activeJourney.id))
         .returning();
+
+      // Create journey end record
+      const journeyEndData = {
+        userId: parseInt(userId),
+        sessionId: activeJourney.sessionId,
+        latitude: latitude?.toString() || activeJourney.latitude,
+        longitude: longitude?.toString() || activeJourney.longitude,
+        recordedAt: new Date(),
+        accuracy: accuracy?.toString() || null,
+        speed: "0.00",
+        locationType: 'journey_end',
+        activityType: 'completed',
+        appState: 'active',
+        batteryLevel: batteryLevel?.toString() || null,
+        networkStatus: networkStatus || null,
+        siteName: journeyNotes || 'Journey completed',
+        checkInTime: new Date(),
+        checkOutTime: new Date(),
+        totalDistanceTravelled: finalDistance.toFixed(3)
+      };
+
+      const endRecord = await db.insert(geoTracking).values(journeyEndData).returning();
 
       res.json({
         success: true,
-        data: result[0],
-        message: 'Journey stopped successfully! Yeah There you go'
+        message: 'Journey ended successfully!',
+        data: {
+          journeyStart: updatedJourney[0],
+          journeyEnd: endRecord[0],
+          summary: {
+            duration: `${durationMinutes} minutes`,
+            totalDistance: `${finalDistance.toFixed(3)} km`,
+            startTime: activeJourney.checkInTime,
+            endTime: new Date(),
+            sessionId: activeJourney.sessionId
+          }
+        }
       });
 
     } catch (error: unknown) {
-      console.error('Error stopping journey:', error);
+      console.error('Error ending journey:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to stop journey', details: errorMessage });
+      res.status(500).json({ error: 'Failed to end journey', details: errorMessage });
     }
   });
 
@@ -1486,6 +1553,7 @@ export function setupWebRoutes(app: Express) {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c; // Distance in meters
   }
+
   // ===== DAILY TASKS ENDPOINTS =====
 
   app.get('/api/tasks/recent', async (req: Request, res: Response) => {
