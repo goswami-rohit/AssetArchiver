@@ -28,7 +28,7 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
   phoneNumber: varchar("phone_number", { length: 50 }),
-  inviteToken: text("invite_token").unique(),
+  inviteToken: text("inviteToken").unique(),
   status: text("status").default("active").notNull(), // "pending", "active", "inactive"
   salesmanLoginId: text("salesman_login_id").unique(),
   hashedPassword: text("hashed_password"),
@@ -160,24 +160,24 @@ export const salesmanLeaveApplications = pgTable("salesman_leave_applications", 
 // Client Report table
 export const clientReports = pgTable("client_reports", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  dealerType: text("dealer_type").notNull(),
+  dealerType: text("dealerType").notNull(),
   dealerSubDealerName: text("dealer_sub_dealer_name").notNull(),
   location: text("location").notNull(),
   typeBestNonBest: text("type_best_non_best").notNull(),
-  dealerTotalPotential: decimal("dealer_total_potential", { precision: 10, scale: 2 }).notNull(),
-  dealerBestPotential: decimal("dealer_best_potential", { precision: 10, scale: 2 }).notNull(),
-  brandSelling: text("brand_selling").array().notNull(),
-  contactPerson: text("contact_person").notNull(),
+  dealerTotalPotential: decimal("dealerTotalPotential", { precision: 10, scale: 2 }).notNull(),
+  dealerBestPotential: decimal("dealerBestPotential", { precision: 10, scale: 2 }).notNull(),
+  brandSelling: text("brandSelling").array().notNull(),
+  contactPerson: text("contactPerson").notNull(),
   contactPersonPhoneNo: text("contact_person_phone_no").notNull(),
   todayOrderMT: decimal("today_order_mt", { precision: 10, scale: 2 }).notNull(),
   todayCollection: decimal("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
   feedbacks: text("feedbacks").notNull(),
   solutionsAsPerSalesperson: text("solutions_as_per_salesperson").notNull(),
-  anyRemarks: text("any_remarks").notNull(),
+  anyRemarks: text("anyRemarks").notNull(),
   checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }).notNull(),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }), // Assuming userId has no map
+  createdAt: timestamp("createdAt", { withTimezone: true, precision: 6 }).defaultNow().notNull(), // Assuming createdAt has no map
+  updatedAt: timestamp("updatedAt", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(), // Assuming updatedAt has no map
 });
 
 // Competition Report table

@@ -401,7 +401,7 @@ private async handleStart(chatId: number): Promise<void> {
         {
           text: "🌐 Open Sales CRM Web App",
           web_app: {
-            url: `https://49ae3be7bdaf.ngrok-free.app/pwa`
+            url: `https://telesalesside.onrender.com/pwa`
           }
         }
       ],
@@ -592,5 +592,5 @@ private async handleStart(chatId: number): Promise<void> {
 export const telegramBot = TelegramBotService.getInstance({
   token: process.env.TELEGRAM_BOT_TOKEN || '',
   aiApiKey: process.env.OPENROUTER_API_KEY || '',
-  webAppUrl: process.env.WEB_APP_URL || `https://92d88af29f8f.ngrok-free.app/pwa`
+  webAppUrl: process.env.WEB_APP_URL || `https://telesalesside.onrender.com/pwa`
 });
