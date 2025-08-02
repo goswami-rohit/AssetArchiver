@@ -446,15 +446,30 @@ export default function CRMDashboard() {
 
         const data = await response.json();
         if (data.success) {
+          // ✅ SUCCESS: New punch-in recorded
           setAttendanceStatus('in');
           setAttendanceData(data.data);
           showSuccess('✅ Punched in successfully! Have a productive day!');
-          await fetchDashboardStats(); // Refresh stats
+          await fetchDashboardStats();
         } else {
-          // ✅ FIXED: Handle "already punched in" error
+          // ✅ HANDLE ALL ERROR CASES PROPERLY
           if (data.error && data.error.includes('Already punched in')) {
-            await fetchAttendanceStatus(); // This will set status to 'in'
-            showSuccess('You are already punched in today! Ready to punch out.');
+            // User is already punched in - use the returned data
+            if (data.data) {
+              setAttendanceData(data.data);
+              // Check if they've punched out already
+              const newStatus = data.data.outTimeTimestamp ? 'out' : 'in';
+              setAttendanceStatus(newStatus);
+              if (newStatus === 'in') {
+                showSuccess('You are already punched in today! Ready to punch out.');
+              } else {
+                showSuccess('Your attendance is complete for today.');
+              }
+            } else {
+              // Fallback - just set to 'in' since they're already punched in
+              setAttendanceStatus('in');
+              showSuccess('You are already punched in today! Ready to punch out.');
+            }
           } else {
             addError(`Punch in failed: ${data.error || 'Unknown error'}`);
           }
@@ -462,7 +477,7 @@ export default function CRMDashboard() {
       } else {
         // ✅ PUNCH OUT
         const response = await fetch('/api/attendance/punch-out', {
-          method: 'PATCH', // ✅ FIXED: Changed from POST to PATCH
+          method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId: user.id,
@@ -479,12 +494,24 @@ export default function CRMDashboard() {
 
         const data = await response.json();
         if (data.success) {
+          // ✅ SUCCESS: Punch-out recorded
           setAttendanceStatus('out');
           setAttendanceData(data.data);
           showSuccess('✅ Punched out successfully! Great work today!');
-          await fetchDashboardStats(); // Refresh stats
+          await fetchDashboardStats();
         } else {
-          addError(`Punch out failed: ${data.error || 'Unknown error'}`);
+          // ✅ HANDLE PUNCH-OUT ERRORS
+          if (data.error && data.error.includes('Already punched out')) {
+            // User already punched out - set correct status
+            setAttendanceStatus('out');
+            showSuccess('You have already punched out today.');
+          } else if (data.error && data.error.includes('No punch-in record')) {
+            // No punch-in found - set to 'out' status
+            setAttendanceStatus('out');
+            addError('Please punch in first before punching out.');
+          } else {
+            addError(`Punch out failed: ${data.error || 'Unknown error'}`);
+          }
         }
       }
     } catch (error) {
@@ -494,7 +521,6 @@ export default function CRMDashboard() {
       setIsLoading(false);
     }
   };
-
   // 🗺️ SMART JOURNEY HANDLING
   const handleStartJourney = async () => {
     if (!user || !currentLocation) {
@@ -937,8 +963,8 @@ export default function CRMDashboard() {
                 onClick={handleAttendancePunch}
                 disabled={isLoading}
                 className={`h-24 flex flex-col items-center justify-center space-y-2 text-white font-semibold ${attendanceStatus === 'in'
-                    ? 'bg-gradient-to-br from-red-500 to-red-700 hover:from-red-600 hover:to-red-800'
-                    : 'bg-gradient-to-br from-green-500 to-green-700 hover:from-green-600 hover:to-green-800'
+                  ? 'bg-gradient-to-br from-red-500 to-red-700 hover:from-red-600 hover:to-red-800'
+                  : 'bg-gradient-to-br from-green-500 to-green-700 hover:from-green-600 hover:to-green-800'
                   }`}
               >
                 {isLoading ? (
