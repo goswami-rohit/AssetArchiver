@@ -11,7 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  Clock, MapPin, Users, CheckCircle, Play, Square, Calendar, Building2, MessageCircle, Send, Mic, Camera, 
+  Clock, MapPin, Users, CheckCircle, Play, Square, Calendar, Building2, MessageCircle, Send, Mic, Camera,
   Navigation, Plus, List, UserPlus, CalendarDays, LogIn, LogOut, Briefcase, TrendingUp, Zap, Star, Heart,
   Sparkles, Target, Route, Store, BarChart3, Settings, AlertCircle, Loader2, RefreshCw, Eye, Edit, Trash2,
   Home, Phone, Mail, Globe, Award, Battery, Wifi, Signal, ChevronRight, Activity, FileText, Users2,
@@ -89,14 +89,14 @@ export default function CRMDashboard() {
   const [chatContext, setChatContext] = useState<string>('dashboard');
   const [attendanceStatus, setAttendanceStatus] = useState<'out' | 'in' | null>(null);
   const [attendanceData, setAttendanceData] = useState<any>(null);
-  
+
   // Data State
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
   const [tasks, setTasks] = useState<any[]>([]);
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [recentReports, setRecentReports] = useState<any[]>([]);
   const [leaveApplications, setLeaveApplications] = useState<any[]>([]);
-  
+
   // UI State
   const [isLoading, setIsLoading] = useState(false);
   const [showDealerForm, setShowDealerForm] = useState(false);
@@ -106,13 +106,13 @@ export default function CRMDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
-  
+
   // Form State
   const [dealerForm, setDealerForm] = useState({
     name: '', type: 'Dealer', region: '', area: '', phoneNo: '', address: '',
     totalPotential: '', bestPotential: '', brandSelling: [''], feedbacks: '', remarks: ''
   });
-  
+
   const [leaveForm, setLeaveForm] = useState({
     leaveType: '', startDate: '', endDate: '', reason: '', totalDays: 1
   });
@@ -451,12 +451,18 @@ export default function CRMDashboard() {
           showSuccess('✅ Punched in successfully! Have a productive day!');
           await fetchDashboardStats(); // Refresh stats
         } else {
-          addError(`Punch in failed: ${data.error || 'Unknown error'}`);
+          // ✅ FIXED: Handle "already punched in" error
+          if (data.error && data.error.includes('Already punched in')) {
+            await fetchAttendanceStatus(); // This will set status to 'in'
+            showSuccess('You are already punched in today! Ready to punch out.');
+          } else {
+            addError(`Punch in failed: ${data.error || 'Unknown error'}`);
+          }
         }
       } else {
         // ✅ PUNCH OUT
         const response = await fetch('/api/attendance/punch-out', {
-          method: 'POST',
+          method: 'PATCH', // ✅ FIXED: Changed from POST to PATCH
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userId: user.id,
@@ -742,7 +748,7 @@ export default function CRMDashboard() {
   const calculateWeeklyHours = (attendanceData: any[]) => {
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-    
+
     return attendanceData
       .filter(record => new Date(record.attendanceDate) >= weekStart)
       .reduce((total, record) => {
@@ -883,8 +889,8 @@ export default function CRMDashboard() {
               </Badge>
             )}
 
-            <Badge variant={attendanceStatus === 'in' ? 'default' : 'outline'} 
-                   className={attendanceStatus === 'in' ? 'bg-green-600' : 'border-red-300 text-red-600'}>
+            <Badge variant={attendanceStatus === 'in' ? 'default' : 'outline'}
+              className={attendanceStatus === 'in' ? 'bg-green-600' : 'border-red-300 text-red-600'}>
               {attendanceStatus === 'in' ? <LogIn className="w-3 h-3 mr-1" /> : <LogOut className="w-3 h-3 mr-1" />}
               {attendanceStatus === 'in' ? 'Checked In' : 'Checked Out'}
             </Badge>
@@ -930,11 +936,10 @@ export default function CRMDashboard() {
               <Button
                 onClick={handleAttendancePunch}
                 disabled={isLoading}
-                className={`h-24 flex flex-col items-center justify-center space-y-2 text-white font-semibold ${
-                  attendanceStatus === 'in'
+                className={`h-24 flex flex-col items-center justify-center space-y-2 text-white font-semibold ${attendanceStatus === 'in'
                     ? 'bg-gradient-to-br from-red-500 to-red-700 hover:from-red-600 hover:to-red-800'
                     : 'bg-gradient-to-br from-green-500 to-green-700 hover:from-green-600 hover:to-green-800'
-                }`}
+                  }`}
               >
                 {isLoading ? (
                   <Loader2 className="w-8 h-8 animate-spin" />
@@ -1333,7 +1338,7 @@ export default function CRMDashboard() {
                         </div>
                         <Progress value={(dashboardStats.attendance.weeklyHours / 40) * 100} />
                       </div>
-                      
+
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
                           <span>Task Completion</span>
@@ -1341,7 +1346,7 @@ export default function CRMDashboard() {
                         </div>
                         <Progress value={(dashboardStats.tasks.completed / (dashboardStats.tasks.completed + dashboardStats.tasks.pending || 1)) * 100} />
                       </div>
-                      
+
                       <div className="space-y-2">
                         <div className="flex justify-between text-sm">
                           <span>Dealer Coverage</span>
@@ -1481,7 +1486,7 @@ export default function CRMDashboard() {
       </div>
 
       {/* 🎨 MODALS AND DIALOGS */}
-      
+
       {/* Dealer Form Dialog */}
       <Dialog open={showDealerForm} onOpenChange={setShowDealerForm}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1765,7 +1770,7 @@ export default function CRMDashboard() {
                 </SelectContent>
               </Select>
             </div>
-            
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="startDate">Start Date *</Label>
