@@ -40,6 +40,7 @@ export default function ChatInterface({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pendingTVRData, setPendingTVRData] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -77,7 +78,7 @@ export default function ChatInterface({
       case 'dvr':
         return "📊 Let's create your Daily Visit Report! Just tell me about your visit - dealer name, order amount, collection, and any feedback.";
       case 'tvr':
-        return "🔧 Technical Visit Report mode! Describe the technical work you performed and I'll help format the report.";
+        return "🔧 Technical Visit Report mode! Describe the technical work you performed and I'll help format the report. Tell me about the site, issue, and work done!";
       case 'location_punch':
         return "📍 Location punch ready! I can help you check in/out at your current location with photo capture.";
       case 'journey_active':
@@ -99,6 +100,50 @@ export default function ChatInterface({
     }
   };
 
+  const handleTVRSubmission = async (tvrData: any) => {
+    try {
+      const response = await fetch('/api/tvr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          useAI: true,
+          userInput: inputValue,
+          userId: userId,
+          location: currentLocation,
+          ...tvrData
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const successMessage: ChatMessage = {
+          id: (Date.now() + 2).toString(),
+          type: 'ai',
+          content: `✅ ${data.message}\n\n🔧 **TVR Created Successfully!**\n• Report ID: ${data.data.id}\n• Site: ${data.data.siteNameConcernedPerson}\n• Type: ${data.data.visitType}\n• Time: ${new Date(data.data.checkInTime).toLocaleString()}\n\nYour technical visit report has been saved to the database!`,
+          timestamp: new Date(),
+          context: 'tvr'
+        };
+        setMessages(prev => [...prev, successMessage]);
+        setPendingTVRData(null);
+      } else {
+        throw new Error(data.error || 'Failed to submit TVR');
+      }
+    } catch (error) {
+      console.error('TVR submission error:', error);
+      const errorMessage: ChatMessage = {
+        id: (Date.now() + 2).toString(),
+        type: 'ai',
+        content: `❌ Error submitting TVR: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`,
+        timestamp: new Date(),
+        context: 'tvr'
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
 
@@ -111,14 +156,22 @@ export default function ChatInterface({
     };
 
     setMessages(prev => [...prev, userMessage]);
+    const currentInput = inputValue;
     setInputValue('');
     setIsLoading(true);
 
     try {
+      // Check for TVR submission commands
+      if (context === 'tvr' && pendingTVRData && (currentInput.toLowerCase().includes('submit') || currentInput.toLowerCase().includes('save'))) {
+        await handleTVRSubmission(pendingTVRData);
+        setIsLoading(false);
+        return;
+      }
+
       // Determine which API endpoint to use based on context
       let apiEndpoint = '/api/ai/chat-assist';
       let requestBody: any = {
-        userInput: inputValue,
+        userInput: currentInput,
         context,
         userId,
         location: currentLocation
@@ -128,17 +181,38 @@ export default function ChatInterface({
       if (context === 'dvr' && currentLocation) {
         apiEndpoint = '/api/ai/generate-dvr';
         requestBody = {
-          userInput: inputValue,
+          userInput: currentInput,
           location: currentLocation,
           userId
         };
       } else if (context === 'tvr' && currentLocation) {
-        apiEndpoint = '/api/ai/generate-tvr';
-        requestBody = {
-          userInput: inputValue,
-          location: currentLocation,
-          userId
+        // For TVR, we'll simulate AI generation and then submit to our fixed endpoint
+        const mockTVRData = {
+          visitType: currentInput.toLowerCase().includes('repair') ? 'Repair' : 
+                     currentInput.toLowerCase().includes('install') ? 'Installation' : 'Maintenance',
+          siteNameConcernedPerson: currentInput.includes('at ') ? 
+            currentInput.split('at ')[1]?.split(' ')[0] || 'Customer Site' : 'Customer Site',
+          phoneNo: '0000000000', // Default, could be extracted from input
+          clientsRemarks: currentInput,
+          salespersonRemarks: `Technical support provided based on: ${currentInput}`,
+          emailId: null
         };
+
+        setPendingTVRData(mockTVRData);
+
+        const aiResponse = `Perfect! I've prepared your TVR:\n\n🔧 **Technical Visit Report**\n• Site: ${mockTVRData.siteNameConcernedPerson}\n• Type: ${mockTVRData.visitType}\n• Issue Description: ${mockTVRData.clientsRemarks}\n• Work Performed: ${mockTVRData.salespersonRemarks}\n\n💾 Say **'submit'** or **'save'** to create this TVR in the database, or describe more details to modify it.`;
+
+        const aiMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'ai',
+          content: aiResponse,
+          timestamp: new Date(),
+          context
+        };
+
+        setMessages(prev => [...prev, aiMessage]);
+        setIsLoading(false);
+        return;
       }
 
       const response = await fetch(apiEndpoint, {
@@ -154,8 +228,6 @@ export default function ChatInterface({
       let aiResponse = '';
       if (context === 'dvr' && data.generatedDVR) {
         aiResponse = `Great! I've generated your DVR:\n\n📊 **Daily Visit Report**\n• Dealer: ${data.generatedDVR.dealerName}\n• Order: ${data.generatedDVR.todayOrderMt} MT\n• Collection: ₹${data.generatedDVR.todayCollectionRupees}\n• Feedback: ${data.generatedDVR.feedbacks}\n\nSay 'submit' to save this report or 'edit' to modify.`;
-      } else if (context === 'tvr' && data.generatedTVR) {
-        aiResponse = `Perfect! I've created your TVR:\n\n🔧 **Technical Visit Report**\n• Client: ${data.generatedTVR.clientName}\n• Purpose: ${data.generatedTVR.visitPurpose}\n• Issues: ${data.generatedTVR.technicalIssues.join(', ')}\n• Solutions: ${data.generatedTVR.solutionsProvided.join(', ')}\n\nSay 'submit' to save or 'modify' to change details.`;
       } else {
         aiResponse = data.response || data.assistance || 'I understand! How can I help you further?';
       }

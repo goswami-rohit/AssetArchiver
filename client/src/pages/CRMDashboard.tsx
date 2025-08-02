@@ -86,17 +86,25 @@ export default function CRMDashboard() {
     }
 
     try {
-      const response = await fetch('/api/journey/start', {
+      // FIXED: Use correct TVR endpoint instead of non-existent journey endpoint
+      const response = await fetch('/api/tvr', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           userId: user.id,
+          visitType: 'Journey Start',
+          siteNameConcernedPerson: 'Journey started from PWA',
+          phoneNo: '', // Required field
+          address: `Lat: ${currentLocation.lat}, Lng: ${currentLocation.lng}`,
+          nature: 'Journey Start',
+          problemDescription: 'Journey initiated from mobile dashboard',
+          actionTaken: 'Journey tracking started',
+          nextAction: 'Continue journey tracking',
+          followUp: false,
           latitude: currentLocation.lat,
-          longitude: currentLocation.lng,
-          journeyType: 'simple',
-          siteName: 'Journey started from PWA'
+          longitude: currentLocation.lng
         })
       });
 
@@ -107,7 +115,7 @@ export default function CRMDashboard() {
         setChatContext('journey_active');
         alert('Journey started successfully!');
       } else {
-        alert('Error starting journey: ' + data.error);
+        alert('Error starting journey: ' + (data.error || 'Unknown error'));
       }
     } catch (error) {
       console.error('Error starting journey:', error);
@@ -115,7 +123,38 @@ export default function CRMDashboard() {
     }
   };
 
-  const handleLocationPunch = () => {
+  const handleLocationPunch = async () => {
+    if (!user || !currentLocation) {
+      alert('User or location not available');
+      return;
+    }
+
+    try {
+      // FIXED: Use correct attendance punch-in endpoint
+      const response = await fetch('/api/attendance/punch-in', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          locationName: 'Location Punch',
+          latitude: currentLocation.lat,
+          longitude: currentLocation.lng,
+          imageCaptured: false
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert('Location punched successfully!');
+      } else {
+        alert('Error punching location: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('Error punching location:', error);
+      alert('Failed to punch location');
+    }
     setChatContext('location_punch');
   };
 

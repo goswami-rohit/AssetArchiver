@@ -38,18 +38,38 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ===== TECHNICAL VISIT REPORTS WITH AI =====
+  // ===== TECHNICAL VISIT REPORTS WITH AI (FIXED) =====
   app.get('/api/tvr/recent', async (req: Request, res: Response) => {
     try {
+      const { limit = 10, userId, visitType } = req.query;
+
+      let whereClause = undefined;
+
+      if (userId) {
+        whereClause = eq(technicalVisitReports.userId, parseInt(userId as string));
+      }
+      if (visitType) {
+        whereClause = whereClause
+          ? and(whereClause, eq(technicalVisitReports.visitType, visitType as string))
+          : eq(technicalVisitReports.visitType, visitType as string);
+      }
+
       const reports = await db.query.technicalVisitReports.findMany({
-        orderBy: [desc(technicalVisitReports.reportDate)],
-        limit: 10,
+        where: whereClause,
+        orderBy: [desc(technicalVisitReports.reportDate), desc(technicalVisitReports.createdAt)],
+        limit: parseInt(limit as string),
         with: {
           user: {
-            columns: { firstName: true, lastName: true }
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
           }
         }
       });
-      res.json(reports);
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
     } catch (error) {
       console.error('Error fetching technical reports:', error);
       res.status(500).json({ error: 'Failed to fetch technical reports' });
@@ -60,13 +80,17 @@ export function setupWebRoutes(app: Express) {
     try {
       const { useAI, userInput, location, ...manualData } = req.body;
 
+      // ✅ VALIDATE REQUIRED FIELDS FIRST
+      if (!req.body.userId || isNaN(parseInt(req.body.userId))) {
+        return res.status(400).json({ error: 'Valid userId is required' });
+      }
+
       let tvrData;
 
       if (useAI && userInput) {
         // 🤖 AI MAGIC BUTTON - Generate TVR from chat
         console.log('🔧 Using AI to generate TVR from input:', userInput);
 
-        // Call the correct AI method with proper parameters
         const aiGeneratedData = await aiService.generateTVRFromInput({
           siteName: req.body.siteName || "Customer Site",
           technicalIssue: userInput,
@@ -75,40 +99,40 @@ export function setupWebRoutes(app: Express) {
           visitType: req.body.visitType
         });
 
-        // Map AI generated data to schema-compliant format
+        // ✅ SCHEMA-COMPLIANT DATA MAPPING
         tvrData = {
-          userId: req.body.userId || 1,
-          reportDate: new Date().toISOString().split('T')[0], // YYYY-MM-DD format for date field
+          userId: parseInt(req.body.userId), // ✅ Integer conversion
+          reportDate: new Date(), // ✅ Date object for schema
           visitType: aiGeneratedData.visitType || "Maintenance",
           siteNameConcernedPerson: aiGeneratedData.siteNameConcernedPerson || "Customer",
           phoneNo: aiGeneratedData.phoneNo || req.body.phoneNo || "0000000000",
           emailId: aiGeneratedData.emailId || req.body.emailId || null,
           clientsRemarks: aiGeneratedData.clientsRemarks || userInput,
           salespersonRemarks: aiGeneratedData.salespersonRemarks || "Technical support provided",
-          checkInTime: new Date(), // timestamp with timezone
-          checkOutTime: null, // will be set when checking out
+          checkInTime: new Date(), // ✅ Date object
+          checkOutTime: null,
           inTimeImageUrl: req.body.inTimeImageUrl || null,
           outTimeImageUrl: req.body.outTimeImageUrl || null
         };
       } else {
-        // Manual TVR creation
+        // ✅ MANUAL TVR CREATION WITH PROPER VALIDATION
         tvrData = {
-          userId: manualData.userId || 1,
-          reportDate: manualData.reportDate || new Date().toISOString().split('T')[0],
+          userId: parseInt(manualData.userId || req.body.userId),
+          reportDate: manualData.reportDate ? new Date(manualData.reportDate) : new Date(), // ✅ Date object
           visitType: manualData.visitType || "Maintenance",
           siteNameConcernedPerson: manualData.siteNameConcernedPerson,
           phoneNo: manualData.phoneNo,
           emailId: manualData.emailId || null,
           clientsRemarks: manualData.clientsRemarks,
           salespersonRemarks: manualData.salespersonRemarks,
-          checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(),
-          checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null,
+          checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(), // ✅ Date object
+          checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null, // ✅ Date object or null
           inTimeImageUrl: manualData.inTimeImageUrl || null,
           outTimeImageUrl: manualData.outTimeImageUrl || null
         };
       }
 
-      // Validate required fields before database insertion
+      // ✅ VALIDATE REQUIRED FIELDS PER SCHEMA
       if (!tvrData.siteNameConcernedPerson) {
         return res.status(400).json({ error: 'Site name and concerned person is required' });
       }
@@ -122,13 +146,40 @@ export function setupWebRoutes(app: Express) {
         return res.status(400).json({ error: 'Salesperson remarks are required' });
       }
 
-      // Validate visit type enum
-      const validVisitTypes = ["Installation", "Repair", "Maintenance"];
-      if (!validVisitTypes.includes(tvrData.visitType)) {
-        return res.status(400).json({ error: 'Invalid visit type. Must be Installation, Repair, or Maintenance' });
+      // ✅ VALIDATE FIELD LENGTHS PER SCHEMA
+      if (tvrData.siteNameConcernedPerson.length > 255) {
+        return res.status(400).json({ error: 'Site name and concerned person exceeds 255 characters' });
+      }
+      if (tvrData.phoneNo.length > 20) {
+        return res.status(400).json({ error: 'Phone number exceeds 20 characters' });
+      }
+      if (tvrData.emailId && tvrData.emailId.length > 255) {
+        return res.status(400).json({ error: 'Email ID exceeds 255 characters' });
+      }
+      if (tvrData.clientsRemarks.length > 500) {
+        return res.status(400).json({ error: 'Client remarks exceed 500 characters' });
+      }
+      if (tvrData.salespersonRemarks.length > 500) {
+        return res.status(400).json({ error: 'Salesperson remarks exceed 500 characters' });
+      }
+      if (tvrData.inTimeImageUrl && tvrData.inTimeImageUrl.length > 500) {
+        return res.status(400).json({ error: 'In-time image URL exceeds 500 characters' });
+      }
+      if (tvrData.outTimeImageUrl && tvrData.outTimeImageUrl.length > 500) {
+        return res.status(400).json({ error: 'Out-time image URL exceeds 500 characters' });
       }
 
-      // Insert into database
+      // ✅ VALIDATE VISIT TYPE ENUM
+      const validVisitTypes = ["Installation", "Repair", "Maintenance"];
+      if (!validVisitTypes.includes(tvrData.visitType)) {
+        return res.status(400).json({
+          error: 'Invalid visit type',
+          validTypes: validVisitTypes,
+          provided: tvrData.visitType
+        });
+      }
+
+      // ✅ INSERT INTO DATABASE
       const result = await db.insert(technicalVisitReports).values(tvrData).returning();
 
       res.status(201).json({
@@ -138,33 +189,66 @@ export function setupWebRoutes(app: Express) {
         message: useAI ? '🔧 TVR created with AI assistance!' : 'TVR created successfully!'
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating technical report:', error);
 
-      // Handle specific database errors
-      if (error.code === '23502') { // NOT NULL violation
-        return res.status(400).json({ error: 'Missing required field', details: error.message });
-      }
-      if (error.code === '23505') { // Unique violation
-        return res.status(400).json({ error: 'Duplicate entry', details: error.message });
+      // ✅ COMPREHENSIVE ERROR HANDLING
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Validation error',
+          details: error.errors
+        });
       }
 
-      res.status(500).json({ error: 'Failed to create technical report', details: error.message });
+      if (error?.code === '23502') { // NOT NULL violation
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') { // Unique violation
+        return res.status(400).json({
+          error: 'Duplicate entry',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') { // Foreign key violation
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      res.status(500).json({
+        error: 'Failed to create technical report',
+        details: errorMessage
+      });
     }
   });
 
-  // Additional endpoint for checking out from a visit
+  // ✅ CHECKOUT ENDPOINT (ALREADY CORRECT)
   app.patch('/api/tvr/:id/checkout', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const { outTimeImageUrl } = req.body;
 
+      // ✅ VALIDATE ID FORMAT
+      if (!id || id.length > 255) {
+        return res.status(400).json({ error: 'Invalid TVR ID format' });
+      }
+
+      // ✅ VALIDATE IMAGE URL LENGTH IF PROVIDED
+      if (outTimeImageUrl && outTimeImageUrl.length > 500) {
+        return res.status(400).json({ error: 'Image URL exceeds 500 characters' });
+      }
+
       const result = await db
         .update(technicalVisitReports)
         .set({
-          checkOutTime: new Date(),
+          checkOutTime: new Date(), // ✅ Date object
           outTimeImageUrl: outTimeImageUrl || null,
-          updatedAt: new Date()
+          updatedAt: new Date() // ✅ Date object (though schema handles this automatically)
         })
         .where(eq(technicalVisitReports.id, id))
         .returning();
@@ -179,278 +263,420 @@ export function setupWebRoutes(app: Express) {
         message: 'Successfully checked out from visit'
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating checkout time:', error);
-      res.status(500).json({ error: 'Failed to update checkout time' });
+      res.status(500).json({
+        error: 'Failed to update checkout time',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
-  // ===== SALESMAN ATTENDANCE =====
-  app.get('/api/attendance/recent', async (req: Request, res: Response) => {
-    try {
-      const attendance = await db.query.salesmanAttendance.findMany({
-        orderBy: [desc(salesmanAttendance.attendanceDate)],
-        limit: 10,
-        with: {
-          user: {
-            columns: { firstName: true, lastName: true, salesmanLoginId: true }
-          }
+ // ===== SALESMAN ATTENDANCE ENDPOINTS =====
+
+// Get recent attendance records
+app.get('/api/attendance/recent', async (req: Request, res: Response) => {
+  try {
+    const attendance = await db.query.salesmanAttendance.findMany({
+      orderBy: [desc(salesmanAttendance.attendanceDate)],
+      limit: 10,
+      with: {
+        user: {
+          columns: { firstName: true, lastName: true, salesmanLoginId: true }
         }
-      });
-      res.json(attendance);
-    } catch (error) {
-      console.error('Error fetching attendance:', error);
-      res.status(500).json({ error: 'Failed to fetch attendance' });
-    }
-  });
-
-  // Punch IN endpoint - FIXED
-  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-    try {
-      const {
-        userId,
-        locationName,
-        latitude,
-        longitude,
-        accuracy,
-        speed,
-        heading,
-        altitude,
-        imageUrl,
-        imageCaptured = false
-      } = req.body;
-
-      // Check if user already punched in today
-      const today = new Date().toISOString().split('T')[0];
-      const existingAttendance = await db.query.salesmanAttendance.findFirst({
-        where: and(
-          eq(salesmanAttendance.userId, userId),
-          eq(salesmanAttendance.attendanceDate, today)
-        )
-      });
-
-      if (existingAttendance) {
-        return res.status(400).json({
-          error: 'Already punched in today',
-          data: existingAttendance
-        });
       }
+    });
+    res.json(attendance);
+  } catch (error) {
+    console.error('Error fetching attendance:', error);
+    res.status(500).json({ error: 'Failed to fetch attendance' });
+  }
+});
 
-      const validatedData = insertSalesmanAttendanceSchema.parse({
-        userId,
-        attendanceDate: today,
-        locationName: locationName || "Unknown Location",
-        inTimeTimestamp: new Date(), // ✅ Date object
-        outTimeTimestamp: null,
-        inTimeImageCaptured: imageCaptured,
-        outTimeImageCaptured: false,
-        inTimeImageUrl: imageUrl || null,
-        outTimeImageUrl: null,
-        inTimeLatitude: latitude?.toString() || "0",
-        inTimeLongitude: longitude?.toString() || "0",
-        inTimeAccuracy: accuracy?.toString() || null,
-        inTimeSpeed: speed?.toString() || null,
-        inTimeHeading: heading?.toString() || null,
-        inTimeAltitude: altitude?.toString() || null,
-        outTimeLatitude: null,
-        outTimeLongitude: null,
-        outTimeAccuracy: null,
-        outTimeSpeed: null,
-        outTimeHeading: null,
-        outTimeAltitude: null,
-        createdAt: new Date(), // ✅ Date object
-        updatedAt: new Date()  // ✅ Date object
+// Punch IN endpoint
+app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+  try {
+    const {
+      userId,
+      locationName,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      heading,
+      altitude,
+      imageUrl,
+      imageCaptured = false
+    } = req.body;
+
+    // Get today's date as proper date object
+    const today = new Date();
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    // Check if user already punched in today
+    const existingAttendance = await db.query.salesmanAttendance.findFirst({
+      where: and(
+        eq(salesmanAttendance.userId, userId),
+        eq(salesmanAttendance.attendanceDate, todayDateOnly)
+      )
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        error: 'Already punched in today',
+        data: existingAttendance
       });
-
-      const result = await db.insert(salesmanAttendance).values(validatedData).returning();
-
-      res.status(201).json({
-        success: true,
-        data: result[0],
-        message: '✅ Punched in successfully!'
-      });
-
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: 'Validation error', details: error.errors });
-      }
-      console.error('Error creating punch-in:', error);
-      res.status(500).json({ error: 'Failed to punch in' });
     }
-  });
 
-  // Punch OUT endpoint
-  app.patch('/api/attendance/punch-out', async (req: Request, res: Response) => {
-    try {
-      const {
-        userId,
-        latitude,
-        longitude,
-        accuracy,
-        speed,
-        heading,
-        altitude,
-        imageUrl,
-        imageCaptured = false
-      } = req.body;
+    // Insert new attendance record
+    const newAttendance = {
+      userId,
+      attendanceDate: todayDateOnly,
+      locationName: locationName || "Unknown Location",
+      inTimeTimestamp: new Date(),
+      outTimeTimestamp: null,
+      inTimeImageCaptured: imageCaptured,
+      outTimeImageCaptured: false,
+      inTimeImageUrl: imageUrl || null,
+      outTimeImageUrl: null,
+      inTimeLatitude: latitude || 0,
+      inTimeLongitude: longitude || 0,
+      inTimeAccuracy: accuracy || null,
+      inTimeSpeed: speed || null,
+      inTimeHeading: heading || null,
+      inTimeAltitude: altitude || null,
+      outTimeLatitude: null,
+      outTimeLongitude: null,
+      outTimeAccuracy: null,
+      outTimeSpeed: null,
+      outTimeHeading: null,
+      outTimeAltitude: null
+    };
 
-      const today = new Date().toISOString().split('T')[0];
+    const result = await db.insert(salesmanAttendance).values(newAttendance).returning();
 
-      // Find today's attendance record
-      const existingAttendance = await db.query.salesmanAttendance.findFirst({
-        where: and(
-          eq(salesmanAttendance.userId, userId),
-          eq(salesmanAttendance.attendanceDate, today)
-        )
+    res.status(201).json({
+      success: true,
+      data: result[0],
+      message: 'Punched in successfully!'
+    });
+
+  } catch (error) {
+    console.error('Error creating punch-in:', error);
+    res.status(500).json({ error: 'Failed to punch in' });
+  }
+});
+
+// Punch OUT endpoint
+app.patch('/api/attendance/punch-out', async (req: Request, res: Response) => {
+  try {
+    const {
+      userId,
+      latitude,
+      longitude,
+      accuracy,
+      speed,
+      heading,
+      altitude,
+      imageUrl,
+      imageCaptured = false
+    } = req.body;
+
+    // Get today's date as proper date object
+    const today = new Date();
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    // Find today's attendance record
+    const existingAttendance = await db.query.salesmanAttendance.findFirst({
+      where: and(
+        eq(salesmanAttendance.userId, userId),
+        eq(salesmanAttendance.attendanceDate, todayDateOnly)
+      )
+    });
+
+    if (!existingAttendance) {
+      return res.status(400).json({
+        error: 'No punch-in record found for today. Please punch in first.'
       });
-
-      if (!existingAttendance) {
-        return res.status(400).json({
-          error: 'No punch-in record found for today. Please punch in first.'
-        });
-      }
-
-      if (existingAttendance.outTimeTimestamp) {
-        return res.status(400).json({
-          error: 'Already punched out today',
-          data: existingAttendance
-        });
-      }
-
-      const result = await db.update(salesmanAttendance)
-        .set({
-          outTimeTimestamp: new Date(), // ✅ Date object, not string
-          outTimeImageCaptured: imageCaptured,
-          outTimeImageUrl: imageUrl || null,
-          outTimeLatitude: latitude?.toString() || null,
-          outTimeLongitude: longitude?.toString() || null,
-          outTimeAccuracy: accuracy?.toString() || null,
-          outTimeSpeed: speed?.toString() || null,
-          outTimeHeading: heading?.toString() || null,
-          outTimeAltitude: altitude?.toString() || null,
-          updatedAt: new Date() // ✅ Date object, not string
-        })
-        .where(eq(salesmanAttendance.id, existingAttendance.id))
-        .returning();
-
-      res.json({
-        success: true,
-        data: result[0],
-        message: '✅ Punched out successfully!'
-      });
-
-    } catch (error) {
-      console.error('Error updating punch-out:', error);
-      res.status(500).json({ error: 'Failed to punch out' });
     }
-  });
-  // Get today's attendance status
-  app.get('/api/attendance/today/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const today = new Date().toISOString().split('T')[0];
 
-      const todayAttendance = await db.query.salesmanAttendance.findFirst({
-        where: and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today)
-        )
+    if (existingAttendance.outTimeTimestamp) {
+      return res.status(400).json({
+        error: 'Already punched out today',
+        data: existingAttendance
       });
-
-      res.json({
-        hasAttendance: !!todayAttendance,
-        punchedIn: !!todayAttendance,
-        punchedOut: !!todayAttendance?.outTimeTimestamp,
-        data: todayAttendance || null
-      });
-
-    } catch (error) {
-      console.error('Error fetching today attendance:', error);
-      res.status(500).json({ error: 'Failed to fetch today attendance' });
     }
-  });
 
-  // ===== LEAVE APPLICATIONS =====
-  app.get('/api/leave/recent', async (req: Request, res: Response) => {
-    try {
-      const leaves = await db.query.salesmanLeaveApplications.findMany({
-        orderBy: [desc(salesmanLeaveApplications.createdAt)],
-        limit: 10,
-        with: {
-          user: {
-            columns: { firstName: true, lastName: true, salesmanLoginId: true }
-          }
+    // Update with punch-out data
+    const result = await db.update(salesmanAttendance)
+      .set({
+        outTimeTimestamp: new Date(),
+        outTimeImageCaptured: imageCaptured,
+        outTimeImageUrl: imageUrl || null,
+        outTimeLatitude: latitude || null,
+        outTimeLongitude: longitude || null,
+        outTimeAccuracy: accuracy || null,
+        outTimeSpeed: speed || null,
+        outTimeHeading: heading || null,
+        outTimeAltitude: altitude || null,
+        updatedAt: new Date()
+      })
+      .where(eq(salesmanAttendance.id, existingAttendance.id))
+      .returning();
+
+    res.json({
+      success: true,
+      data: result[0],
+      message: 'Punched out successfully!'
+    });
+
+  } catch (error) {
+    console.error('Error updating punch-out:', error);
+    res.status(500).json({ error: 'Failed to punch out' });
+  }
+});
+
+// Get today's attendance status
+app.get('/api/attendance/today/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    
+    // Get today's date as proper date object
+    const today = new Date();
+    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+    const todayAttendance = await db.query.salesmanAttendance.findFirst({
+      where: and(
+        eq(salesmanAttendance.userId, parseInt(userId)),
+        eq(salesmanAttendance.attendanceDate, todayDateOnly)
+      )
+    });
+
+    res.json({
+      hasAttendance: !!todayAttendance,
+      punchedIn: !!todayAttendance,
+      punchedOut: !!todayAttendance?.outTimeTimestamp,
+      data: todayAttendance || null
+    });
+
+  } catch (error) {
+    console.error('Error fetching today attendance:', error);
+    res.status(500).json({ error: 'Failed to fetch today attendance' });
+  }
+});
+  // ===== LEAVE APPLICATIONS ENDPOINTS =====
+
+// Get recent leave applications
+app.get('/api/leave/recent', async (req: Request, res: Response) => {
+  try {
+    const leaves = await db.query.salesmanLeaveApplications.findMany({
+      orderBy: [desc(salesmanLeaveApplications.createdAt)],
+      limit: 10,
+      with: {
+        user: {
+          columns: { firstName: true, lastName: true, salesmanLoginId: true }
         }
-      });
-      res.json(leaves);
-    } catch (error) {
-      console.error('Error fetching leaves:', error);
-      res.status(500).json({ error: 'Failed to fetch leaves' });
-    }
-  });
-
-  app.post('/api/leave', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertSalesmanLeaveApplicationSchema.parse({
-        userId: req.body.userId,
-        leaveType: req.body.leaveType,
-        startDate: req.body.startDate,
-        endDate: req.body.endDate,
-        reason: req.body.reason,
-        status: 'Pending',
-        adminRemarks: null,
-        createdAt: new Date(), // ✅ Date object
-        updatedAt: new Date()  // ✅ Date object
-      });
-
-      const result = await db.insert(salesmanLeaveApplications).values(validatedData).returning();
-      res.status(201).json({
-        success: true,
-        data: result[0],
-        message: 'Leave application submitted successfully!'
-      });
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ error: 'Validation error', details: error.errors });
       }
-      console.error('Error creating leave application:', error);
-      res.status(500).json({ error: 'Failed to create leave application' });
-    }
-  });
+    });
+    res.json(leaves);
+  } catch (error) {
+    console.error('Error fetching leaves:', error);
+    res.status(500).json({ error: 'Failed to fetch leaves' });
+  }
+});
 
-  // Admin endpoint to approve/reject leave
-  app.patch('/api/leave/:id/status', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { status, adminRemarks } = req.body;
-
-      if (!['Approved', 'Rejected'].includes(status)) {
-        return res.status(400).json({ error: 'Status must be Approved or Rejected' });
+// Get leave applications for specific user
+app.get('/api/leave/user/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    
+    const leaves = await db.query.salesmanLeaveApplications.findMany({
+      where: eq(salesmanLeaveApplications.userId, parseInt(userId)),
+      orderBy: [desc(salesmanLeaveApplications.createdAt)],
+      with: {
+        user: {
+          columns: { firstName: true, lastName: true, salesmanLoginId: true }
+        }
       }
+    });
+    
+    res.json({
+      success: true,
+      data: leaves
+    });
+  } catch (error) {
+    console.error('Error fetching user leaves:', error);
+    res.status(500).json({ error: 'Failed to fetch user leaves' });
+  }
+});
 
-      const result = await db.update(salesmanLeaveApplications)
-        .set({
-          status,
-          adminRemarks: adminRemarks || null,
-          updatedAt: new Date()
-        })
-        .where(eq(salesmanLeaveApplications.id, id))
-        .returning();
+// Submit new leave application
+app.post('/api/leave', async (req: Request, res: Response) => {
+  try {
+    const {
+      userId,
+      leaveType,
+      startDate,
+      endDate,
+      reason
+    } = req.body;
 
-      if (result.length === 0) {
-        return res.status(404).json({ error: 'Leave application not found' });
-      }
-
-      res.json({
-        success: true,
-        data: result[0],
-        message: `Leave application ${status.toLowerCase()}`
+    // Validate required fields
+    if (!userId || !leaveType || !startDate || !endDate || !reason) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: userId, leaveType, startDate, endDate, reason' 
       });
-    } catch (error) {
-      console.error('Error updating leave status:', error);
-      res.status(500).json({ error: 'Failed to update leave status' });
     }
-  });
 
+    // Parse dates properly
+    const parsedStartDate = new Date(startDate);
+    const parsedEndDate = new Date(endDate);
+
+    // Validate dates
+    if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
+      return res.status(400).json({ error: 'Invalid date format' });
+    }
+
+    if (parsedStartDate > parsedEndDate) {
+      return res.status(400).json({ error: 'Start date cannot be after end date' });
+    }
+
+    // Create leave application
+    const newLeaveApplication = {
+      userId: parseInt(userId),
+      leaveType,
+      startDate: parsedStartDate,
+      endDate: parsedEndDate,
+      reason,
+      status: 'Pending',
+      adminRemarks: null
+    };
+
+    const result = await db.insert(salesmanLeaveApplications).values(newLeaveApplication).returning();
+    
+    res.status(201).json({
+      success: true,
+      data: result[0],
+      message: 'Leave application submitted successfully!'
+    });
+  } catch (error) {
+    console.error('Error creating leave application:', error);
+    res.status(500).json({ error: 'Failed to create leave application' });
+  }
+});
+
+// Admin endpoint to approve/reject leave
+app.patch('/api/leave/:id/status', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { status, adminRemarks } = req.body;
+
+    // Validate status
+    if (!['Approved', 'Rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be Approved or Rejected' });
+    }
+
+    // Check if leave application exists
+    const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
+      where: eq(salesmanLeaveApplications.id, id)
+    });
+
+    if (!existingLeave) {
+      return res.status(404).json({ error: 'Leave application not found' });
+    }
+
+    if (existingLeave.status !== 'Pending') {
+      return res.status(400).json({ 
+        error: `Leave application is already ${existingLeave.status.toLowerCase()}` 
+      });
+    }
+
+    // Update leave status
+    const result = await db.update(salesmanLeaveApplications)
+      .set({
+        status,
+        adminRemarks: adminRemarks || null,
+        updatedAt: new Date()
+      })
+      .where(eq(salesmanLeaveApplications.id, id))
+      .returning();
+
+    res.json({
+      success: true,
+      data: result[0],
+      message: `Leave application ${status.toLowerCase()} successfully`
+    });
+  } catch (error) {
+    console.error('Error updating leave status:', error);
+    res.status(500).json({ error: 'Failed to update leave status' });
+  }
+});
+
+// Get leave application by ID
+app.get('/api/leave/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    
+    const leave = await db.query.salesmanLeaveApplications.findFirst({
+      where: eq(salesmanLeaveApplications.id, id),
+      with: {
+        user: {
+          columns: { firstName: true, lastName: true, email: true, salesmanLoginId: true }
+        }
+      }
+    });
+
+    if (!leave) {
+      return res.status(404).json({ error: 'Leave application not found' });
+    }
+
+    res.json({
+      success: true,
+      data: leave
+    });
+  } catch (error) {
+    console.error('Error fetching leave application:', error);
+    res.status(500).json({ error: 'Failed to fetch leave application' });
+  }
+});
+
+// Cancel leave application (only if pending)
+app.delete('/api/leave/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body; // To ensure user can only cancel their own leave
+
+    // Check if leave exists and is pending
+    const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
+      where: eq(salesmanLeaveApplications.id, id)
+    });
+
+    if (!existingLeave) {
+      return res.status(404).json({ error: 'Leave application not found' });
+    }
+
+    if (existingLeave.userId !== userId) {
+      return res.status(403).json({ error: 'You can only cancel your own leave applications' });
+    }
+
+    if (existingLeave.status !== 'Pending') {
+      return res.status(400).json({ 
+        error: `Cannot cancel ${existingLeave.status.toLowerCase()} leave application` 
+      });
+    }
+
+    // Delete the leave application
+    await db.delete(salesmanLeaveApplications)
+      .where(eq(salesmanLeaveApplications.id, id));
+
+    res.json({
+      success: true,
+      message: 'Leave application cancelled successfully'
+    });
+  } catch (error) {
+    console.error('Error cancelling leave application:', error);
+    res.status(500).json({ error: 'Failed to cancel leave application' });
+  }
+});
   // ===== DAILY VISIT REPORTS (Primary DVR) =====
   // ===== UNIFIED DVR ENDPOINT (AI + Manual + Hybrid) =====
   app.post('/api/dvr', async (req: Request, res: Response) => {
