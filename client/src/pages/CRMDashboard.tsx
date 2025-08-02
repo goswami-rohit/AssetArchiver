@@ -961,7 +961,7 @@ export default function CRMDashboard() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <Button
                 onClick={handleAttendancePunch}
-                disabled={isLoading}
+                disabled={isLoading || attendanceStatus === null}
                 className={`h-24 flex flex-col items-center justify-center space-y-2 text-white font-semibold ${attendanceStatus === 'in'
                   ? 'bg-gradient-to-br from-red-500 to-red-700 hover:from-red-600 hover:to-red-800'
                   : 'bg-gradient-to-br from-green-500 to-green-700 hover:from-green-600 hover:to-green-800'
@@ -969,13 +969,15 @@ export default function CRMDashboard() {
               >
                 {isLoading ? (
                   <Loader2 className="w-8 h-8 animate-spin" />
+                ) : attendanceStatus === null ? (
+                  <Loader2 className="w-8 h-8 animate-spin" /> // ✅ Show loading when null
                 ) : attendanceStatus === 'in' ? (
                   <LogOut className="w-8 h-8" />
                 ) : (
                   <LogIn className="w-8 h-8" />
                 )}
                 <span className="text-sm">
-                  {attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                  {attendanceStatus === null ? 'Loading...' : attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
                 </span>
               </Button>
 
