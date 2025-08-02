@@ -122,14 +122,14 @@ export default function CRMDashboard() {
 
   const fetchAttendanceStatus = async () => {
     if (!user) return;
-    
+
     try {
       const response = await fetch(`/api/attendance/today/${user.id}`);
       const data = await response.json();
-      
+
       if (data.success && data.data) {
         setAttendanceData(data.data);
-        // If there's checkInTime but no outTimeTimestamp, user is checked in
+        // If there's inTimeTimestamp but no outTimeTimestamp, user is checked in
         setAttendanceStatus(data.data.outTimeTimestamp ? 'out' : 'in');
       } else {
         setAttendanceStatus('out');
@@ -142,15 +142,15 @@ export default function CRMDashboard() {
 
   const fetchTasks = async () => {
     if (!user) return;
-    
+
     try {
-      // Using TVR with followUp true as tasks
-      const response = await fetch(`/api/tvr/user/${user.id}?limit=10`);
+      // ✅ FIXED: Using correct TVR endpoint with userId filter
+      const response = await fetch(`/api/tvr/recent?userId=${user.id}&limit=10`);
       const data = await response.json();
-      
+
       if (data.success) {
-        // Filter for items that need follow-up
-        const followUpTasks = data.data.filter((tvr: any) => tvr.followUp);
+        // Filter for items that need follow-up (you can adjust this logic)
+        const followUpTasks = data.data.filter((tvr: any) => tvr.visitType && !tvr.checkOutTime);
         setTasks(followUpTasks);
       }
     } catch (error) {
@@ -161,11 +161,12 @@ export default function CRMDashboard() {
 
   const fetchDealers = async () => {
     if (!user) return;
-    
+
     try {
-      const response = await fetch(`/api/dealers?userId=${user.id}&limit=50`);
+      // ✅ FIXED: Using correct dealers endpoint
+      const response = await fetch(`/api/dealers/recent?userId=${user.id}&limit=50`);
       const data = await response.json();
-      
+
       if (data.success) {
         setDealers(data.data || []);
       }
@@ -183,22 +184,19 @@ export default function CRMDashboard() {
 
     try {
       if (attendanceStatus === 'out') {
-        // Punch In
-        const response = await fetch('/api/attendance', {
+        // ✅ FIXED: Correct punch-in endpoint and request body
+        const response = await fetch('/api/attendance/punch-in', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
             userId: user.id,
-            attendanceDate: new Date().toISOString().split('T')[0],
-            checkInTime: new Date().toISOString(),
             locationName: 'Mobile Check-in',
-            latitude: currentLocation.lat.toString(),
-            longitude: currentLocation.lng.toString(),
-            accuracy: '10',
-            imageCaptured: false,
-            status: 'Present'
+            latitude: currentLocation.lat,
+            longitude: currentLocation.lng,
+            accuracy: 10,
+            imageCaptured: false
           })
         });
 
@@ -211,7 +209,7 @@ export default function CRMDashboard() {
           alert('Error punching in: ' + (data.error || 'Unknown error'));
         }
       } else {
-        // Punch Out
+        // ✅ FIXED: Correct punch-out endpoint (already correct)
         const response = await fetch('/api/attendance/punch-out', {
           method: 'PATCH',
           headers: {
@@ -248,7 +246,8 @@ export default function CRMDashboard() {
     }
 
     try {
-      const response = await fetch('/api/journey/start', {
+      // ✅ NEED TO ADD: Journey endpoint - using placeholder for now
+      const response = await fetch('/api/journey', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -257,9 +256,10 @@ export default function CRMDashboard() {
           userId: user.id,
           startLatitude: currentLocation.lat.toString(),
           startLongitude: currentLocation.lng.toString(),
+          journeyDate: new Date().toISOString().split('T')[0],
+          startTime: new Date(),
           journeyType: 'field_visit',
-          plannedRoute: 'Daily field visits',
-          startTime: new Date().toISOString()
+          plannedRoute: 'Daily field visits'
         })
       });
 
@@ -335,6 +335,7 @@ export default function CRMDashboard() {
     if (!user) return;
 
     try {
+      // ✅ NEED TO ADD: Leave endpoint - using placeholder for now
       const response = await fetch('/api/leave', {
         method: 'POST',
         headers: {
@@ -442,11 +443,10 @@ export default function CRMDashboard() {
           <Button
             onClick={handleAttendancePunch}
             variant={attendanceStatus === 'in' ? 'default' : 'outline'}
-            className={`h-20 flex flex-col items-center justify-center space-y-2 ${
-              attendanceStatus === 'in' 
-                ? 'bg-red-600 hover:bg-red-700 text-white' 
+            className={`h-20 flex flex-col items-center justify-center space-y-2 ${attendanceStatus === 'in'
+                ? 'bg-red-600 hover:bg-red-700 text-white'
                 : 'hover:bg-green-50 border-green-600 text-green-600'
-            }`}
+              }`}
           >
             {attendanceStatus === 'in' ? <LogOut className="w-6 h-6" /> : <LogIn className="w-6 h-6" />}
             <span className="text-sm">{attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}</span>
@@ -473,9 +473,9 @@ export default function CRMDashboard() {
                       <CardContent className="p-4">
                         <h4 className="font-medium">{task.visitType}</h4>
                         <p className="text-sm text-gray-600">Site: {task.siteNameConcernedPerson}</p>
-                        <p className="text-sm text-gray-600">Next Action: {task.nextAction}</p>
+                        <p className="text-sm text-gray-600">Date: {new Date(task.reportDate).toLocaleDateString()}</p>
                         <Badge variant="outline" className="mt-2">
-                          Follow-up Required
+                          {task.checkOutTime ? 'Completed' : 'In Progress'}
                         </Badge>
                       </CardContent>
                     </Card>
@@ -533,14 +533,14 @@ export default function CRMDashboard() {
                         <Input
                           id="name"
                           value={dealerForm.name}
-                          onChange={(e) => setDealerForm({...dealerForm, name: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, name: e.target.value })}
                           required
                           maxLength={255}
                         />
                       </div>
                       <div>
                         <Label htmlFor="type">Dealer Type *</Label>
-                        <Select value={dealerForm.type} onValueChange={(value) => setDealerForm({...dealerForm, type: value})}>
+                        <Select value={dealerForm.type} onValueChange={(value) => setDealerForm({ ...dealerForm, type: value })}>
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
@@ -555,7 +555,7 @@ export default function CRMDashboard() {
                         <Input
                           id="region"
                           value={dealerForm.region}
-                          onChange={(e) => setDealerForm({...dealerForm, region: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, region: e.target.value })}
                           required
                           maxLength={100}
                         />
@@ -565,7 +565,7 @@ export default function CRMDashboard() {
                         <Input
                           id="area"
                           value={dealerForm.area}
-                          onChange={(e) => setDealerForm({...dealerForm, area: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, area: e.target.value })}
                           required
                           maxLength={255}
                         />
@@ -575,7 +575,7 @@ export default function CRMDashboard() {
                         <Input
                           id="phoneNo"
                           value={dealerForm.phoneNo}
-                          onChange={(e) => setDealerForm({...dealerForm, phoneNo: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, phoneNo: e.target.value })}
                           required
                           maxLength={20}
                         />
@@ -587,7 +587,7 @@ export default function CRMDashboard() {
                           type="number"
                           step="0.01"
                           value={dealerForm.totalPotential}
-                          onChange={(e) => setDealerForm({...dealerForm, totalPotential: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, totalPotential: e.target.value })}
                           required
                         />
                       </div>
@@ -598,18 +598,18 @@ export default function CRMDashboard() {
                           type="number"
                           step="0.01"
                           value={dealerForm.bestPotential}
-                          onChange={(e) => setDealerForm({...dealerForm, bestPotential: e.target.value})}
+                          onChange={(e) => setDealerForm({ ...dealerForm, bestPotential: e.target.value })}
                           required
                         />
                       </div>
                     </div>
-                    
+
                     <div>
                       <Label htmlFor="address">Address *</Label>
                       <Textarea
                         id="address"
                         value={dealerForm.address}
-                        onChange={(e) => setDealerForm({...dealerForm, address: e.target.value})}
+                        onChange={(e) => setDealerForm({ ...dealerForm, address: e.target.value })}
                         required
                         maxLength={500}
                       />
@@ -641,7 +641,7 @@ export default function CRMDashboard() {
                       <Textarea
                         id="feedbacks"
                         value={dealerForm.feedbacks}
-                        onChange={(e) => setDealerForm({...dealerForm, feedbacks: e.target.value})}
+                        onChange={(e) => setDealerForm({ ...dealerForm, feedbacks: e.target.value })}
                         required
                         maxLength={500}
                       />
@@ -652,7 +652,7 @@ export default function CRMDashboard() {
                       <Textarea
                         id="remarks"
                         value={dealerForm.remarks}
-                        onChange={(e) => setDealerForm({...dealerForm, remarks: e.target.value})}
+                        onChange={(e) => setDealerForm({ ...dealerForm, remarks: e.target.value })}
                         maxLength={500}
                       />
                     </div>
@@ -711,7 +711,7 @@ export default function CRMDashboard() {
               <form onSubmit={handleLeaveApplication} className="space-y-4">
                 <div>
                   <Label htmlFor="leaveType">Leave Type *</Label>
-                  <Select value={leaveForm.leaveType} onValueChange={(value) => setLeaveForm({...leaveForm, leaveType: value})}>
+                  <Select value={leaveForm.leaveType} onValueChange={(value) => setLeaveForm({ ...leaveForm, leaveType: value })}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select leave type" />
                     </SelectTrigger>
@@ -730,7 +730,7 @@ export default function CRMDashboard() {
                       id="startDate"
                       type="date"
                       value={leaveForm.startDate}
-                      onChange={(e) => setLeaveForm({...leaveForm, startDate: e.target.value})}
+                      onChange={(e) => setLeaveForm({ ...leaveForm, startDate: e.target.value })}
                       required
                     />
                   </div>
@@ -740,7 +740,7 @@ export default function CRMDashboard() {
                       id="endDate"
                       type="date"
                       value={leaveForm.endDate}
-                      onChange={(e) => setLeaveForm({...leaveForm, endDate: e.target.value})}
+                      onChange={(e) => setLeaveForm({ ...leaveForm, endDate: e.target.value })}
                       required
                     />
                   </div>
@@ -751,7 +751,7 @@ export default function CRMDashboard() {
                     id="totalDays"
                     type="number"
                     value={leaveForm.totalDays}
-                    onChange={(e) => setLeaveForm({...leaveForm, totalDays: parseInt(e.target.value)})}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, totalDays: parseInt(e.target.value) })}
                     min="1"
                   />
                 </div>
@@ -760,7 +760,7 @@ export default function CRMDashboard() {
                   <Textarea
                     id="reason"
                     value={leaveForm.reason}
-                    onChange={(e) => setLeaveForm({...leaveForm, reason: e.target.value})}
+                    onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
                     placeholder="Please provide reason for leave"
                     required
                   />
@@ -841,8 +841,8 @@ export default function CRMDashboard() {
                   {attendanceStatus === 'in' ? '✓' : '✗'}
                 </span>
                 <span className="text-sm text-gray-600">
-                  {attendanceStatus === 'in' ? 
-                    (attendanceData ? `In: ${new Date(attendanceData.checkInTime).toLocaleTimeString()}` : 'Checked In') : 
+                  {attendanceStatus === 'in' ?
+                    (attendanceData ? `In: ${new Date(attendanceData.inTimeTimestamp).toLocaleTimeString()}` : 'Checked In') :
                     'Not Checked In'}
                 </span>
               </div>
