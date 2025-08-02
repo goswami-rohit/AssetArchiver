@@ -37,8 +37,7 @@ export function setupWebRoutes(app: Express) {
     res.redirect('/login');
   });
 
-  // ===== TECHNICAL VISIT REPORTS WITH AI =====
-  // ===== TECHNICAL VISIT REPORTS WITH AI (FIXED) =====
+  // ===== TECHNICAL VISIT REPORTS WITH AI (FIXED WITH SCHEMA VALIDATION) =====
   app.get('/api/tvr/recent', async (req: Request, res: Response) => {
     try {
       const { limit = 10, userId, visitType } = req.query;
@@ -80,11 +79,6 @@ export function setupWebRoutes(app: Express) {
     try {
       const { useAI, userInput, location, ...manualData } = req.body;
 
-      // ✅ VALIDATE REQUIRED FIELDS FIRST
-      if (!req.body.userId || isNaN(parseInt(req.body.userId))) {
-        return res.status(400).json({ error: 'Valid userId is required' });
-      }
-
       let tvrData;
 
       if (useAI && userInput) {
@@ -101,15 +95,15 @@ export function setupWebRoutes(app: Express) {
 
         // ✅ SCHEMA-COMPLIANT DATA MAPPING
         tvrData = {
-          userId: parseInt(req.body.userId), // ✅ Integer conversion
-          reportDate: new Date(), // ✅ Date object for schema
+          userId: parseInt(req.body.userId),
+          reportDate: new Date().toISOString().split('T')[0], // ✅ Convert to YYYY-MM-DD string for date type
           visitType: aiGeneratedData.visitType || "Maintenance",
           siteNameConcernedPerson: aiGeneratedData.siteNameConcernedPerson || "Customer",
           phoneNo: aiGeneratedData.phoneNo || req.body.phoneNo || "0000000000",
           emailId: aiGeneratedData.emailId || req.body.emailId || null,
           clientsRemarks: aiGeneratedData.clientsRemarks || userInput,
           salespersonRemarks: aiGeneratedData.salespersonRemarks || "Technical support provided",
-          checkInTime: new Date(), // ✅ Date object
+          checkInTime: new Date(), // ✅ timestamp type accepts Date object
           checkOutTime: null,
           inTimeImageUrl: req.body.inTimeImageUrl || null,
           outTimeImageUrl: req.body.outTimeImageUrl || null
@@ -118,7 +112,9 @@ export function setupWebRoutes(app: Express) {
         // ✅ MANUAL TVR CREATION WITH PROPER VALIDATION
         tvrData = {
           userId: parseInt(manualData.userId || req.body.userId),
-          reportDate: manualData.reportDate ? new Date(manualData.reportDate) : new Date(), // ✅ Date object
+          reportDate: manualData.reportDate
+            ? new Date(manualData.reportDate).toISOString().split('T')[0] // ✅ Convert to YYYY-MM-DD string
+            : new Date().toISOString().split('T')[0], // ✅ Convert to YYYY-MM-DD string
           visitType: manualData.visitType || "Maintenance",
           siteNameConcernedPerson: manualData.siteNameConcernedPerson,
           phoneNo: manualData.phoneNo,
@@ -132,55 +128,11 @@ export function setupWebRoutes(app: Express) {
         };
       }
 
-      // ✅ VALIDATE REQUIRED FIELDS PER SCHEMA
-      if (!tvrData.siteNameConcernedPerson) {
-        return res.status(400).json({ error: 'Site name and concerned person is required' });
-      }
-      if (!tvrData.phoneNo) {
-        return res.status(400).json({ error: 'Phone number is required' });
-      }
-      if (!tvrData.clientsRemarks) {
-        return res.status(400).json({ error: 'Client remarks are required' });
-      }
-      if (!tvrData.salespersonRemarks) {
-        return res.status(400).json({ error: 'Salesperson remarks are required' });
-      }
+      // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
+      const validatedData = insertTechnicalVisitReportSchema.parse(tvrData);
 
-      // ✅ VALIDATE FIELD LENGTHS PER SCHEMA
-      if (tvrData.siteNameConcernedPerson.length > 255) {
-        return res.status(400).json({ error: 'Site name and concerned person exceeds 255 characters' });
-      }
-      if (tvrData.phoneNo.length > 20) {
-        return res.status(400).json({ error: 'Phone number exceeds 20 characters' });
-      }
-      if (tvrData.emailId && tvrData.emailId.length > 255) {
-        return res.status(400).json({ error: 'Email ID exceeds 255 characters' });
-      }
-      if (tvrData.clientsRemarks.length > 500) {
-        return res.status(400).json({ error: 'Client remarks exceed 500 characters' });
-      }
-      if (tvrData.salespersonRemarks.length > 500) {
-        return res.status(400).json({ error: 'Salesperson remarks exceed 500 characters' });
-      }
-      if (tvrData.inTimeImageUrl && tvrData.inTimeImageUrl.length > 500) {
-        return res.status(400).json({ error: 'In-time image URL exceeds 500 characters' });
-      }
-      if (tvrData.outTimeImageUrl && tvrData.outTimeImageUrl.length > 500) {
-        return res.status(400).json({ error: 'Out-time image URL exceeds 500 characters' });
-      }
-
-      // ✅ VALIDATE VISIT TYPE ENUM
-      const validVisitTypes = ["Installation", "Repair", "Maintenance"];
-      if (!validVisitTypes.includes(tvrData.visitType)) {
-        return res.status(400).json({
-          error: 'Invalid visit type',
-          validTypes: validVisitTypes,
-          provided: tvrData.visitType
-        });
-      }
-
-      // ✅ INSERT INTO DATABASE
-      const result = await db.insert(technicalVisitReports).values(tvrData).returning();
+      // ✅ INSERT INTO DATABASE WITH VALIDATED DATA
+      const result = await db.insert(technicalVisitReports).values(validatedData).returning();
 
       res.status(201).json({
         success: true,
@@ -192,14 +144,19 @@ export function setupWebRoutes(app: Express) {
     } catch (error: any) {
       console.error('Error creating technical report:', error);
 
-      // ✅ COMPREHENSIVE ERROR HANDLING
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Validation error',
-          details: error.errors
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
         });
       }
 
+      // ✅ DATABASE ERROR HANDLING
       if (error?.code === '23502') { // NOT NULL violation
         return res.status(400).json({
           error: 'Missing required field',
@@ -227,29 +184,32 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ✅ CHECKOUT ENDPOINT (ALREADY CORRECT)
+  // ✅ CHECKOUT ENDPOINT WITH SCHEMA VALIDATION
   app.patch('/api/tvr/:id/checkout', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const { outTimeImageUrl } = req.body;
 
-      // ✅ VALIDATE ID FORMAT
-      if (!id || id.length > 255) {
-        return res.status(400).json({ error: 'Invalid TVR ID format' });
+      // ✅ BASIC VALIDATION
+      if (!id) {
+        return res.status(400).json({ error: 'TVR ID is required' });
       }
 
-      // ✅ VALIDATE IMAGE URL LENGTH IF PROVIDED
+      // ✅ PREPARE UPDATE DATA
+      const updateData = {
+        checkOutTime: new Date(), // ✅ timestamp type accepts Date object
+        outTimeImageUrl: outTimeImageUrl || null,
+        updatedAt: new Date() // ✅ This is handled automatically by schema but explicit is fine
+      };
+
+      // ✅ VALIDATE UPDATE DATA (create a partial schema or validate manually)
       if (outTimeImageUrl && outTimeImageUrl.length > 500) {
         return res.status(400).json({ error: 'Image URL exceeds 500 characters' });
       }
 
       const result = await db
         .update(technicalVisitReports)
-        .set({
-          checkOutTime: new Date(), // ✅ Date object
-          outTimeImageUrl: outTimeImageUrl || null,
-          updatedAt: new Date() // ✅ Date object (though schema handles this automatically)
-        })
+        .set(updateData)
         .where(eq(technicalVisitReports.id, id))
         .returning();
 
@@ -271,414 +231,797 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
- // ===== SALESMAN ATTENDANCE ENDPOINTS =====
+  // ===== SALESMAN ATTENDANCE ENDPOINTS (FIXED WITH SCHEMA VALIDATION) =====
 
-// Get recent attendance records
-app.get('/api/attendance/recent', async (req: Request, res: Response) => {
-  try {
-    const attendance = await db.query.salesmanAttendance.findMany({
-      orderBy: [desc(salesmanAttendance.attendanceDate)],
-      limit: 10,
-      with: {
-        user: {
-          columns: { firstName: true, lastName: true, salesmanLoginId: true }
-        }
+  // Get recent attendance records
+  app.get('/api/attendance/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 10, userId } = req.query;
+
+      let whereClause = undefined;
+      if (userId) {
+        whereClause = eq(salesmanAttendance.userId, parseInt(userId as string));
       }
-    });
-    res.json(attendance);
-  } catch (error) {
-    console.error('Error fetching attendance:', error);
-    res.status(500).json({ error: 'Failed to fetch attendance' });
-  }
-});
 
-// Punch IN endpoint
-app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-  try {
-    const {
-      userId,
-      locationName,
-      latitude,
-      longitude,
-      accuracy,
-      speed,
-      heading,
-      altitude,
-      imageUrl,
-      imageCaptured = false
-    } = req.body;
+      const attendance = await db.query.salesmanAttendance.findMany({
+        where: whereClause,
+        orderBy: [desc(salesmanAttendance.attendanceDate), desc(salesmanAttendance.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
 
-    // Get today's date as proper date object
-    const today = new Date();
-    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      res.json({
+        success: true,
+        data: attendance,
+        total: attendance.length
+      });
+    } catch (error) {
+      console.error('Error fetching attendance:', error);
+      res.status(500).json({ error: 'Failed to fetch attendance' });
+    }
+  });
 
-    // Check if user already punched in today
-    const existingAttendance = await db.query.salesmanAttendance.findFirst({
-      where: and(
-        eq(salesmanAttendance.userId, userId),
-        eq(salesmanAttendance.attendanceDate, todayDateOnly)
-      )
-    });
+  // Punch IN endpoint
+  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        locationName,
+        latitude,
+        longitude,
+        accuracy,
+        speed,
+        heading,
+        altitude,
+        imageUrl,
+        imageCaptured = false
+      } = req.body;
 
-    if (existingAttendance) {
-      return res.status(400).json({
-        error: 'Already punched in today',
-        data: existingAttendance
+      // Get today's date as YYYY-MM-DD string for date type
+      const today = new Date();
+      const todayDateString = today.toISOString().split('T')[0]; // ✅ Convert to YYYY-MM-DD string
+
+      // Check if user already punched in today
+      const existingAttendance = await db.query.salesmanAttendance.findFirst({
+        where: and(
+          eq(salesmanAttendance.userId, parseInt(userId)),
+          eq(salesmanAttendance.attendanceDate, todayDateString)
+        )
+      });
+
+      if (existingAttendance) {
+        return res.status(400).json({
+          error: 'Already punched in today',
+          data: existingAttendance
+        });
+      }
+
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
+      const attendanceData = {
+        userId: parseInt(userId),
+        attendanceDate: todayDateString, // ✅ String for date type
+        locationName: locationName || "Unknown Location",
+        inTimeTimestamp: new Date(), // ✅ Date object for timestamp
+        outTimeTimestamp: null,
+        inTimeImageCaptured: Boolean(imageCaptured), // ✅ Ensure boolean
+        outTimeImageCaptured: false, // ✅ Boolean default
+        inTimeImageUrl: imageUrl || null,
+        outTimeImageUrl: null,
+        inTimeLatitude: latitude ? latitude.toString() : "0", // ✅ Convert to string for decimal
+        inTimeLongitude: longitude ? longitude.toString() : "0", // ✅ Convert to string for decimal
+        inTimeAccuracy: accuracy ? accuracy.toString() : null, // ✅ Convert to string for decimal
+        inTimeSpeed: speed ? speed.toString() : null, // ✅ Convert to string for decimal
+        inTimeHeading: heading ? heading.toString() : null, // ✅ Convert to string for decimal
+        inTimeAltitude: altitude ? altitude.toString() : null, // ✅ Convert to string for decimal
+        outTimeLatitude: null,
+        outTimeLongitude: null,
+        outTimeAccuracy: null,
+        outTimeSpeed: null,
+        outTimeHeading: null,
+        outTimeAltitude: null
+      };
+
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertSalesmanAttendanceSchema.parse(attendanceData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(salesmanAttendance).values(validatedData).returning();
+
+      res.status(201).json({
+        success: true,
+        data: result[0],
+        message: 'Punched in successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error creating punch-in:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Attendance validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') {
+        return res.status(400).json({
+          error: 'Duplicate attendance entry',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') {
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to punch in',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+  });
 
-    // Insert new attendance record
-    const newAttendance = {
-      userId,
-      attendanceDate: todayDateOnly,
-      locationName: locationName || "Unknown Location",
-      inTimeTimestamp: new Date(),
-      outTimeTimestamp: null,
-      inTimeImageCaptured: imageCaptured,
-      outTimeImageCaptured: false,
-      inTimeImageUrl: imageUrl || null,
-      outTimeImageUrl: null,
-      inTimeLatitude: latitude || 0,
-      inTimeLongitude: longitude || 0,
-      inTimeAccuracy: accuracy || null,
-      inTimeSpeed: speed || null,
-      inTimeHeading: heading || null,
-      inTimeAltitude: altitude || null,
-      outTimeLatitude: null,
-      outTimeLongitude: null,
-      outTimeAccuracy: null,
-      outTimeSpeed: null,
-      outTimeHeading: null,
-      outTimeAltitude: null
-    };
+  // Punch OUT endpoint
+  app.patch('/api/attendance/punch-out', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        latitude,
+        longitude,
+        accuracy,
+        speed,
+        heading,
+        altitude,
+        imageUrl,
+        imageCaptured = false
+      } = req.body;
 
-    const result = await db.insert(salesmanAttendance).values(newAttendance).returning();
+      // Get today's date as YYYY-MM-DD string
+      const today = new Date();
+      const todayDateString = today.toISOString().split('T')[0];
 
-    res.status(201).json({
-      success: true,
-      data: result[0],
-      message: 'Punched in successfully!'
-    });
-
-  } catch (error) {
-    console.error('Error creating punch-in:', error);
-    res.status(500).json({ error: 'Failed to punch in' });
-  }
-});
-
-// Punch OUT endpoint
-app.patch('/api/attendance/punch-out', async (req: Request, res: Response) => {
-  try {
-    const {
-      userId,
-      latitude,
-      longitude,
-      accuracy,
-      speed,
-      heading,
-      altitude,
-      imageUrl,
-      imageCaptured = false
-    } = req.body;
-
-    // Get today's date as proper date object
-    const today = new Date();
-    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-    // Find today's attendance record
-    const existingAttendance = await db.query.salesmanAttendance.findFirst({
-      where: and(
-        eq(salesmanAttendance.userId, userId),
-        eq(salesmanAttendance.attendanceDate, todayDateOnly)
-      )
-    });
-
-    if (!existingAttendance) {
-      return res.status(400).json({
-        error: 'No punch-in record found for today. Please punch in first.'
+      // Find today's attendance record
+      const existingAttendance = await db.query.salesmanAttendance.findFirst({
+        where: and(
+          eq(salesmanAttendance.userId, parseInt(userId)),
+          eq(salesmanAttendance.attendanceDate, todayDateString)
+        )
       });
-    }
 
-    if (existingAttendance.outTimeTimestamp) {
-      return res.status(400).json({
-        error: 'Already punched out today',
-        data: existingAttendance
-      });
-    }
+      if (!existingAttendance) {
+        return res.status(400).json({
+          error: 'No punch-in record found for today. Please punch in first.'
+        });
+      }
 
-    // Update with punch-out data
-    const result = await db.update(salesmanAttendance)
-      .set({
-        outTimeTimestamp: new Date(),
-        outTimeImageCaptured: imageCaptured,
+      if (existingAttendance.outTimeTimestamp) {
+        return res.status(400).json({
+          error: 'Already punched out today',
+          data: existingAttendance
+        });
+      }
+
+      // ✅ PREPARE UPDATE DATA WITH PROPER TYPES
+      const updateData = {
+        outTimeTimestamp: new Date(), // ✅ Date object for timestamp
+        outTimeImageCaptured: Boolean(imageCaptured), // ✅ Ensure boolean
         outTimeImageUrl: imageUrl || null,
-        outTimeLatitude: latitude || null,
-        outTimeLongitude: longitude || null,
-        outTimeAccuracy: accuracy || null,
-        outTimeSpeed: speed || null,
-        outTimeHeading: heading || null,
-        outTimeAltitude: altitude || null,
-        updatedAt: new Date()
-      })
-      .where(eq(salesmanAttendance.id, existingAttendance.id))
-      .returning();
+        outTimeLatitude: latitude ? latitude.toString() : null, // ✅ Convert to string for decimal
+        outTimeLongitude: longitude ? longitude.toString() : null, // ✅ Convert to string for decimal
+        outTimeAccuracy: accuracy ? accuracy.toString() : null, // ✅ Convert to string for decimal
+        outTimeSpeed: speed ? speed.toString() : null, // ✅ Convert to string for decimal
+        outTimeHeading: heading ? heading.toString() : null, // ✅ Convert to string for decimal
+        outTimeAltitude: altitude ? altitude.toString() : null, // ✅ Convert to string for decimal
+        updatedAt: new Date() // ✅ Date object
+      };
 
-    res.json({
-      success: true,
-      data: result[0],
-      message: 'Punched out successfully!'
-    });
-
-  } catch (error) {
-    console.error('Error updating punch-out:', error);
-    res.status(500).json({ error: 'Failed to punch out' });
-  }
-});
-
-// Get today's attendance status
-app.get('/api/attendance/today/:userId', async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.params;
-    
-    // Get today's date as proper date object
-    const today = new Date();
-    const todayDateOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-
-    const todayAttendance = await db.query.salesmanAttendance.findFirst({
-      where: and(
-        eq(salesmanAttendance.userId, parseInt(userId)),
-        eq(salesmanAttendance.attendanceDate, todayDateOnly)
-      )
-    });
-
-    res.json({
-      hasAttendance: !!todayAttendance,
-      punchedIn: !!todayAttendance,
-      punchedOut: !!todayAttendance?.outTimeTimestamp,
-      data: todayAttendance || null
-    });
-
-  } catch (error) {
-    console.error('Error fetching today attendance:', error);
-    res.status(500).json({ error: 'Failed to fetch today attendance' });
-  }
-});
-  // ===== LEAVE APPLICATIONS ENDPOINTS =====
-
-// Get recent leave applications
-app.get('/api/leave/recent', async (req: Request, res: Response) => {
-  try {
-    const leaves = await db.query.salesmanLeaveApplications.findMany({
-      orderBy: [desc(salesmanLeaveApplications.createdAt)],
-      limit: 10,
-      with: {
-        user: {
-          columns: { firstName: true, lastName: true, salesmanLoginId: true }
-        }
+      // ✅ VALIDATE IMAGE URL LENGTH
+      if (imageUrl && imageUrl.length > 500) {
+        return res.status(400).json({ error: 'Image URL exceeds 500 characters' });
       }
-    });
-    res.json(leaves);
-  } catch (error) {
-    console.error('Error fetching leaves:', error);
-    res.status(500).json({ error: 'Failed to fetch leaves' });
-  }
-});
 
-// Get leave applications for specific user
-app.get('/api/leave/user/:userId', async (req: Request, res: Response) => {
-  try {
-    const { userId } = req.params;
-    
-    const leaves = await db.query.salesmanLeaveApplications.findMany({
-      where: eq(salesmanLeaveApplications.userId, parseInt(userId)),
-      orderBy: [desc(salesmanLeaveApplications.createdAt)],
-      with: {
-        user: {
-          columns: { firstName: true, lastName: true, salesmanLoginId: true }
-        }
+      // Update attendance record
+      const result = await db.update(salesmanAttendance)
+        .set(updateData)
+        .where(eq(salesmanAttendance.id, existingAttendance.id))
+        .returning();
+
+      res.json({
+        success: true,
+        data: result[0],
+        message: 'Punched out successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error updating punch-out:', error);
+
+      // ✅ ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field for punch-out',
+          details: error.detail || error.message
+        });
       }
-    });
-    
-    res.json({
-      success: true,
-      data: leaves
-    });
-  } catch (error) {
-    console.error('Error fetching user leaves:', error);
-    res.status(500).json({ error: 'Failed to fetch user leaves' });
-  }
-});
 
-// Submit new leave application
-app.post('/api/leave', async (req: Request, res: Response) => {
-  try {
-    const {
-      userId,
-      leaveType,
-      startDate,
-      endDate,
-      reason
-    } = req.body;
-
-    // Validate required fields
-    if (!userId || !leaveType || !startDate || !endDate || !reason) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: userId, leaveType, startDate, endDate, reason' 
+      res.status(500).json({
+        error: 'Failed to punch out',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+  });
 
-    // Parse dates properly
-    const parsedStartDate = new Date(startDate);
-    const parsedEndDate = new Date(endDate);
+  // Get today's attendance status
+  app.get('/api/attendance/today/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
 
-    // Validate dates
-    if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format' });
-    }
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
 
-    if (parsedStartDate > parsedEndDate) {
-      return res.status(400).json({ error: 'Start date cannot be after end date' });
-    }
+      // Get today's date as YYYY-MM-DD string
+      const today = new Date();
+      const todayDateString = today.toISOString().split('T')[0];
 
-    // Create leave application
-    const newLeaveApplication = {
-      userId: parseInt(userId),
-      leaveType,
-      startDate: parsedStartDate,
-      endDate: parsedEndDate,
-      reason,
-      status: 'Pending',
-      adminRemarks: null
-    };
+      const todayAttendance = await db.query.salesmanAttendance.findFirst({
+        where: and(
+          eq(salesmanAttendance.userId, userIdInt),
+          eq(salesmanAttendance.attendanceDate, todayDateString)
+        )
+      });
 
-    const result = await db.insert(salesmanLeaveApplications).values(newLeaveApplication).returning();
-    
-    res.status(201).json({
-      success: true,
-      data: result[0],
-      message: 'Leave application submitted successfully!'
-    });
-  } catch (error) {
-    console.error('Error creating leave application:', error);
-    res.status(500).json({ error: 'Failed to create leave application' });
-  }
-});
+      res.json({
+        success: true,
+        hasAttendance: !!todayAttendance,
+        punchedIn: !!todayAttendance,
+        punchedOut: !!todayAttendance?.outTimeTimestamp,
+        data: todayAttendance || null
+      });
 
-// Admin endpoint to approve/reject leave
-app.patch('/api/leave/:id/status', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { status, adminRemarks } = req.body;
-
-    // Validate status
-    if (!['Approved', 'Rejected'].includes(status)) {
-      return res.status(400).json({ error: 'Status must be Approved or Rejected' });
-    }
-
-    // Check if leave application exists
-    const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
-      where: eq(salesmanLeaveApplications.id, id)
-    });
-
-    if (!existingLeave) {
-      return res.status(404).json({ error: 'Leave application not found' });
-    }
-
-    if (existingLeave.status !== 'Pending') {
-      return res.status(400).json({ 
-        error: `Leave application is already ${existingLeave.status.toLowerCase()}` 
+    } catch (error) {
+      console.error('Error fetching today attendance:', error);
+      res.status(500).json({
+        error: 'Failed to fetch today attendance',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+  });
+  // ===== SALESMAN LEAVE APPLICATIONS ENDPOINTS (COMPLETE SET) =====
 
-    // Update leave status
-    const result = await db.update(salesmanLeaveApplications)
-      .set({
-        status,
+  // Get recent leave applications (Admin view)
+  app.get('/api/leave/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 10, status, userId } = req.query;
+
+      let whereClause = undefined;
+
+      if (status) {
+        whereClause = eq(salesmanLeaveApplications.status, status as string);
+      }
+
+      if (userId) {
+        const userClause = eq(salesmanLeaveApplications.userId, parseInt(userId as string));
+        whereClause = whereClause ? and(whereClause, userClause) : userClause;
+      }
+
+      const leaves = await db.query.salesmanLeaveApplications.findMany({
+        where: whereClause,
+        orderBy: [desc(salesmanLeaveApplications.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true, email: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: leaves,
+        total: leaves.length
+      });
+    } catch (error) {
+      console.error('Error fetching leave applications:', error);
+      res.status(500).json({
+        error: 'Failed to fetch leave applications',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get leave applications for specific user
+  app.get('/api/leave/user/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { status, limit = 20 } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      let whereClause = eq(salesmanLeaveApplications.userId, userIdInt);
+
+      if (status) {
+        whereClause = and(whereClause, eq(salesmanLeaveApplications.status, status as string));
+      }
+
+      const leaves = await db.query.salesmanLeaveApplications.findMany({
+        where: whereClause,
+        orderBy: [desc(salesmanLeaveApplications.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: leaves,
+        total: leaves.length
+      });
+    } catch (error) {
+      console.error('Error fetching user leave applications:', error);
+      res.status(500).json({
+        error: 'Failed to fetch user leave applications',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Submit new leave application
+  app.post('/api/leave', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        leaveType,
+        startDate,
+        endDate,
+        reason
+      } = req.body;
+
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
+      const leaveData = {
+        userId: parseInt(userId),
+        leaveType: leaveType,
+        startDate: new Date(startDate).toISOString().split('T')[0], // ✅ Convert to YYYY-MM-DD string for date type
+        endDate: new Date(endDate).toISOString().split('T')[0], // ✅ Convert to YYYY-MM-DD string for date type
+        reason: reason,
+        status: 'Pending', // ✅ Default status
+        adminRemarks: null
+      };
+
+      // ✅ ADDITIONAL BUSINESS LOGIC VALIDATION
+      const parsedStartDate = new Date(startDate);
+      const parsedEndDate = new Date(endDate);
+
+      if (isNaN(parsedStartDate.getTime()) || isNaN(parsedEndDate.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+      }
+
+      if (parsedStartDate > parsedEndDate) {
+        return res.status(400).json({ error: 'Start date cannot be after end date' });
+      }
+
+      // ✅ Check for overlapping leave applications
+      const overlappingLeaves = await db.query.salesmanLeaveApplications.findMany({
+        where: and(
+          eq(salesmanLeaveApplications.userId, parseInt(userId)),
+          eq(salesmanLeaveApplications.status, 'Approved'),
+          or(
+            and(
+              lte(salesmanLeaveApplications.startDate, leaveData.startDate),
+              gte(salesmanLeaveApplications.endDate, leaveData.startDate)
+            ),
+            and(
+              lte(salesmanLeaveApplications.startDate, leaveData.endDate),
+              gte(salesmanLeaveApplications.endDate, leaveData.endDate)
+            )
+          )
+        )
+      });
+
+      if (overlappingLeaves.length > 0) {
+        return res.status(400).json({
+          error: 'Leave dates overlap with existing approved leave',
+          conflictingLeaves: overlappingLeaves
+        });
+      }
+
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertSalesmanLeaveApplicationSchema.parse(leaveData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(salesmanLeaveApplications).values(validatedData).returning();
+
+      res.status(201).json({
+        success: true,
+        data: result[0],
+        message: 'Leave application submitted successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error creating leave application:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Leave application validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') {
+        return res.status(400).json({
+          error: 'Duplicate leave application',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') {
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to create leave application',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Admin endpoint to approve/reject leave
+  app.patch('/api/leave/:id/status', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { status, adminRemarks } = req.body;
+
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Leave application ID is required' });
+      }
+
+      // ✅ VALIDATE STATUS ENUM
+      const validStatuses = ['Pending', 'Approved', 'Rejected'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({
+          error: 'Invalid status',
+          validStatuses: validStatuses,
+          provided: status
+        });
+      }
+
+      // ✅ VALIDATE ADMIN REMARKS LENGTH
+      if (adminRemarks && adminRemarks.length > 500) {
+        return res.status(400).json({ error: 'Admin remarks exceed 500 characters' });
+      }
+
+      // Check if leave application exists
+      const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
+        where: eq(salesmanLeaveApplications.id, id)
+      });
+
+      if (!existingLeave) {
+        return res.status(404).json({ error: 'Leave application not found' });
+      }
+
+      // ✅ PREPARE UPDATE DATA
+      const updateData = {
+        status: status,
+        adminRemarks: adminRemarks || null,
+        updatedAt: new Date() // ✅ Date object for timestamp
+      };
+
+      // Update leave status
+      const result = await db.update(salesmanLeaveApplications)
+        .set(updateData)
+        .where(eq(salesmanLeaveApplications.id, id))
+        .returning();
+
+      res.json({
+        success: true,
+        data: result[0],
+        message: `Leave application ${status.toLowerCase()} successfully`
+      });
+
+    } catch (error: any) {
+      console.error('Error updating leave status:', error);
+
+      // ✅ ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field for status update',
+          details: error.detail || error.message
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to update leave status',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get leave application by ID
+  app.get('/api/leave/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Leave application ID is required' });
+      }
+
+      const leave = await db.query.salesmanLeaveApplications.findFirst({
+        where: eq(salesmanLeaveApplications.id, id),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, email: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      if (!leave) {
+        return res.status(404).json({ error: 'Leave application not found' });
+      }
+
+      res.json({
+        success: true,
+        data: leave
+      });
+    } catch (error) {
+      console.error('Error fetching leave application:', error);
+      res.status(500).json({
+        error: 'Failed to fetch leave application',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Cancel/Delete leave application (only if pending)
+  app.delete('/api/leave/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { userId } = req.body;
+
+      // ✅ VALIDATE INPUTS
+      if (!id) {
+        return res.status(400).json({ error: 'Leave application ID is required' });
+      }
+
+      if (!userId || isNaN(parseInt(userId))) {
+        return res.status(400).json({ error: 'Valid user ID is required' });
+      }
+
+      // Check if leave exists
+      const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
+        where: eq(salesmanLeaveApplications.id, id)
+      });
+
+      if (!existingLeave) {
+        return res.status(404).json({ error: 'Leave application not found' });
+      }
+
+      // ✅ AUTHORIZATION CHECK
+      if (existingLeave.userId !== parseInt(userId)) {
+        return res.status(403).json({ error: 'You can only cancel your own leave applications' });
+      }
+
+      // ✅ BUSINESS LOGIC CHECK
+      if (existingLeave.status !== 'Pending') {
+        return res.status(400).json({
+          error: `Cannot cancel ${existingLeave.status.toLowerCase()} leave application`
+        });
+      }
+
+      // Delete the leave application
+      await db.delete(salesmanLeaveApplications)
+        .where(eq(salesmanLeaveApplications.id, id));
+
+      res.json({
+        success: true,
+        message: 'Leave application cancelled successfully'
+      });
+
+    } catch (error) {
+      console.error('Error cancelling leave application:', error);
+      res.status(500).json({
+        error: 'Failed to cancel leave application',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Bulk approve/reject multiple leave applications (Admin only)
+  app.patch('/api/leave/bulk/status', async (req: Request, res: Response) => {
+    try {
+      const { leaveIds, status, adminRemarks } = req.body;
+
+      // ✅ VALIDATE INPUTS
+      if (!Array.isArray(leaveIds) || leaveIds.length === 0) {
+        return res.status(400).json({ error: 'Leave IDs array is required' });
+      }
+
+      const validStatuses = ['Approved', 'Rejected'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({
+          error: 'Invalid status for bulk operation',
+          validStatuses: validStatuses
+        });
+      }
+
+      if (adminRemarks && adminRemarks.length > 500) {
+        return res.status(400).json({ error: 'Admin remarks exceed 500 characters' });
+      }
+
+      // ✅ PREPARE UPDATE DATA
+      const updateData = {
+        status: status,
         adminRemarks: adminRemarks || null,
         updatedAt: new Date()
-      })
-      .where(eq(salesmanLeaveApplications.id, id))
-      .returning();
+      };
 
-    res.json({
-      success: true,
-      data: result[0],
-      message: `Leave application ${status.toLowerCase()} successfully`
-    });
-  } catch (error) {
-    console.error('Error updating leave status:', error);
-    res.status(500).json({ error: 'Failed to update leave status' });
-  }
-});
+      // Update multiple leave applications
+      const result = await db.update(salesmanLeaveApplications)
+        .set(updateData)
+        .where(and(
+          inArray(salesmanLeaveApplications.id, leaveIds),
+          eq(salesmanLeaveApplications.status, 'Pending') // Only update pending leaves
+        ))
+        .returning();
 
-// Get leave application by ID
-app.get('/api/leave/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    
-    const leave = await db.query.salesmanLeaveApplications.findFirst({
-      where: eq(salesmanLeaveApplications.id, id),
-      with: {
-        user: {
-          columns: { firstName: true, lastName: true, email: true, salesmanLoginId: true }
-        }
-      }
-    });
+      res.json({
+        success: true,
+        updated: result.length,
+        data: result,
+        message: `${result.length} leave applications ${status.toLowerCase()} successfully`
+      });
 
-    if (!leave) {
-      return res.status(404).json({ error: 'Leave application not found' });
-    }
-
-    res.json({
-      success: true,
-      data: leave
-    });
-  } catch (error) {
-    console.error('Error fetching leave application:', error);
-    res.status(500).json({ error: 'Failed to fetch leave application' });
-  }
-});
-
-// Cancel leave application (only if pending)
-app.delete('/api/leave/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { userId } = req.body; // To ensure user can only cancel their own leave
-
-    // Check if leave exists and is pending
-    const existingLeave = await db.query.salesmanLeaveApplications.findFirst({
-      where: eq(salesmanLeaveApplications.id, id)
-    });
-
-    if (!existingLeave) {
-      return res.status(404).json({ error: 'Leave application not found' });
-    }
-
-    if (existingLeave.userId !== userId) {
-      return res.status(403).json({ error: 'You can only cancel your own leave applications' });
-    }
-
-    if (existingLeave.status !== 'Pending') {
-      return res.status(400).json({ 
-        error: `Cannot cancel ${existingLeave.status.toLowerCase()} leave application` 
+    } catch (error: any) {
+      console.error('Error bulk updating leave status:', error);
+      res.status(500).json({
+        error: 'Failed to bulk update leave status',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
+  });
 
-    // Delete the leave application
-    await db.delete(salesmanLeaveApplications)
-      .where(eq(salesmanLeaveApplications.id, id));
+  // Get leave statistics for user
+  app.get('/api/leave/stats/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { year = new Date().getFullYear() } = req.query;
 
-    res.json({
-      success: true,
-      message: 'Leave application cancelled successfully'
-    });
-  } catch (error) {
-    console.error('Error cancelling leave application:', error);
-    res.status(500).json({ error: 'Failed to cancel leave application' });
-  }
-});
-  // ===== DAILY VISIT REPORTS (Primary DVR) =====
-  // ===== UNIFIED DVR ENDPOINT (AI + Manual + Hybrid) =====
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      // Get leave statistics for the year
+      const startOfYear = `${year}-01-01`;
+      const endOfYear = `${year}-12-31`;
+
+      const leaves = await db.query.salesmanLeaveApplications.findMany({
+        where: and(
+          eq(salesmanLeaveApplications.userId, userIdInt),
+          gte(salesmanLeaveApplications.startDate, startOfYear),
+          lte(salesmanLeaveApplications.endDate, endOfYear)
+        )
+      });
+
+      // Calculate statistics
+      const stats = {
+        total: leaves.length,
+        pending: leaves.filter(l => l.status === 'Pending').length,
+        approved: leaves.filter(l => l.status === 'Approved').length,
+        rejected: leaves.filter(l => l.status === 'Rejected').length,
+        totalDays: 0,
+        approvedDays: 0
+      };
+
+      // Calculate total days
+      leaves.forEach(leave => {
+        const start = new Date(leave.startDate);
+        const end = new Date(leave.endDate);
+        const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+        stats.totalDays += days;
+        if (leave.status === 'Approved') {
+          stats.approvedDays += days;
+        }
+      });
+
+      res.json({
+        success: true,
+        year: parseInt(year as string),
+        userId: userIdInt,
+        stats: stats
+      });
+
+    } catch (error) {
+      console.error('Error fetching leave statistics:', error);
+      res.status(500).json({
+        error: 'Failed to fetch leave statistics',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  // ===== DAILY VISIT REPORTS (FIXED WITH SCHEMA VALIDATION) =====
+
+  // Get recent DVR records
+  app.get('/api/dvr/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 10, userId, dealerType } = req.query;
+
+      let whereClause = undefined;
+      if (userId) {
+        whereClause = eq(dailyVisitReports.userId, parseInt(userId as string));
+      }
+      if (dealerType) {
+        whereClause = whereClause
+          ? and(whereClause, eq(dailyVisitReports.dealerType, dealerType as string))
+          : eq(dailyVisitReports.dealerType, dealerType as string);
+      }
+
+      const reports = await db.query.dailyVisitReports.findMany({
+        where: whereClause,
+        orderBy: [desc(dailyVisitReports.reportDate), desc(dailyVisitReports.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
+    } catch (error) {
+      console.error('Error fetching DVR reports:', error);
+      res.status(500).json({ error: 'Failed to fetch DVR reports' });
+    }
+  });
+
+  // ===== UNIFIED DVR ENDPOINT (AI + Manual + Hybrid) WITH SCHEMA VALIDATION =====
   app.post('/api/dvr', async (req: Request, res: Response) => {
     try {
       const {
@@ -696,7 +1039,6 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         // 🤖 AI MAGIC BUTTON - Generate DVR from chat
         console.log('🎯 Using AI to generate DVR from input:', userInput);
 
-        // Call the correct AI method with proper parameters
         const aiGeneratedData = await aiService.generateDVRFromInput({
           dealerName: dealerName || "Customer",
           visitContext: userInput,
@@ -705,109 +1047,93 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
           dealerType: req.body.dealerType
         });
 
+        // ✅ SCHEMA-COMPLIANT DATA MAPPING
         dvrData = {
-          userId: req.body.userId || 1,
-          reportDate: new Date().toISOString().split('T')[0], // date format for schema
+          userId: parseInt(req.body.userId || 1),
+          reportDate: new Date().toISOString().split('T')[0], // ✅ Date string for schema
           dealerType: aiGeneratedData.dealerType || "Dealer",
-          dealerName: dealerName || aiGeneratedData.dealerName || "",
+          dealerName: dealerName || aiGeneratedData.dealerName || null,
           subDealerName: aiGeneratedData.subDealerName || null,
           location: aiGeneratedData.location || `${location?.lat || 0}, ${location?.lng || 0}`,
-          latitude: (location?.lat || 0).toString(), // decimal as string
-          longitude: (location?.lng || 0).toString(), // decimal as string
-          visitType: aiGeneratedData.visitType || "Best", // "Best" or "Non Best"
-          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential || 0).toString(), // decimal as string
-          dealerBestPotential: (aiGeneratedData.dealerBestPotential || 0).toString(), // decimal as string
-          brandSelling: Array.isArray(aiGeneratedData.brandSelling) ? aiGeneratedData.brandSelling : [],
-          contactPerson: aiGeneratedData.contactPerson || "",
-          contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo || "",
-          todayOrderMt: (aiGeneratedData.todayOrderMt || 0).toString(), // decimal as string
-          todayCollectionRupees: (aiGeneratedData.todayCollectionRupees || 0).toString(), // decimal as string
+          latitude: (location?.lat || 0).toString(), // ✅ Decimal as string
+          longitude: (location?.lng || 0).toString(), // ✅ Decimal as string
+          visitType: aiGeneratedData.visitType || "Best",
+          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+          dealerBestPotential: (aiGeneratedData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+          brandSelling: Array.isArray(aiGeneratedData.brandSelling) ? aiGeneratedData.brandSelling : [], // ✅ Array
+          contactPerson: aiGeneratedData.contactPerson || null,
+          contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo || null,
+          todayOrderMt: (aiGeneratedData.todayOrderMt || 0).toString(), // ✅ Decimal as string
+          todayCollectionRupees: (aiGeneratedData.todayCollectionRupees || 0).toString(), // ✅ Decimal as string
           feedbacks: aiGeneratedData.feedbacks || userInput,
-          solutionBySalesperson: aiGeneratedData.solutionBySalesperson || "",
+          solutionBySalesperson: aiGeneratedData.solutionBySalesperson || null,
           anyRemarks: aiGeneratedData.anyRemarks || "Generated via AI",
-          checkInTime: new Date(), // timestamp with timezone
+          checkInTime: new Date(), // ✅ Timestamp
           checkOutTime: null,
           inTimeImageUrl: req.body.inTimeImageUrl || null,
           outTimeImageUrl: req.body.outTimeImageUrl || null
         };
       } else {
-        // Manual DVR creation
+        // ✅ MANUAL DVR CREATION WITH PROPER TYPES
         dvrData = {
-          userId: manualData.userId || 1,
-          reportDate: manualData.reportDate || new Date().toISOString().split('T')[0],
+          userId: parseInt(manualData.userId || req.body.userId || 1),
+          reportDate: manualData.reportDate
+            ? new Date(manualData.reportDate).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0], // ✅ Date string
           dealerType: manualData.dealerType || "Dealer",
-          dealerName: manualData.dealerName || "",
+          dealerName: manualData.dealerName || null,
           subDealerName: manualData.subDealerName || null,
           location: manualData.location || "",
-          latitude: (manualData.latitude || 0).toString(),
-          longitude: (manualData.longitude || 0).toString(),
+          latitude: (manualData.latitude || 0).toString(), // ✅ Decimal as string
+          longitude: (manualData.longitude || 0).toString(), // ✅ Decimal as string
           visitType: manualData.visitType || "Best",
-          dealerTotalPotential: (manualData.dealerTotalPotential || 0).toString(),
-          dealerBestPotential: (manualData.dealerBestPotential || 0).toString(),
-          brandSelling: Array.isArray(manualData.brandSelling) ? manualData.brandSelling : [],
-          contactPerson: manualData.contactPerson || "",
-          contactPersonPhoneNo: manualData.contactPersonPhoneNo || "",
-          todayOrderMt: (manualData.todayOrderMt || 0).toString(),
-          todayCollectionRupees: (manualData.todayCollectionRupees || 0).toString(),
+          dealerTotalPotential: (manualData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+          dealerBestPotential: (manualData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+          brandSelling: Array.isArray(manualData.brandSelling) ? manualData.brandSelling : [], // ✅ Array
+          contactPerson: manualData.contactPerson || null,
+          contactPersonPhoneNo: manualData.contactPersonPhoneNo || null,
+          todayOrderMt: (manualData.todayOrderMt || 0).toString(), // ✅ Decimal as string
+          todayCollectionRupees: (manualData.todayCollectionRupees || 0).toString(), // ✅ Decimal as string
           feedbacks: manualData.feedbacks || "",
-          solutionBySalesperson: manualData.solutionBySalesperson || "",
-          anyRemarks: manualData.anyRemarks || "",
-          checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(),
-          checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null,
+          solutionBySalesperson: manualData.solutionBySalesperson || null,
+          anyRemarks: manualData.anyRemarks || null,
+          checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(), // ✅ Timestamp
+          checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null, // ✅ Timestamp or null
           inTimeImageUrl: manualData.inTimeImageUrl || null,
           outTimeImageUrl: manualData.outTimeImageUrl || null
         };
       }
 
-      // Validate required fields before database insertion
-      if (!dvrData.dealerType) {
-        return res.status(400).json({ error: 'Dealer type is required' });
-      }
-      if (!dvrData.location) {
-        return res.status(400).json({ error: 'Location is required' });
-      }
-      if (!dvrData.feedbacks) {
-        return res.status(400).json({ error: 'Feedbacks are required' });
-      }
+      // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
+      const validatedData = insertDailyVisitReportSchema.parse(dvrData);
 
-      // Validate dealer type enum
-      const validDealerTypes = ["Dealer", "Sub Dealer"];
-      if (!validDealerTypes.includes(dvrData.dealerType)) {
-        return res.status(400).json({ error: 'Invalid dealer type. Must be Dealer or Sub Dealer' });
-      }
-
-      // Validate visit type enum
-      const validVisitTypes = ["Best", "Non Best"];
-      if (!validVisitTypes.includes(dvrData.visitType)) {
-        return res.status(400).json({ error: 'Invalid visit type. Must be Best or Non Best' });
-      }
-
-      // Create primary DVR
-      const dvrResult = await db.insert(dailyVisitReports).values(dvrData).returning();
+      // ✅ CREATE PRIMARY DVR WITH VALIDATED DATA
+      const dvrResult = await db.insert(dailyVisitReports).values(validatedData).returning();
 
       // 🔄 HYBRID: Auto-create client report if requested
       let clientReportResult = null;
       if (alsoCreateClientReport) {
         try {
           const clientReportData = {
-            dealerType: dvrData.dealerType,
-            dealerSubDealerName: dvrData.dealerName + (dvrData.subDealerName ? ` / ${dvrData.subDealerName}` : ''),
-            location: dvrData.location,
-            typeBestNonBest: dvrData.visitType,
-            dealerTotalPotential: dvrData.dealerTotalPotential,
-            dealerBestPotential: dvrData.dealerBestPotential,
-            brandSelling: dvrData.brandSelling,
-            contactPerson: dvrData.contactPerson,
-            contactPersonPhoneNo: dvrData.contactPersonPhoneNo,
-            todayOrderMT: dvrData.todayOrderMt, // Note: MT vs Mt conversion
-            todayCollection: dvrData.todayCollectionRupees,
-            feedbacks: dvrData.feedbacks,
-            solutionsAsPerSalesperson: dvrData.solutionBySalesperson,
-            anyRemarks: dvrData.anyRemarks,
-            checkOutTime: dvrData.checkOutTime || new Date(),
-            userId: dvrData.userId
+            dealerType: validatedData.dealerType,
+            dealerSubDealerName: validatedData.dealerName + (validatedData.subDealerName ? ` / ${validatedData.subDealerName}` : ''),
+            location: validatedData.location,
+            typeBestNonBest: validatedData.visitType,
+            dealerTotalPotential: validatedData.dealerTotalPotential,
+            dealerBestPotential: validatedData.dealerBestPotential,
+            brandSelling: validatedData.brandSelling,
+            contactPerson: validatedData.contactPerson,
+            contactPersonPhoneNo: validatedData.contactPersonPhoneNo,
+            todayOrderMT: validatedData.todayOrderMt, // Note: MT vs Mt conversion
+            todayCollection: validatedData.todayCollectionRupees,
+            feedbacks: validatedData.feedbacks,
+            solutionsAsPerSalesperson: validatedData.solutionBySalesperson,
+            anyRemarks: validatedData.anyRemarks,
+            checkOutTime: validatedData.checkOutTime || new Date(),
+            userId: validatedData.userId
           };
 
+          // Note: You would need insertClientReportSchema for this too
           clientReportResult = await db.insert(clientReports).values(clientReportData).returning();
         } catch (clientError) {
           console.warn('Failed to create client report:', clientError);
@@ -824,34 +1150,74 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         hybrid: alsoCreateClientReport ? 'Client report also created' : 'DVR only'
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating DVR:', error);
 
-      // Handle specific database errors
-      if (error.code === '23502') { // NOT NULL violation
-        return res.status(400).json({ error: 'Missing required field', details: error.message });
-      }
-      if (error.code === '23505') { // Unique violation
-        return res.status(400).json({ error: 'Duplicate entry', details: error.message });
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'DVR validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
       }
 
-      res.status(500).json({ error: 'Failed to create DVR', details: error.message });
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') { // NOT NULL violation
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') { // Unique violation
+        return res.status(400).json({
+          error: 'Duplicate DVR entry',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') { // Foreign key violation
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to create DVR',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
-  // Additional endpoint for DVR checkout
+  // ✅ CHECKOUT ENDPOINT WITH VALIDATION
   app.patch('/api/dvr/:id/checkout', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
       const { outTimeImageUrl } = req.body;
 
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'DVR ID is required' });
+      }
+
+      // ✅ VALIDATE IMAGE URL LENGTH
+      if (outTimeImageUrl && outTimeImageUrl.length > 500) {
+        return res.status(400).json({ error: 'Image URL exceeds 500 characters' });
+      }
+
+      // ✅ PREPARE UPDATE DATA
+      const updateData = {
+        checkOutTime: new Date(), // ✅ Timestamp
+        outTimeImageUrl: outTimeImageUrl || null,
+        updatedAt: new Date() // ✅ Timestamp
+      };
+
       const result = await db
         .update(dailyVisitReports)
-        .set({
-          checkOutTime: new Date(),
-          outTimeImageUrl: outTimeImageUrl || null,
-          updatedAt: new Date()
-        })
+        .set(updateData)
         .where(eq(dailyVisitReports.id, id))
         .returning();
 
@@ -865,12 +1231,95 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         message: 'Successfully checked out from visit'
       });
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating checkout time:', error);
-      res.status(500).json({ error: 'Failed to update checkout time' });
+      res.status(500).json({
+        error: 'Failed to update checkout time',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
-  // ===== CLIENT REPORTS (Secondary/Simplified DVR) =====
+  // ===== CLIENT REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
+
+  // Get recent client reports
+  app.get('/api/client-reports/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 10, userId, dealerType } = req.query;
+
+      let whereClause = undefined;
+
+      if (userId) {
+        whereClause = eq(clientReports.userId, parseInt(userId as string));
+      }
+
+      if (dealerType) {
+        const dealerClause = eq(clientReports.dealerType, dealerType as string);
+        whereClause = whereClause ? and(whereClause, dealerClause) : dealerClause;
+      }
+
+      const reports = await db.query.clientReports.findMany({
+        where: whereClause,
+        orderBy: [desc(clientReports.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
+    } catch (error) {
+      console.error('Error fetching client reports:', error);
+      res.status(500).json({
+        error: 'Failed to fetch client reports',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get client reports for specific user
+  app.get('/api/client-reports/user/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { limit = 20 } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      const reports = await db.query.clientReports.findMany({
+        where: eq(clientReports.userId, userIdInt),
+        orderBy: [desc(clientReports.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
+    } catch (error) {
+      console.error('Error fetching user client reports:', error);
+      res.status(500).json({
+        error: 'Failed to fetch user client reports',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Create new client report (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/client-reports', async (req: Request, res: Response) => {
     try {
       const { linkToDVR, dvrId, ...clientData } = req.body;
@@ -905,56 +1354,31 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         }
       }
 
-      // Validate required fields
-      if (!finalClientData.dealerType) {
-        return res.status(400).json({ error: 'Dealer type is required' });
-      }
-      if (!finalClientData.dealerSubDealerName) {
-        return res.status(400).json({ error: 'Dealer/Sub dealer name is required' });
-      }
-      if (!finalClientData.location) {
-        return res.status(400).json({ error: 'Location is required' });
-      }
-      if (!finalClientData.typeBestNonBest) {
-        return res.status(400).json({ error: 'Type (Best/Non Best) is required' });
-      }
-      if (!finalClientData.contactPerson) {
-        return res.status(400).json({ error: 'Contact person is required' });
-      }
-      if (!finalClientData.contactPersonPhoneNo) {
-        return res.status(400).json({ error: 'Contact person phone number is required' });
-      }
-      if (!finalClientData.feedbacks) {
-        return res.status(400).json({ error: 'Feedbacks are required' });
-      }
-      if (!finalClientData.solutionsAsPerSalesperson) {
-        return res.status(400).json({ error: 'Solutions as per salesperson is required' });
-      }
-      if (!finalClientData.anyRemarks) {
-        return res.status(400).json({ error: 'Remarks are required' });
-      }
-
-      // Prepare data for insertion
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
       const insertData = {
         dealerType: finalClientData.dealerType,
         dealerSubDealerName: finalClientData.dealerSubDealerName,
         location: finalClientData.location,
         typeBestNonBest: finalClientData.typeBestNonBest,
-        dealerTotalPotential: (finalClientData.dealerTotalPotential || 0).toString(),
-        dealerBestPotential: (finalClientData.dealerBestPotential || 0).toString(),
-        brandSelling: Array.isArray(finalClientData.brandSelling) ? finalClientData.brandSelling : [],
+        dealerTotalPotential: (finalClientData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+        dealerBestPotential: (finalClientData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+        brandSelling: Array.isArray(finalClientData.brandSelling) ? finalClientData.brandSelling : [], // ✅ Array
         contactPerson: finalClientData.contactPerson,
         contactPersonPhoneNo: finalClientData.contactPersonPhoneNo,
-        todayOrderMT: (finalClientData.todayOrderMT || 0).toString(),
-        todayCollection: (finalClientData.todayCollection || 0).toString(),
+        todayOrderMT: (finalClientData.todayOrderMT || 0).toString(), // ✅ Decimal as string
+        todayCollection: (finalClientData.todayCollection || 0).toString(), // ✅ Decimal as string
         feedbacks: finalClientData.feedbacks,
         solutionsAsPerSalesperson: finalClientData.solutionsAsPerSalesperson,
         anyRemarks: finalClientData.anyRemarks,
-        checkOutTime: finalClientData.checkOutTime ? new Date(finalClientData.checkOutTime) : new Date(),
-        userId: finalClientData.userId || 1
+        checkOutTime: finalClientData.checkOutTime ? new Date(finalClientData.checkOutTime) : new Date(), // ✅ Timestamp
+        userId: parseInt(finalClientData.userId || 1)
       };
 
-      const result = await db.insert(clientReports).values(insertData).returning();
+      // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
+      const validatedData = insertClientReportSchema.parse(insertData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(clientReports).values(validatedData).returning();
 
       res.status(201).json({
         success: true,
@@ -963,77 +1387,419 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         message: 'Client report created successfully!'
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error creating client report:', error);
 
-      // Type-safe error handling
-      if (error && typeof error === 'object' && 'code' in error) {
-        const dbError = error as { code: string; message: string };
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Client report validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
 
-        if (dbError.code === '23502') { // NOT NULL violation
-          return res.status(400).json({ error: 'Missing required field', details: dbError.message });
-        }
-        if (dbError.code === '23505') { // Unique violation
-          return res.status(400).json({ error: 'Duplicate entry', details: dbError.message });
-        }
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') { // NOT NULL violation
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') { // Unique violation
+        return res.status(400).json({
+          error: 'Duplicate client report entry',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') { // Foreign key violation
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to create client report', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to create client report',
+        details: errorMessage
+      });
     }
   });
-  // ===== UNIFIED DVR VIEW =====
 
-  app.get('/api/dvr/unified/:userId', async (req: Request, res: Response) => {
+  // Get client report by ID
+  app.get('/api/client-reports/:id', async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const { id } = req.params;
 
-      const [dvrs, clientReportsData] = await Promise.all([
-        db.query.dailyVisitReports.findMany({
-          where: eq(dailyVisitReports.userId, parseInt(userId)),
-          orderBy: [desc(dailyVisitReports.reportDate)],
-          limit: 20
-        }),
-        db.query.clientReports.findMany({
-          where: eq(clientReports.userId, parseInt(userId)),
-          orderBy: [desc(clientReports.createdAt)],
-          limit: 20
-        })
-      ]);
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Client report ID is required' });
+      }
 
-      // Combine and sort by date
-      const unified = [
-        ...dvrs.map(dvr => ({ ...dvr, type: 'DVR', date: dvr.reportDate })),
-        ...clientReportsData.map(cr => ({ ...cr, type: 'CLIENT_REPORT', date: cr.createdAt }))
-      ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      res.json(unified);
-    } catch (error: unknown) {
-      console.error('Error fetching unified DVR:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to fetch unified DVR data', details: errorMessage });
-    }
-  });
-  // ===== COMPETITION REPORTS =====
-  app.get('/api/competition/recent', async (req: Request, res: Response) => {
-    try {
-      const reports = await db.query.competitionReports.findMany({
-        orderBy: [desc(competitionReports.reportDate)],
-        limit: 10,
+      const report = await db.query.clientReports.findFirst({
+        where: eq(clientReports.id, id),
         with: {
           user: {
-            columns: { firstName: true, lastName: true }
+            columns: { firstName: true, lastName: true, email: true, salesmanLoginId: true }
           }
         }
       });
-      res.json(reports);
-    } catch (error: unknown) {
-      console.error('Error fetching competition reports:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to fetch competition reports', details: errorMessage });
+
+      if (!report) {
+        return res.status(404).json({ error: 'Client report not found' });
+      }
+
+      res.json({
+        success: true,
+        data: report
+      });
+    } catch (error) {
+      console.error('Error fetching client report:', error);
+      res.status(500).json({
+        error: 'Failed to fetch client report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
+  // Update client report
+  app.put('/api/client-reports/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
+
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Client report ID is required' });
+      }
+
+      // Check if report exists
+      const existingReport = await db.query.clientReports.findFirst({
+        where: eq(clientReports.id, id)
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({ error: 'Client report not found' });
+      }
+
+      // ✅ PREPARE UPDATE DATA WITH PROPER TYPES
+      const finalUpdateData = {
+        dealerType: updateData.dealerType || existingReport.dealerType,
+        dealerSubDealerName: updateData.dealerSubDealerName || existingReport.dealerSubDealerName,
+        location: updateData.location || existingReport.location,
+        typeBestNonBest: updateData.typeBestNonBest || existingReport.typeBestNonBest,
+        dealerTotalPotential: updateData.dealerTotalPotential ? updateData.dealerTotalPotential.toString() : existingReport.dealerTotalPotential,
+        dealerBestPotential: updateData.dealerBestPotential ? updateData.dealerBestPotential.toString() : existingReport.dealerBestPotential,
+        brandSelling: Array.isArray(updateData.brandSelling) ? updateData.brandSelling : existingReport.brandSelling,
+        contactPerson: updateData.contactPerson || existingReport.contactPerson,
+        contactPersonPhoneNo: updateData.contactPersonPhoneNo || existingReport.contactPersonPhoneNo,
+        todayOrderMT: updateData.todayOrderMT ? updateData.todayOrderMT.toString() : existingReport.todayOrderMT,
+        todayCollection: updateData.todayCollection ? updateData.todayCollection.toString() : existingReport.todayCollection,
+        feedbacks: updateData.feedbacks || existingReport.feedbacks,
+        solutionsAsPerSalesperson: updateData.solutionsAsPerSalesperson || existingReport.solutionsAsPerSalesperson,
+        anyRemarks: updateData.anyRemarks || existingReport.anyRemarks,
+        checkOutTime: updateData.checkOutTime ? new Date(updateData.checkOutTime) : existingReport.checkOutTime,
+        updatedAt: new Date() // ✅ Update timestamp
+      };
+
+      // Update the report
+      const result = await db.update(clientReports)
+        .set(finalUpdateData)
+        .where(eq(clientReports.id, id))
+        .returning();
+
+      res.json({
+        success: true,
+        data: result[0],
+        message: 'Client report updated successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error updating client report:', error);
+
+      // ✅ ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field for update',
+          details: error.detail || error.message
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to update client report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Delete client report
+  app.delete('/api/client-reports/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { userId } = req.body;
+
+      // ✅ VALIDATE INPUTS
+      if (!id) {
+        return res.status(400).json({ error: 'Client report ID is required' });
+      }
+
+      // Check if report exists
+      const existingReport = await db.query.clientReports.findFirst({
+        where: eq(clientReports.id, id)
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({ error: 'Client report not found' });
+      }
+
+      // ✅ AUTHORIZATION CHECK (if userId provided)
+      if (userId && existingReport.userId !== parseInt(userId)) {
+        return res.status(403).json({ error: 'You can only delete your own client reports' });
+      }
+
+      // Delete the report
+      await db.delete(clientReports)
+        .where(eq(clientReports.id, id));
+
+      res.json({
+        success: true,
+        message: 'Client report deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('Error deleting client report:', error);
+      res.status(500).json({
+        error: 'Failed to delete client report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get client report statistics
+  app.get('/api/client-reports/stats/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { startDate, endDate } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      let whereClause = eq(clientReports.userId, userIdInt);
+
+      // Add date range filter if provided
+      if (startDate && endDate) {
+        whereClause = and(
+          whereClause,
+          gte(clientReports.createdAt, new Date(startDate as string)),
+          lte(clientReports.createdAt, new Date(endDate as string))
+        );
+      }
+
+      const reports = await db.query.clientReports.findMany({
+        where: whereClause
+      });
+
+      // Calculate statistics
+      const stats = {
+        totalReports: reports.length,
+        dealerTypes: {
+          dealer: reports.filter(r => r.dealerType === 'Dealer').length,
+          subDealer: reports.filter(r => r.dealerType === 'Sub Dealer').length
+        },
+        visitTypes: {
+          best: reports.filter(r => r.typeBestNonBest === 'Best').length,
+          nonBest: reports.filter(r => r.typeBestNonBest === 'Non Best').length
+        },
+        totalOrderValue: reports.reduce((sum, r) => sum + parseFloat(r.todayOrderMT || '0'), 0),
+        totalCollection: reports.reduce((sum, r) => sum + parseFloat(r.todayCollection || '0'), 0),
+        totalPotential: reports.reduce((sum, r) => sum + parseFloat(r.dealerTotalPotential || '0'), 0)
+      };
+
+      res.json({
+        success: true,
+        userId: userIdInt,
+        dateRange: { startDate, endDate },
+        stats: stats
+      });
+
+    } catch (error) {
+      console.error('Error fetching client report statistics:', error);
+      res.status(500).json({
+        error: 'Failed to fetch client report statistics',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Create client report from DVR (dedicated endpoint)
+  app.post('/api/client-reports/from-dvr/:dvrId', async (req: Request, res: Response) => {
+    try {
+      const { dvrId } = req.params;
+      const overrides = req.body; // Allow field overrides
+
+      // ✅ VALIDATE DVR ID
+      if (!dvrId) {
+        return res.status(400).json({ error: 'DVR ID is required' });
+      }
+
+      // Get DVR data
+      const existingDVR = await db.query.dailyVisitReports.findFirst({
+        where: eq(dailyVisitReports.id, dvrId)
+      });
+
+      if (!existingDVR) {
+        return res.status(404).json({ error: 'DVR not found' });
+      }
+
+      // ✅ MAP DVR DATA TO CLIENT REPORT FORMAT
+      const clientReportData = {
+        dealerType: existingDVR.dealerType,
+        dealerSubDealerName: existingDVR.dealerName + (existingDVR.subDealerName ? ` / ${existingDVR.subDealerName}` : ''),
+        location: existingDVR.location,
+        typeBestNonBest: existingDVR.visitType,
+        dealerTotalPotential: existingDVR.dealerTotalPotential, // Already string
+        dealerBestPotential: existingDVR.dealerBestPotential, // Already string
+        brandSelling: existingDVR.brandSelling,
+        contactPerson: existingDVR.contactPerson || "Not specified",
+        contactPersonPhoneNo: existingDVR.contactPersonPhoneNo || "0000000000",
+        todayOrderMT: existingDVR.todayOrderMt, // Already string
+        todayCollection: existingDVR.todayCollectionRupees, // Already string
+        feedbacks: existingDVR.feedbacks,
+        solutionsAsPerSalesperson: existingDVR.solutionBySalesperson || "No solutions provided",
+        anyRemarks: existingDVR.anyRemarks || "Auto-generated from DVR",
+        checkOutTime: existingDVR.checkOutTime || new Date(),
+        userId: existingDVR.userId,
+        ...overrides // Allow field overrides
+      };
+
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertClientReportSchema.parse(clientReportData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(clientReports).values(validatedData).returning();
+
+      res.status(201).json({
+        success: true,
+        data: result[0],
+        sourceDVR: dvrId,
+        message: 'Client report created from DVR successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error creating client report from DVR:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Client report validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to create client report from DVR',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  // ===== COMPETITION REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
+
+  // Get recent competition reports
+  app.get('/api/competition/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 10, userId, brandName } = req.query;
+
+      let whereClause = undefined;
+
+      if (userId) {
+        whereClause = eq(competitionReports.userId, parseInt(userId as string));
+      }
+
+      if (brandName) {
+        const brandClause = ilike(competitionReports.brandName, `%${brandName}%`);
+        whereClause = whereClause ? and(whereClause, brandClause) : brandClause;
+      }
+
+      const reports = await db.query.competitionReports.findMany({
+        where: whereClause,
+        orderBy: [desc(competitionReports.reportDate), desc(competitionReports.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
+    } catch (error) {
+      console.error('Error fetching competition reports:', error);
+      res.status(500).json({
+        error: 'Failed to fetch competition reports',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get competition reports for specific user
+  app.get('/api/competition/user/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { limit = 20, brandName } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      let whereClause = eq(competitionReports.userId, userIdInt);
+
+      if (brandName) {
+        whereClause = and(whereClause, ilike(competitionReports.brandName, `%${brandName}%`));
+      }
+
+      const reports = await db.query.competitionReports.findMany({
+        where: whereClause,
+        orderBy: [desc(competitionReports.reportDate), desc(competitionReports.createdAt)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        data: reports,
+        total: reports.length
+      });
+    } catch (error) {
+      console.error('Error fetching user competition reports:', error);
+      res.status(500).json({
+        error: 'Failed to fetch user competition reports',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Create new competition report (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/competition', async (req: Request, res: Response) => {
     try {
       const { useAI, userInput, ...manualData } = req.body;
@@ -1051,56 +1817,40 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
           reportDate: new Date().toISOString().split('T')[0]
         });
 
+        // ✅ SCHEMA-COMPLIANT DATA MAPPING
         competitionData = {
-          userId: req.body.userId || 1,
-          reportDate: new Date().toISOString().split('T')[0],
-          brandName: req.body.brandName || "Competitor Brand",
+          userId: parseInt(req.body.userId || 1),
+          reportDate: new Date().toISOString().split('T')[0], // ✅ Date string for schema
+          brandName: req.body.brandName || aiGeneratedData.brandName || "Competitor Brand",
           billing: aiGeneratedData.billing || "Not specified",
           nod: aiGeneratedData.nod || "Not specified",
           retail: aiGeneratedData.retail || "Not specified",
-          schemesYesNo: aiGeneratedData.hasSchemes || "No", // Map hasSchemes to schemesYesNo
-          avgSchemeCost: (aiGeneratedData.avgSchemeCost || 0).toString(),
-          remarks: aiGeneratedData.remarks || userInput
+          schemesYesNo: aiGeneratedData.hasSchemes === true ? "Yes" : "No", // ✅ Map boolean to string
+          avgSchemeCost: (aiGeneratedData.avgSchemeCost || 0).toString(), // ✅ Decimal as string
+          remarks: aiGeneratedData.remarks || userInput || null
         };
       } else {
-        // Manual Competition Report creation
+        // ✅ MANUAL COMPETITION REPORT CREATION WITH PROPER TYPES
         competitionData = {
-          userId: manualData.userId || 1,
-          reportDate: manualData.reportDate || new Date().toISOString().split('T')[0],
+          userId: parseInt(manualData.userId || req.body.userId || 1),
+          reportDate: manualData.reportDate
+            ? new Date(manualData.reportDate).toISOString().split('T')[0]
+            : new Date().toISOString().split('T')[0], // ✅ Date string
           brandName: manualData.brandName,
           billing: manualData.billing,
           nod: manualData.nod,
           retail: manualData.retail,
           schemesYesNo: manualData.schemesYesNo,
-          avgSchemeCost: (manualData.avgSchemeCost || 0).toString(),
+          avgSchemeCost: (manualData.avgSchemeCost || 0).toString(), // ✅ Decimal as string
           remarks: manualData.remarks || null
         };
       }
 
-      // Validate required fields
-      if (!competitionData.brandName) {
-        return res.status(400).json({ error: 'Brand name is required' });
-      }
-      if (!competitionData.billing) {
-        return res.status(400).json({ error: 'Billing information is required' });
-      }
-      if (!competitionData.nod) {
-        return res.status(400).json({ error: 'NOD (Number of Dealers) is required' });
-      }
-      if (!competitionData.retail) {
-        return res.status(400).json({ error: 'Retail information is required' });
-      }
-      if (!competitionData.schemesYesNo) {
-        return res.status(400).json({ error: 'Schemes Yes/No is required' });
-      }
+      // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
+      const validatedData = insertCompetitionReportSchema.parse(competitionData);
 
-      // Validate schemes enum
-      const validSchemes = ["Yes", "No"];
-      if (!validSchemes.includes(competitionData.schemesYesNo)) {
-        return res.status(400).json({ error: 'Invalid schemes value. Must be Yes or No' });
-      }
-
-      const result = await db.insert(competitionReports).values(competitionData).returning();
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(competitionReports).values(validatedData).returning();
 
       res.status(201).json({
         success: true,
@@ -1109,28 +1859,383 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         message: useAI ? '🏢 Competition report created with AI assistance!' : 'Competition report created successfully!'
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error creating competition report:', error);
 
-      // Type-safe error handling
-      if (error && typeof error === 'object' && 'code' in error) {
-        const dbError = error as { code: string; message: string };
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Competition report validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
 
-        if (dbError.code === '23502') { // NOT NULL violation
-          return res.status(400).json({ error: 'Missing required field', details: dbError.message });
-        }
-        if (dbError.code === '23505') { // Unique violation
-          return res.status(400).json({ error: 'Duplicate entry', details: dbError.message });
-        }
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') { // NOT NULL violation
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23505') { // Unique violation
+        return res.status(400).json({
+          error: 'Duplicate competition report entry',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') { // Foreign key violation
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to create competition report', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to create competition report',
+        details: errorMessage
+      });
     }
   });
-  // ===== UNIFIED JOURNEY TRACKING SYSTEM =====
 
-  // 1. Start Journey (Simple or Dealer Visit)
+  // Get competition report by ID
+  app.get('/api/competition/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Competition report ID is required' });
+      }
+
+      const report = await db.query.competitionReports.findFirst({
+        where: eq(competitionReports.id, id),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, email: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      if (!report) {
+        return res.status(404).json({ error: 'Competition report not found' });
+      }
+
+      res.json({
+        success: true,
+        data: report
+      });
+    } catch (error) {
+      console.error('Error fetching competition report:', error);
+      res.status(500).json({
+        error: 'Failed to fetch competition report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Update competition report
+  app.put('/api/competition/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const updateData = req.body;
+
+      // ✅ VALIDATE ID
+      if (!id) {
+        return res.status(400).json({ error: 'Competition report ID is required' });
+      }
+
+      // Check if report exists
+      const existingReport = await db.query.competitionReports.findFirst({
+        where: eq(competitionReports.id, id)
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({ error: 'Competition report not found' });
+      }
+
+      // ✅ PREPARE UPDATE DATA WITH PROPER TYPES
+      const finalUpdateData = {
+        reportDate: updateData.reportDate
+          ? new Date(updateData.reportDate).toISOString().split('T')[0]
+          : existingReport.reportDate,
+        brandName: updateData.brandName || existingReport.brandName,
+        billing: updateData.billing || existingReport.billing,
+        nod: updateData.nod || existingReport.nod,
+        retail: updateData.retail || existingReport.retail,
+        schemesYesNo: updateData.schemesYesNo || existingReport.schemesYesNo,
+        avgSchemeCost: updateData.avgSchemeCost
+          ? updateData.avgSchemeCost.toString()
+          : existingReport.avgSchemeCost,
+        remarks: updateData.remarks !== undefined ? updateData.remarks : existingReport.remarks,
+        updatedAt: new Date() // ✅ Update timestamp
+      };
+
+      // ✅ VALIDATE SCHEMES ENUM IF PROVIDED
+      if (updateData.schemesYesNo) {
+        const validSchemes = ['Yes', 'No'];
+        if (!validSchemes.includes(updateData.schemesYesNo)) {
+          return res.status(400).json({
+            error: 'Invalid schemes value',
+            validValues: validSchemes,
+            provided: updateData.schemesYesNo
+          });
+        }
+      }
+
+      // Update the report
+      const result = await db.update(competitionReports)
+        .set(finalUpdateData)
+        .where(eq(competitionReports.id, id))
+        .returning();
+
+      res.json({
+        success: true,
+        data: result[0],
+        message: 'Competition report updated successfully!'
+      });
+
+    } catch (error: any) {
+      console.error('Error updating competition report:', error);
+
+      // ✅ ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field for update',
+          details: error.detail || error.message
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to update competition report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Delete competition report
+  app.delete('/api/competition/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const { userId } = req.body;
+
+      // ✅ VALIDATE INPUTS
+      if (!id) {
+        return res.status(400).json({ error: 'Competition report ID is required' });
+      }
+
+      // Check if report exists
+      const existingReport = await db.query.competitionReports.findFirst({
+        where: eq(competitionReports.id, id)
+      });
+
+      if (!existingReport) {
+        return res.status(404).json({ error: 'Competition report not found' });
+      }
+
+      // ✅ AUTHORIZATION CHECK (if userId provided)
+      if (userId && existingReport.userId !== parseInt(userId)) {
+        return res.status(403).json({ error: 'You can only delete your own competition reports' });
+      }
+
+      // Delete the report
+      await db.delete(competitionReports)
+        .where(eq(competitionReports.id, id));
+
+      res.json({
+        success: true,
+        message: 'Competition report deleted successfully'
+      });
+
+    } catch (error) {
+      console.error('Error deleting competition report:', error);
+      res.status(500).json({
+        error: 'Failed to delete competition report',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get competition analysis/statistics
+  app.get('/api/competition/analysis/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { startDate, endDate, brandName } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      let whereClause = eq(competitionReports.userId, userIdInt);
+
+      // Add filters
+      if (startDate && endDate) {
+        whereClause = and(
+          whereClause,
+          gte(competitionReports.reportDate, startDate as string),
+          lte(competitionReports.reportDate, endDate as string)
+        );
+      }
+
+      if (brandName) {
+        whereClause = and(whereClause, ilike(competitionReports.brandName, `%${brandName}%`));
+      }
+
+      const reports = await db.query.competitionReports.findMany({
+        where: whereClause,
+        orderBy: [desc(competitionReports.reportDate)]
+      });
+
+      // Calculate analytics
+      const analysis = {
+        totalReports: reports.length,
+        uniqueBrands: [...new Set(reports.map(r => r.brandName))].length,
+        schemesAnalysis: {
+          withSchemes: reports.filter(r => r.schemesYesNo === 'Yes').length,
+          withoutSchemes: reports.filter(r => r.schemesYesNo === 'No').length
+        },
+        avgSchemeCost: {
+          overall: reports.reduce((sum, r) => sum + parseFloat(r.avgSchemeCost || '0'), 0) / reports.length || 0,
+          withSchemes: (() => {
+            const withSchemes = reports.filter(r => r.schemesYesNo === 'Yes');
+            return withSchemes.length > 0
+              ? withSchemes.reduce((sum, r) => sum + parseFloat(r.avgSchemeCost || '0'), 0) / withSchemes.length
+              : 0;
+          })()
+        },
+        brandBreakdown: reports.reduce((acc, report) => {
+          const brand = report.brandName;
+          if (!acc[brand]) {
+            acc[brand] = {
+              count: 0,
+              withSchemes: 0,
+              avgSchemeCost: 0
+            };
+          }
+          acc[brand].count++;
+          if (report.schemesYesNo === 'Yes') {
+            acc[brand].withSchemes++;
+          }
+          acc[brand].avgSchemeCost += parseFloat(report.avgSchemeCost || '0');
+          return acc;
+        }, {} as Record<string, any>),
+        recentTrends: reports.slice(0, 5).map(r => ({
+          date: r.reportDate,
+          brand: r.brandName,
+          hasSchemes: r.schemesYesNo === 'Yes',
+          schemeCost: parseFloat(r.avgSchemeCost || '0')
+        }))
+      };
+
+      // Calculate average scheme cost per brand
+      Object.keys(analysis.brandBreakdown).forEach(brand => {
+        const data = analysis.brandBreakdown[brand];
+        data.avgSchemeCost = data.count > 0 ? data.avgSchemeCost / data.count : 0;
+      });
+
+      res.json({
+        success: true,
+        userId: userIdInt,
+        dateRange: { startDate, endDate },
+        brandFilter: brandName,
+        analysis: analysis
+      });
+
+    } catch (error) {
+      console.error('Error fetching competition analysis:', error);
+      res.status(500).json({
+        error: 'Failed to fetch competition analysis',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Get competition trends (brand performance over time)
+  app.get('/api/competition/trends', async (req: Request, res: Response) => {
+    try {
+      const { userId, days = 30 } = req.query;
+
+      let whereClause = undefined;
+
+      if (userId) {
+        whereClause = eq(competitionReports.userId, parseInt(userId as string));
+      }
+
+      // Get reports from last N days
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - parseInt(days as string));
+      const pastDateString = pastDate.toISOString().split('T')[0];
+
+      const dateClause = gte(competitionReports.reportDate, pastDateString);
+      whereClause = whereClause ? and(whereClause, dateClause) : dateClause;
+
+      const reports = await db.query.competitionReports.findMany({
+        where: whereClause,
+        orderBy: [asc(competitionReports.reportDate)],
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      // Group by date and analyze trends
+      const trendsByDate = reports.reduce((acc, report) => {
+        const date = report.reportDate;
+        if (!acc[date]) {
+          acc[date] = {
+            date,
+            totalReports: 0,
+            brandsTracked: new Set(),
+            schemesCount: 0,
+            totalSchemeCost: 0,
+            reports: []
+          };
+        }
+
+        acc[date].totalReports++;
+        acc[date].brandsTracked.add(report.brandName);
+        if (report.schemesYesNo === 'Yes') {
+          acc[date].schemesCount++;
+          acc[date].totalSchemeCost += parseFloat(report.avgSchemeCost || '0');
+        }
+        acc[date].reports.push(report);
+
+        return acc;
+      }, {} as Record<string, any>);
+
+      // Convert to array and calculate averages
+      const trends = Object.values(trendsByDate).map((dayData: any) => ({
+        date: dayData.date,
+        totalReports: dayData.totalReports,
+        uniqueBrands: dayData.brandsTracked.size,
+        schemesPercentage: dayData.totalReports > 0 ? (dayData.schemesCount / dayData.totalReports) * 100 : 0,
+        avgSchemeCost: dayData.schemesCount > 0 ? dayData.totalSchemeCost / dayData.schemesCount : 0,
+        reports: dayData.reports
+      }));
+
+      res.json({
+        success: true,
+        period: `Last ${days} days`,
+        totalDays: trends.length,
+        trends: trends
+      });
+
+    } catch (error) {
+      console.error('Error fetching competition trends:', error);
+      res.status(500).json({
+        error: 'Failed to fetch competition trends',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  // ===== GEO TRACKING ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
 
   // Helper function for precise distance calculation
   function calculatePreciseDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -1144,7 +2249,7 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
     return R * c; // Distance in meters
   }
 
-  // 1. Start Journey - NO SESSION ID
+  // 1. Start Journey (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/start', async (req: Request, res: Response) => {
     try {
       const {
@@ -1164,11 +2269,6 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         priority = 'medium'
       } = req.body;
 
-      // Validate required fields
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({ error: 'Missing required fields: userId, latitude, longitude' });
-      }
-
       // Check for existing active journey
       const activeJourney = await db.query.geoTracking.findFirst({
         where: and(
@@ -1186,9 +2286,6 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         });
       }
 
-      // Generate unique ID for journey
-      const journeyId = crypto.randomUUID();
-
       // Get dealer info if dealer visit journey
       let dealersToVisit = [];
       if (journeyType === 'dealer_visit' && plannedDealers && plannedDealers.length > 0) {
@@ -1198,46 +2295,75 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         });
       }
 
-      // Create the new journey record
-      const newJourney = await db.insert(geoTracking).values({
-        id: journeyId,
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
+      const journeyData = {
+        id: crypto.randomUUID(),
         userId: parseInt(userId),
-        latitude: latitude.toString(),
-        longitude: longitude.toString(),
-        locationType: 'journey_start',
+        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string with 7 decimal places
+        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string with 7 decimal places
         recordedAt: new Date(),
-        accuracy: accuracy?.toString() || null,
+        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null, // ✅ Decimal as string
         speed: null,
         heading: null,
         altitude: null,
+        locationType: 'journey_start',
+        activityType: journeyType,
         appState: 'foreground',
-        batteryLevel: batteryLevel?.toString() || null,
+        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null, // ✅ Decimal as string
         isCharging: isCharging || false,
         networkStatus: networkStatus || null,
         ipAddress: ipAddress || null,
         siteName: siteName || (dealersToVisit.length > 0 ? `Visiting ${dealersToVisit.map(d => d.name).join(', ')}` : 'Simple Journey'),
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: "0.000",
-        createdAt: new Date(),
-        updatedAt: new Date()
-      }).returning();
+        totalDistanceTravelled: "0.000" // ✅ Decimal as string with 3 decimal places
+      };
+
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertGeoTrackingSchema.parse(journeyData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(geoTracking).values(validatedData).returning();
 
       res.status(201).json({
         success: true,
-        data: newJourney[0],
+        data: result[0],
         message: 'Journey started successfully!',
         plannedDealers: dealersToVisit
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error starting journey:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Journey start validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to start journey', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to start journey',
+        details: errorMessage
+      });
     }
   });
 
-  // 2. Track Location During Journey - NO SESSION ID
+  // 2. Track Location During Journey (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/track', async (req: Request, res: Response) => {
     try {
       const {
@@ -1289,29 +2415,34 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         totalDistance = parseFloat(lastTrackingPoint.totalDistanceTravelled || '0') + (distance / 1000);
       }
 
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
       const trackingData = {
         userId: parseInt(userId),
-        latitude: parseFloat(latitude).toFixed(7),
-        longitude: parseFloat(longitude).toFixed(7),
+        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string
+        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string
         recordedAt: new Date(),
-        accuracy: accuracy?.toString() || null,
-        speed: speed?.toString() || "0.00",
-        heading: heading?.toString() || null,
-        altitude: altitude?.toString() || null,
+        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null, // ✅ Decimal as string
+        speed: speed ? parseFloat(speed).toFixed(2) : "0.00", // ✅ Decimal as string
+        heading: heading ? parseFloat(heading).toFixed(2) : null, // ✅ Decimal as string
+        altitude: altitude ? parseFloat(altitude).toFixed(2) : null, // ✅ Decimal as string
         locationType: 'journey_tracking',
         activityType: 'in_transit',
         appState: appState,
-        batteryLevel: batteryLevel?.toString() || null,
+        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null, // ✅ Decimal as string
         isCharging: null,
         networkStatus: networkStatus || null,
         ipAddress: null,
         siteName: 'Journey in progress',
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: totalDistance.toFixed(3)
+        totalDistanceTravelled: totalDistance.toFixed(3) // ✅ Decimal as string
       };
 
-      const result = await db.insert(geoTracking).values(trackingData).returning();
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertGeoTrackingSchema.parse(trackingData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(geoTracking).values(validatedData).returning();
 
       res.json({
         success: true,
@@ -1323,14 +2454,30 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         }
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error tracking location:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Location tracking validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to track location', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to track location',
+        details: errorMessage
+      });
     }
   });
 
-  // 3. Check-in at Dealer Location - NO SESSION ID
+  // 3. Check-in at Dealer Location (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/dealer-checkin', async (req: Request, res: Response) => {
     try {
       const {
@@ -1383,30 +2530,34 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         parseFloat(longitude)
       );
 
-      // Create dealer check-in record
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
       const dealerCheckinData = {
         userId: parseInt(userId),
-        latitude: parseFloat(latitude).toFixed(7),
-        longitude: parseFloat(longitude).toFixed(7),
+        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string
+        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string
         recordedAt: new Date(),
-        accuracy: accuracy?.toString() || null,
-        speed: "0.00",
+        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null, // ✅ Decimal as string
+        speed: "0.00", // ✅ Decimal as string
         heading: null,
         altitude: null,
         locationType: 'dealer_checkin',
         activityType: visitPurpose,
         appState: 'active',
-        batteryLevel: batteryLevel?.toString() || null,
+        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null, // ✅ Decimal as string
         isCharging: null,
         networkStatus: networkStatus || null,
         ipAddress: null,
         siteName: `${dealer.name} - ${dealer.type} (${dealer.region})`,
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled || '0') + (distanceFromStart / 1000)).toFixed(3)
+        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled || '0') + (distanceFromStart / 1000)).toFixed(3) // ✅ Decimal as string
       };
 
-      const result = await db.insert(geoTracking).values(dealerCheckinData).returning();
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertGeoTrackingSchema.parse(dealerCheckinData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(geoTracking).values(validatedData).returning();
 
       res.status(201).json({
         success: true,
@@ -1442,14 +2593,30 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         }
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error checking in at dealer:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Dealer check-in validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to check in at dealer', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to check in at dealer',
+        details: errorMessage
+      });
     }
   });
 
-  // 4. Check-out from Dealer Location - NO SESSION ID
+  // 4. Check-out from Dealer Location (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/dealer-checkout', async (req: Request, res: Response) => {
     try {
       const {
@@ -1498,14 +2665,14 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         })
         .where(eq(geoTracking.id, activeCheckin.id));
 
-      // Create checkout record with visit summary
+      // ✅ PREPARE CHECKOUT DATA FOR SCHEMA VALIDATION
       const checkoutData = {
         userId: parseInt(userId),
-        latitude: parseFloat(latitude || activeCheckin.latitude).toFixed(7),
-        longitude: parseFloat(longitude || activeCheckin.longitude).toFixed(7),
+        latitude: parseFloat(latitude || activeCheckin.latitude).toFixed(7), // ✅ Decimal as string
+        longitude: parseFloat(longitude || activeCheckin.longitude).toFixed(7), // ✅ Decimal as string
         recordedAt: new Date(),
         accuracy: null,
-        speed: "0.00",
+        speed: "0.00", // ✅ Decimal as string
         heading: null,
         altitude: null,
         locationType: 'dealer_checkout',
@@ -1515,13 +2682,17 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         isCharging: null,
         networkStatus: null,
         ipAddress: null,
-        siteName: `${dealer?.name || 'Dealer'} - Visit completed`,
-        checkInTime: new Date(),
+        siteName: `${dealer?.name || 'Unknown Dealer'} - Visit Complete`,
+        checkInTime: activeCheckin.checkInTime,
         checkOutTime: new Date(),
-        totalDistanceTravelled: activeCheckin.totalDistanceTravelled
+        totalDistanceTravelled: activeCheckin.totalDistanceTravelled || "0.000" // ✅ Keep same distance
       };
 
-      const result = await db.insert(geoTracking).values(checkoutData).returning();
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertGeoTrackingSchema.parse(checkoutData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(geoTracking).values(validatedData).returning();
 
       res.json({
         success: true,
@@ -1529,32 +2700,52 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
         data: result[0],
         visitSummary: {
           dealer: dealer?.name || 'Unknown',
+          checkinTime: activeCheckin.checkInTime,
+          checkoutTime: result[0].checkOutTime,
           visitDuration: `${Math.round(visitDuration / 60000)} minutes`,
           outcome: visitOutcome,
-          orderValue: orderValue || null,
+          orderValue: orderValue || 'Not specified',
+          nextFollowUp: nextFollowUp || 'Not scheduled',
           notes: visitNotes || 'No notes',
-          nextFollowUp: nextFollowUp || null
+          feedback: dealerFeedback || 'No feedback',
+          issues: issuesEncountered || 'None reported'
         }
       });
 
-    } catch (error: unknown) {
+    } catch (error: any) {
       console.error('Error checking out from dealer:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Dealer check-out validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
       const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to check out from dealer', details: errorMessage });
+      res.status(500).json({
+        error: 'Failed to check out from dealer',
+        details: errorMessage
+      });
     }
   });
 
-  // 5. End Journey - NO SESSION ID
+  // 5. End Journey (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/end', async (req: Request, res: Response) => {
     try {
       const {
         userId,
         latitude,
         longitude,
-        accuracy,
-        batteryLevel,
-        networkStatus,
-        journeyNotes
+        journeyNotes,
+        totalStops,
+        fuelUsed,
+        expensesClaimed
       } = req.body;
 
       // Find active journey
@@ -1568,88 +2759,331 @@ app.delete('/api/leave/:id', async (req: Request, res: Response) => {
 
       if (!activeJourney) {
         return res.status(400).json({
-          error: 'No active journey found'
+          error: 'No active journey found to end'
         });
       }
 
-      // Check if checkInTime exists
-      if (!activeJourney.checkInTime) {
-        return res.status(400).json({
-          error: 'Invalid journey data - no check-in time found'
-        });
-      }
+      // Calculate final distance
+      const finalDistance = calculatePreciseDistance(
+        parseFloat(activeJourney.latitude),
+        parseFloat(activeJourney.longitude),
+        parseFloat(latitude),
+        parseFloat(longitude)
+      );
 
-      // Calculate total journey time
-      const journeyDuration = new Date().getTime() - new Date(activeJourney.checkInTime).getTime();
-      const durationMinutes = Math.round(journeyDuration / 60000);
-
-      // Calculate final distance if coordinates provided
-      let finalDistance = parseFloat(activeJourney.totalDistanceTravelled || '0');
-      if (latitude && longitude) {
-        const distanceFromStart = calculatePreciseDistance(
-          parseFloat(activeJourney.latitude),
-          parseFloat(activeJourney.longitude),
-          parseFloat(latitude),
-          parseFloat(longitude)
-        );
-        finalDistance += (distanceFromStart / 1000);
-      }
+      const totalJourneyDistance = parseFloat(activeJourney.totalDistanceTravelled || '0') + (finalDistance / 1000);
 
       // Update the journey start record with end time
-      const updatedJourney = await db.update(geoTracking)
+      await db.update(geoTracking)
         .set({
           checkOutTime: new Date(),
-          totalDistanceTravelled: finalDistance.toFixed(3),
+          totalDistanceTravelled: totalJourneyDistance.toFixed(3),
           updatedAt: new Date()
         })
-        .where(eq(geoTracking.id, activeJourney.id))
-        .returning();
+        .where(eq(geoTracking.id, activeJourney.id));
 
-      // Create journey end record
+      // ✅ PREPARE JOURNEY END DATA FOR SCHEMA VALIDATION
       const journeyEndData = {
         userId: parseInt(userId),
-        latitude: latitude?.toString() || activeJourney.latitude,
-        longitude: longitude?.toString() || activeJourney.longitude,
+        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string
+        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string
         recordedAt: new Date(),
-        accuracy: accuracy?.toString() || null,
-        speed: "0.00",
+        accuracy: null,
+        speed: "0.00", // ✅ Decimal as string
         heading: null,
         altitude: null,
         locationType: 'journey_end',
         activityType: 'completed',
         appState: 'active',
-        batteryLevel: batteryLevel?.toString() || null,
+        batteryLevel: null,
         isCharging: null,
-        networkStatus: networkStatus || null,
+        networkStatus: null,
         ipAddress: null,
-        siteName: journeyNotes || 'Journey completed',
-        checkInTime: new Date(),
+        siteName: 'Journey Completed',
+        checkInTime: activeJourney.checkInTime,
         checkOutTime: new Date(),
-        totalDistanceTravelled: finalDistance.toFixed(3)
+        totalDistanceTravelled: totalJourneyDistance.toFixed(3) // ✅ Decimal as string
       };
 
-      const endRecord = await db.insert(geoTracking).values(journeyEndData).returning();
+      // ✅ USE SCHEMA VALIDATION
+      const validatedData = insertGeoTrackingSchema.parse(journeyEndData);
+
+      // ✅ INSERT WITH VALIDATED DATA
+      const result = await db.insert(geoTracking).values(validatedData).returning();
+
+      // Calculate journey statistics
+      const journeyDuration = activeJourney.checkInTime ?
+        new Date().getTime() - new Date(activeJourney.checkInTime).getTime() : 0;
 
       res.json({
         success: true,
-        message: 'Journey ended successfully!',
-        data: {
-          journeyStart: updatedJourney[0],
-          journeyEnd: endRecord[0],
-          summary: {
-            duration: `${durationMinutes} minutes`,
-            totalDistance: `${finalDistance.toFixed(3)} km`,
-            startTime: activeJourney.checkInTime,
-            endTime: new Date(),
-            journeyId: activeJourney.id
+        message: 'Journey ended successfully',
+        data: result[0],
+        journeyStats: {
+          journeyId: activeJourney.id,
+          startTime: activeJourney.checkInTime,
+          endTime: result[0].checkOutTime,
+          duration: `${Math.round(journeyDuration / 60000)} minutes`,
+          totalDistance: `${totalJourneyDistance.toFixed(3)} km`,
+          averageSpeed: journeyDuration > 0 ?
+            `${((totalJourneyDistance / (journeyDuration / 3600000)).toFixed(2))} km/h` : '0 km/h',
+          notes: journeyNotes || 'No notes',
+          stops: totalStops || 'Not specified',
+          fuelUsed: fuelUsed || 'Not specified',
+          expenses: expensesClaimed || 'Not specified'
+        }
+      });
+
+    } catch (error: any) {
+      console.error('Error ending journey:', error);
+
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Journey end validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      res.status(500).json({
+        error: 'Failed to end journey',
+        details: errorMessage
+      });
+    }
+  });
+
+  // 6. Get Active Journey Status
+  app.get('/api/journey/active/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      const activeJourney = await db.query.geoTracking.findFirst({
+        where: and(
+          eq(geoTracking.userId, userIdInt),
+          eq(geoTracking.locationType, 'journey_start'),
+          isNull(geoTracking.checkOutTime)
+        ),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
           }
         }
       });
 
-    } catch (error: unknown) {
-      console.error('Error ending journey:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
-      res.status(500).json({ error: 'Failed to end journey', details: errorMessage });
+      if (!activeJourney) {
+        return res.json({
+          success: true,
+          hasActiveJourney: false,
+          data: null
+        });
+      }
+
+      // Get all tracking points for this journey
+      const trackingPoints = await db.query.geoTracking.findMany({
+        where: and(
+          eq(geoTracking.userId, userIdInt),
+          gte(geoTracking.recordedAt, activeJourney.checkInTime || new Date())
+        ),
+        orderBy: [asc(geoTracking.recordedAt)]
+      });
+
+      // Get active dealer check-ins
+      const activeCheckins = await db.query.geoTracking.findMany({
+        where: and(
+          eq(geoTracking.userId, userIdInt),
+          eq(geoTracking.locationType, 'dealer_checkin'),
+          isNull(geoTracking.checkOutTime)
+        )
+      });
+
+      const journeyDuration = activeJourney.checkInTime ?
+        new Date().getTime() - new Date(activeJourney.checkInTime).getTime() : 0;
+
+      res.json({
+        success: true,
+        hasActiveJourney: true,
+        data: {
+          journey: activeJourney,
+          status: {
+            startTime: activeJourney.checkInTime,
+            duration: `${Math.round(journeyDuration / 60000)} minutes`,
+            totalDistance: activeJourney.totalDistanceTravelled,
+            trackingPoints: trackingPoints.length,
+            activeCheckins: activeCheckins.length
+          },
+          trackingHistory: trackingPoints,
+          activeCheckins: activeCheckins
+        }
+      });
+
+    } catch (error) {
+      console.error('Error fetching active journey:', error);
+      res.status(500).json({
+        error: 'Failed to fetch active journey',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // 7. Get Journey History
+  app.get('/api/journey/history/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { limit = 20, startDate, endDate } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      let whereClause = and(
+        eq(geoTracking.userId, userIdInt),
+        eq(geoTracking.locationType, 'journey_start')
+      );
+
+      // Add date filters
+      if (startDate && endDate) {
+        whereClause = and(
+          whereClause,
+          gte(geoTracking.checkInTime, new Date(startDate as string)),
+          lte(geoTracking.checkInTime, new Date(endDate as string))
+        );
+      }
+
+      const journeys = await db.query.geoTracking.findMany({
+        where: whereClause,
+        orderBy: [desc(geoTracking.checkInTime)],
+        limit: parseInt(limit as string),
+        with: {
+          user: {
+            columns: { firstName: true, lastName: true, salesmanLoginId: true }
+          }
+        }
+      });
+
+      // Get statistics for each journey
+      const journeysWithStats = await Promise.all(journeys.map(async (journey) => {
+        const trackingPoints = await db.query.geoTracking.findMany({
+          where: and(
+            eq(geoTracking.userId, userIdInt),
+            gte(geoTracking.recordedAt, journey.checkInTime || new Date()),
+            journey.checkOutTime ? lte(geoTracking.recordedAt, journey.checkOutTime) : undefined
+          )
+        });
+
+        const dealerVisits = trackingPoints.filter(p => p.locationType === 'dealer_checkin').length;
+        const duration = journey.checkInTime && journey.checkOutTime ?
+          new Date(journey.checkOutTime).getTime() - new Date(journey.checkInTime).getTime() : 0;
+
+        return {
+          ...journey,
+          stats: {
+            duration: `${Math.round(duration / 60000)} minutes`,
+            trackingPoints: trackingPoints.length,
+            dealerVisits: dealerVisits,
+            isCompleted: !!journey.checkOutTime
+          }
+        };
+      }));
+
+      res.json({
+        success: true,
+        data: journeysWithStats,
+        total: journeysWithStats.length
+      });
+
+    } catch (error) {
+      console.error('Error fetching journey history:', error);
+      res.status(500).json({
+        error: 'Failed to fetch journey history',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // 8. Get Journey Analytics
+  app.get('/api/journey/analytics/:userId', async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { days = 30 } = req.query;
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      // Get journeys from last N days
+      const pastDate = new Date();
+      pastDate.setDate(pastDate.getDate() - parseInt(days as string));
+
+      const journeys = await db.query.geoTracking.findMany({
+        where: and(
+          eq(geoTracking.userId, userIdInt),
+          eq(geoTracking.locationType, 'journey_start'),
+          gte(geoTracking.checkInTime, pastDate)
+        )
+      });
+
+      const dealerVisits = await db.query.geoTracking.findMany({
+        where: and(
+          eq(geoTracking.userId, userIdInt),
+          eq(geoTracking.locationType, 'dealer_checkin'),
+          gte(geoTracking.checkInTime, pastDate)
+        )
+      });
+
+      // Calculate analytics
+      const totalDistance = journeys.reduce((sum, j) => sum + parseFloat(j.totalDistanceTravelled || '0'), 0);
+      const completedJourneys = journeys.filter(j => j.checkOutTime).length;
+      const totalDuration = journeys.reduce((sum, j) => {
+        if (j.checkInTime && j.checkOutTime) {
+          return sum + (new Date(j.checkOutTime).getTime() - new Date(j.checkInTime).getTime());
+        }
+        return sum;
+      }, 0);
+
+      const analytics = {
+        period: `Last ${days} days`,
+        totalJourneys: journeys.length,
+        completedJourneys: completedJourneys,
+        activeJourneys: journeys.length - completedJourneys,
+        totalDistance: `${totalDistance.toFixed(3)} km`,
+        averageDistance: journeys.length > 0 ? `${(totalDistance / journeys.length).toFixed(3)} km` : '0 km',
+        totalDuration: `${Math.round(totalDuration / 60000)} minutes`,
+        averageDuration: completedJourneys > 0 ? `${Math.round(totalDuration / completedJourneys / 60000)} minutes` : '0 minutes',
+        dealerVisits: {
+          total: dealerVisits.length,
+          completed: dealerVisits.filter(v => v.checkOutTime).length,
+          ongoing: dealerVisits.filter(v => !v.checkOutTime).length
+        },
+        dailyBreakdown: {} // Could add daily breakdown here
+      };
+
+      res.json({
+        success: true,
+        userId: userIdInt,
+        analytics: analytics
+      });
+
+    } catch (error) {
+      console.error('Error fetching journey analytics:', error);
+      res.status(500).json({
+        error: 'Failed to fetch journey analytics',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
   // ===== DAILY TASKS ENDPOINTS =====

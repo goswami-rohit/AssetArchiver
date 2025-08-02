@@ -1,0 +1,336 @@
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_DATABASE_URL")
+}
+
+model Company {
+  id                   Int       @id @default(autoincrement())
+  companyName          String    @map("company_name") @db.VarChar(255)
+  officeAddress        String    @map("office_address")
+  isHeadOffice         Boolean   @default(true) @map("is_head_office")
+  phoneNumber          String    @map("phone_number") @db.VarChar(50)
+  adminUserId          String    @unique @map("admin_user_id")
+  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workosOrganizationId String?   @unique @map("workos_organization_id")
+  users                User[]
+
+  @@index([adminUserId], map: "idx_admin_user_id")
+  @@map("companies")
+}
+
+model User {
+  id                        Int       @id @default(autoincrement())
+  workosUserId              String?    @unique @map("workos_user_id")
+  companyId                 Int       @map("company_id")
+  email                     String    @map("email")
+  firstName                 String?   @map("first_name")
+  lastName                  String?   @map("last_name")
+  role                      String    @map("role") // "admin", "manager", "staff" (for salesmen)
+  createdAt                 DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  phoneNumber               String?   @map("phone_number") @db.VarChar(50)
+  company                   Company   @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  inviteToken               String?   @unique
+  status                    String    @default("active") // "pending", "active", "inactive"
+
+  // Fields for salesman app specific login (empID and emp_password)
+  salesmanLoginId           String?   @unique @map("salesman_login_id")
+  hashedPassword            String?   @map("hashed_password") // Stores securely hashed passwords
+
+  // Relationships to new tables
+  dailyVisitReports         DailyVisitReport[]
+  technicalVisitReports     TechnicalVisitReport[]
+  permanentJourneyPlans     PermanentJourneyPlan[]
+  dealers                   Dealer[] // A user can be associated with multiple dealers/sub-dealers
+  salesmanAttendance        SalesmanAttendance[]
+  salesmanLeaveApplications SalesmanLeaveApplication[]
+  clientReports             ClientReport[]
+  competitionReports        CompetitionReport[]
+  geoTrackingRecords        GeoTracking[] @relation("UserGeoTracking") // Relationship for GeoTracking records
+  assignedTasks             DailyTask[]  @relation("AssignedTasks") // Tasks assigned to this user (salesman)
+  createdTasks              DailyTask[]  @relation("CreatedTasks") // Tasks created by this user (admin)
+
+
+  @@unique([companyId, email])
+  @@index([companyId], map: "idx_user_company_id")
+  @@index([workosUserId], map: "idx_workos_user_id")
+  @@map("users")
+}
+
+// 1. Daily Visit Reports
+model DailyVisitReport {
+  id                    String    @id @default(uuid()) @db.VarChar(255)
+  userId                Int       @map("user_id") // Foreign Key to User.id
+  reportDate            DateTime  @map("report_date") @db.Date
+  dealerType            String    @map("dealer_type") @db.VarChar(50) // "Dealer", "Sub Dealer"
+  dealerName            String?   @map("dealer_name") @db.VarChar(255)
+  subDealerName         String?   @map("sub_dealer_name") @db.VarChar(255)
+  location              String    @db.VarChar(500)
+  latitude              Decimal   @db.Decimal(10, 7)
+  longitude             Decimal   @db.Decimal(10, 7)
+  visitType             String    @map("visit_type") @db.VarChar(50) // "Best", "Non Best"
+  dealerTotalPotential  Decimal   @map("dealer_total_potential") @db.Decimal(10, 2)
+  dealerBestPotential   Decimal   @map("dealer_best_potential") @db.Decimal(10, 2)
+  brandSelling          String[]  @map("brand_selling") // Array of strings
+  contactPerson         String?   @map("contact_person") @db.VarChar(255)
+  contactPersonPhoneNo  String?   @map("contact_person_phone_no") @db.VarChar(20)
+  todayOrderMt          Decimal   @map("today_order_mt") @db.Decimal(10, 2)
+  todayCollectionRupees Decimal   @map("today_collection_rupees") @db.Decimal(10, 2)
+  feedbacks             String    @db.VarChar(500)
+  solutionBySalesperson String?   @map("solution_by_salesperson") @db.VarChar(500)
+  anyRemarks            String?   @map("any_remarks") @db.VarChar(500)
+  checkInTime           DateTime  @map("check_in_time") @db.Timestamptz(6)
+  checkOutTime          DateTime? @map("check_out_time") @db.Timestamptz(6)
+  inTimeImageUrl        String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl       String?   @map("out_time_image_url") @db.VarChar(500)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_daily_visit_reports_user_id")
+  @@map("daily_visit_reports")
+}
+
+// 2. Technical Visit Reports
+model TechnicalVisitReport {
+  id                      String    @id @default(uuid()) @db.VarChar(255)
+  userId                  Int       @map("user_id") // Foreign Key to User.id
+  reportDate              DateTime  @map("report_date") @db.Date
+  visitType               String    @map("visit_type") @db.VarChar(50) // "Installation", "Repair", "Maintenance"
+  siteNameConcernedPerson String    @map("site_name_concerned_person") @db.VarChar(255)
+  phoneNo                 String    @map("phone_no") @db.VarChar(20)
+  emailId                 String?   @map("email_id") @db.VarChar(255)
+  clientsRemarks          String    @map("clients_remarks") @db.VarChar(500)
+  salespersonRemarks      String    @map("salesperson_remarks") @db.VarChar(500)
+  checkInTime             DateTime  @map("check_in_time") @db.Timestamptz(6)
+  checkOutTime            DateTime? @map("check_out_time") @db.Timestamptz(6)
+  inTimeImageUrl          String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl         String?   @map("out_time_image_url") @db.VarChar(500)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_technical_visit_reports_user_id")
+  @@map("technical_visit_reports")
+}
+
+// 3. Permanent Journey Plans
+model PermanentJourneyPlan {
+  id              String   @id @default(uuid()) @db.VarChar(255)
+  userId          Int      @map("user_id") // Foreign Key to User.id
+  planDate        DateTime @map("plan_date") @db.Date
+  areaToBeVisited String   @map("area_to_be_visited") @db.VarChar(500)
+  description     String?  @db.VarChar(500)
+  status          String   @db.VarChar(50) // "Planned", "Visited", "Not Visited", etc.
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dailyTasks DailyTask[] @relation("PJPTasks") // NEW: A Permanent Journey Plan can have multiple daily tasks
+
+  @@index([userId], map: "idx_permanent_journey_plans_user_id") // Unique index name
+  @@map("permanent_journey_plans")
+}
+
+// 4. Dealers (Consolidated for Dealers and Sub-Dealers)
+model Dealer {
+  id             String   @id @default(uuid()) @db.VarChar(255)
+  userId         Int      @map("user_id") // Primary user (salesman) associated
+  type           String   @db.VarChar(50) // "Dealer", "Sub Dealer"
+  parentDealerId String?  @map("parent_dealer_id") @db.VarChar(255) // Self-referencing FK for sub-dealers
+  name           String   @db.VarChar(255) // Stores dealerName or subDealerName
+  region         String   @db.VarChar(100)
+  area           String   @db.VarChar(255)
+  phoneNo        String   @map("phone_no") @db.VarChar(20)
+  address        String   @db.VarChar(500)
+  totalPotential Decimal  @map("total_potential") @db.Decimal(10, 2)
+  bestPotential  Decimal  @map("best_potential") @db.Decimal(10, 2)
+  brandSelling   String[] @map("brand_selling") // Array of strings
+  feedbacks      String   @db.VarChar(500)
+  remarks        String?  @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentDealer Dealer?  @relation("SubDealers", fields: [parentDealerId], references: [id], onDelete: SetNull)
+  subDealers   Dealer[] @relation("SubDealers")
+  dailyTasks   DailyTask[] @relation("DealerDailyTasks") // NEW: Tasks related to this dealer (Named relation)
+
+  @@index([userId], map: "idx_dealers_user_id") // Corrected duplicate index name
+  @@index([parentDealerId], map: "idx_dealers_parent_dealer_id")
+  @@map("dealers")
+}
+
+// 5. Salesman Attendance
+model SalesmanAttendance {
+  id                   String    @id @default(uuid()) @db.VarChar(255)
+  userId               Int       @map("user_id") // Foreign Key to User.id
+  attendanceDate       DateTime  @map("attendance_date") @db.Date
+  locationName         String    @map("location_name") @db.VarChar(500)
+  inTimeTimestamp      DateTime  @map("in_time_timestamp") @db.Timestamptz(6)
+  outTimeTimestamp     DateTime? @map("out_time_timestamp") @db.Timestamptz(6)
+  inTimeImageCaptured  Boolean   @map("in_time_image_captured")
+  outTimeImageCaptured Boolean   @map("out_time_image_captured")
+  inTimeImageUrl       String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl      String?   @map("out_time_image_url") @db.VarChar(500)
+  inTimeLatitude       Decimal   @map("in_time_latitude") @db.Decimal(10, 7)
+  inTimeLongitude      Decimal   @map("in_time_longitude") @db.Decimal(10, 7)
+  inTimeAccuracy       Decimal?  @map("in_time_accuracy") @db.Decimal(10, 2)
+  inTimeSpeed          Decimal?  @map("in_time_speed") @db.Decimal(10, 2)
+  inTimeHeading        Decimal?  @map("in_time_heading") @db.Decimal(10, 2)
+  inTimeAltitude       Decimal?  @map("in_time_altitude") @db.Decimal(10, 2)
+  outTimeLatitude      Decimal?  @map("out_time_latitude") @db.Decimal(10, 7)
+  outTimeLongitude     Decimal?  @map("out_time_longitude") @db.Decimal(10, 7)
+  outTimeAccuracy      Decimal?  @map("out_time_accuracy") @db.Decimal(10, 2)
+  outTimeSpeed         Decimal?  @map("out_time_speed") @db.Decimal(10, 2)
+  outTimeHeading       Decimal?  @map("out_time_heading") @db.Decimal(10, 2)
+  outTimeAltitude      Decimal?  @map("out_time_altitude") @db.Decimal(10, 2)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_salesman_attendance_user_id")
+  @@map("salesman_attendance")
+}
+
+// 6. Salesman Leave Applications
+model SalesmanLeaveApplication {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  userId       Int      @map("user_id") // Foreign Key to User.id
+  leaveType    String   @map("leave_type") @db.VarChar(100)
+  startDate    DateTime @map("start_date") @db.Date
+  endDate      DateTime @map("end_date") @db.Date
+  reason       String   @db.VarChar(500)
+  status       String   @db.VarChar(50) // "Pending", "Approved", "Rejected"
+  adminRemarks String?  @map("admin_remarks") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_salesman_leave_applications_user_id")
+  @@map("salesman_leave_applications")
+}
+
+// 7. Client Report
+model ClientReport {
+  id                        String   @id @default(cuid()) // Unique ID for each report
+  dealerType                String
+  dealerSubDealerName       String   @map("dealer_sub_dealer_name")
+  location                  String
+  typeBestNonBest           String   @map("type_best_non_best")
+  dealerTotalPotential      Decimal  @db.Decimal(10, 2)
+  dealerBestPotential       Decimal  @db.Decimal(10, 2)
+  brandSelling              String[]
+  contactPerson             String
+  contactPersonPhoneNo      String   @map("contact_person_phone_no")
+  todayOrderMT              Decimal  @map("today_order_mt") @db.Decimal(10, 2)
+  todayCollection           Decimal  @map("today_collection_rupees") @db.Decimal(10, 2)
+  feedbacks                 String
+  solutionsAsPerSalesperson String   @map("solutions_as_per_salesperson")
+  anyRemarks                String
+  checkOutTime              DateTime @map("check_out_time")
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("client_reports")
+}
+
+// 8. Competition Report
+model CompetitionReport {
+  id                    String    @id @default(cuid()) // Unique ID for each report
+  userId                Int       @map("user_id") // Foreign Key to User.id (salesman who created report)
+  reportDate            DateTime  @map("report_date") @db.Date
+  brandName             String    @map("brand_name") @db.VarChar(255)
+  billing               String    @db.VarChar(100)
+  nod                   String    @db.VarChar(100)
+  retail                String    @db.VarChar(100)
+  schemesYesNo          String    @map("schemes_yes_no") @db.VarChar(10) // "Yes" or "No"
+  avgSchemeCost         Decimal   @map("avg_scheme_cost") @db.Decimal(10, 2)
+  remarks               String?   @db.VarChar(500) // Made optional
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("competition_reports") // Table name in DB
+  @@index([userId]) // Index for faster lookups by user
+}
+
+// 9. Geo Tracking
+model GeoTracking {
+  id                      String    @id @default(uuid()) // Unique ID for each geo-tracking record
+  userId                  Int       @map("user_id") // Foreign Key to User.id
+  latitude                Decimal   @db.Decimal(10, 7)
+  longitude               Decimal   @db.Decimal(10, 7)
+  recordedAt              DateTime  @default(now()) @map("recorded_at") @db.Timestamptz(6) // Timestamp of the recording
+  accuracy                Decimal?  @db.Decimal(10, 2) // Optional: GPS accuracy in meters
+  speed                   Decimal?  @db.Decimal(10, 2) // Optional: Speed in m/s
+  heading                 Decimal?  @db.Decimal(10, 2) // Optional: Direction of travel in degrees
+  altitude                Decimal?  @db.Decimal(10, 2) // Optional: Altitude in meters
+  locationType            String?   @map("location_type") @db.VarChar(50) // Optional: e.g., 'GPS', 'Network', 'Fused'
+  activityType            String?   @map("activity_type") @db.VarChar(50) // Optional: e.g., 'still', 'in_vehicle', 'walking'
+  appState                String?   @map("app_state") @db.VarChar(50) // Optional: 'foreground', 'background'
+  batteryLevel            Decimal?  @map("battery_level") @db.Decimal(5, 2) // Optional: Battery percentage (0-100)
+  isCharging              Boolean?  @map("is_charging") // Optional: Is device charging?
+  networkStatus           String?   @map("network_status") @db.VarChar(50) // Optional: 'wifi', 'mobile', 'none'
+  ipAddress               String?   @map("ip_address") @db.VarChar(45) // Optional: IPv4 or IPv6
+  siteName                String?   @map("site_name") @db.VarChar(255) // Optional: Name of a specific site if visited
+  checkInTime             DateTime? @map("check_in_time") @db.Timestamptz(6) // Optional: Timestamp of check-in
+  checkOutTime            DateTime? @map("check_out_time") @db.Timestamptz(6) // Optional: Timestamp of check-out
+  totalDistanceTravelled Decimal? @map("total_distance_travelled") @db.Decimal(10, 3) // NEW FIELD! Total distance in KM or M
+
+  // Relationship to the User (staff/employee)
+  user User @relation("UserGeoTracking", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId], map: "idx_geo_tracking_user_id")
+  @@index([recordedAt], map: "idx_geo_tracking_recorded_at") // Useful for time-based queries
+  @@map("geo_tracking") // Table name in DB
+}
+
+
+// 10. DailyTask model for admin to salesman task assignment
+model DailyTask {
+  id                String    @id @default(uuid()) @db.VarChar(255)
+  userId            Int       @map("user_id") // Salesman to whom the task is assigned
+  assignedByUserId  Int       @map("assigned_by_user_id") // Admin/Manager who assigned the task
+  taskDate          DateTime  @map("task_date") @db.Date
+  visitType         String    @map("visit_type") @db.VarChar(50) // "Client Visit", "Technical Visit"
+  relatedDealerId   String?   @map("related_dealer_id") @db.VarChar(255) // Optional: For Client Visits (FK to Dealer.id)
+  siteName          String?   @map("site_name") @db.VarChar(255) // Optional: For Technical Visits
+  description       String?   @db.VarChar(500)
+  status            String    @default("Assigned") @db.VarChar(50) // "Assigned", "Accepted", "Completed", "Rejected", "In Progress"
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pjpId             String?   @map("pjp_id") @db.VarChar(255) // Foreign Key to PermanentJourneyPlan
+
+  user              User      @relation("AssignedTasks", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy        User      @relation("CreatedTasks", fields: [assignedByUserId], references: [id], onDelete: NoAction) // NoAction to keep admin record if deleted
+  relatedDealer     Dealer?   @relation("DealerDailyTasks", fields: [relatedDealerId], references: [id], onDelete: SetNull) // Named relation
+  permanentJourneyPlan PermanentJourneyPlan? @relation("PJPTasks", fields: [pjpId], references: [id], onDelete: SetNull) // Named relation
+
+  @@index([userId], map: "idx_daily_tasks_user_id")
+  @@index([assignedByUserId], map: "idx_daily_tasks_assigned_by_user_id")
+  @@index([taskDate], map: "idx_daily_tasks_task_date")
+  @@index([pjpId], map: "idx_daily_tasks_pjp_id")
+  @@map("daily_tasks")
+}
