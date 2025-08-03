@@ -229,18 +229,25 @@ export default function CRMDashboard() {
     if (!user) return;
 
     try {
-      // ✅ HOOK TO YOUR ATTENDANCE ENDPOINT
+      console.log('🔍 Fetching attendance for user:', user.id); // DEBUG
       const response = await fetch(`/api/attendance/today/${user.id}`);
       const data = await response.json();
+      console.log('🔍 API Response:', data); // DEBUG
 
       if (data.success) {
         if (data.hasAttendance && data.data) {
+          console.log('🔍 Has attendance data:', data.data); // DEBUG
+          console.log('🔍 outTimeTimestamp:', data.data.outTimeTimestamp); // DEBUG
           setAttendanceData(data.data);
-          setAttendanceStatus(data.data.outTimeTimestamp ? 'out' : 'in');
+          const newStatus = data.data.outTimeTimestamp ? 'out' : 'in';
+          console.log('🔍 Setting status to:', newStatus); // DEBUG
+          setAttendanceStatus(newStatus);
         } else {
+          console.log('🔍 No attendance data, setting to out'); // DEBUG
           setAttendanceStatus('out');
         }
       } else {
+        console.log('🔍 API not successful, setting to out'); // DEBUG
         setAttendanceStatus('out');
       }
     } catch (error) {
