@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Square, MapPin, Clock, Navigation, Pause, Play, 
+import {
+  Square, MapPin, Clock, Navigation, Pause, Play,
   Users, CheckCircle, AlertCircle, Battery, Wifi,
   Target, Route, Store, TrendingUp
 } from 'lucide-react';
@@ -47,12 +47,12 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   const [activeJourney, setActiveJourney] = useState<JourneyData | null>(null);
   const [dealerCheckins, setDealerCheckins] = useState<DealerCheckIn[]>([]);
   const [trackingMode, setTrackingMode] = useState<'conservative' | 'balanced' | 'precise'>('balanced');
-  
+
   // Battery & Network Status
   const [batteryLevel, setBatteryLevel] = useState<number>(100);
   const [networkStatus, setNetworkStatus] = useState<'online' | 'offline'>('online');
   const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
-  
+
   // UI State
   const [showQuickActions, setShowQuickActions] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
@@ -100,7 +100,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       // ✅ HOOK TO RIGHT ENDPOINT: Check active journey
       const response = await fetch(`/api/journey/active/${userId}`);
       const data = await response.json();
-      
+
       if (data.success && data.hasActiveJourney && data.data) {
         setActiveJourney({
           id: data.data.journey.id,
@@ -111,12 +111,12 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           activeCheckins: data.data.status.activeCheckins,
           status: 'active'
         });
-        
+
         // Get active dealer check-ins
         if (data.data.activeCheckins) {
           setDealerCheckins(data.data.activeCheckins);
         }
-        
+
         startLocationTracking();
       }
     } catch (error) {
@@ -134,7 +134,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     }
 
     const options = getLocationOptions();
-    
+
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
         const newLocation: LocationData = {
@@ -145,15 +145,15 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           heading: position.coords.heading || 0,
           altitude: position.coords.altitude || 0
         };
-        
+
         setCurrentLocation(newLocation);
         setLastUpdate(new Date());
-        
+
         // Automatically send tracking data if journey is active
         if (activeJourney) {
           sendLocationUpdate(newLocation);
         }
-        
+
         // Auto-adjust tracking mode based on speed
         autoAdjustTrackingMode(newLocation.speed || 0);
       },
@@ -163,14 +163,14 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       },
       options
     );
-    
+
     setLocationWatchId(watchId);
   }, [activeJourney, trackingMode]);
 
   // 📡 SEND LOCATION UPDATE TO BACKEND
   const sendLocationUpdate = async (location: LocationData) => {
     if (!activeJourney) return;
-    
+
     try {
       // ✅ HOOK TO RIGHT ENDPOINT: Track location during journey
       const response = await fetch('/api/journey/track', {
@@ -207,11 +207,11 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   // 🎯 AUTO-ADJUST TRACKING MODE BASED ON SPEED
   const autoAdjustTrackingMode = (speed: number) => {
     const speedKmh = speed * 3.6; // Convert m/s to km/h
-    
+
     let newMode: 'conservative' | 'balanced' | 'precise' = 'conservative';
     if (speedKmh > 30) newMode = 'precise'; // Fast movement
     else if (speedKmh > 5) newMode = 'balanced'; // Walking/slow driving
-    
+
     if (newMode !== trackingMode) {
       setTrackingMode(newMode);
     }
@@ -223,7 +223,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       setErrorMessage('Please enable location services');
       return;
     }
-    
+
     setIsLoading(true);
     try {
       // ✅ HOOK TO RIGHT ENDPOINT: Start journey
@@ -257,7 +257,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           activeCheckins: 0,
           status: 'active'
         });
-        
+
         startLocationTracking();
         setErrorMessage('');
       } else {
@@ -274,9 +274,9 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   // ⏸️ PAUSE/RESUME JOURNEY
   const handlePauseResume = async () => {
     if (!activeJourney) return;
-    
+
     const newStatus = activeJourney.status === 'active' ? 'paused' : 'active';
-    
+
     try {
       // ✅ HOOK TO RIGHT ENDPOINT: Pause or resume journey
       const endpoint = newStatus === 'paused' ? '/api/journey/pause' : '/api/journey/resume';
@@ -293,7 +293,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       const data = await response.json();
       if (data.success) {
         setActiveJourney(prev => prev ? { ...prev, status: newStatus } : null);
-        
+
         if (newStatus === 'paused') {
           if (locationWatchId) {
             navigator.geolocation.clearWatch(locationWatchId);
@@ -312,22 +312,24 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   // 🏪 QUICK DEALER CHECK-IN
   const handleQuickDealerCheckIn = async () => {
     if (!currentLocation || !activeJourney) return;
-    
+
     setIsLoading(true);
     try {
-      // ✅ HOOK TO RIGHT ENDPOINT: Dealer check-in
+      // ✅ FIXED: Use correct API parameters
       const response = await fetch('/api/journey/dealer-checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          dealerId: null, // Quick check-in without specific dealer
-          dealerName: 'Quick Check-in Location',
-          visitPurpose: 'Quick visit',
-          latitude: currentLocation.lat,
-          longitude: currentLocation.lng,
+          dealerId: 'quick-checkin-location', // ✅ FIXED: Need a dealerId
+          latitude: currentLocation.lat, // ✅ FIXED: Changed from endLatitude
+          longitude: currentLocation.lng, // ✅ FIXED: Changed from endLongitude
           accuracy: currentLocation.accuracy,
-          checkInNotes: 'Quick check-in from journey tracker'
+          visitPurpose: 'quick_visit', // ✅ FIXED: Use underscore format
+          expectedDuration: '30 minutes',
+          notes: 'Quick check-in from journey tracker',
+          batteryLevel: batteryLevel,
+          networkStatus: networkStatus
         })
       });
 
@@ -335,11 +337,11 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       if (data.success) {
         const newCheckin: DealerCheckIn = {
           id: data.data.id,
-          dealerName: data.dealerName || 'Quick Check-in',
+          dealerName: data.dealerVisit?.dealer?.name || 'Quick Check-in Location',
           checkInTime: data.data.checkInTime,
           location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`
         };
-        
+
         setDealerCheckins(prev => [...prev, newCheckin]);
         setActiveJourney(prev => prev ? { ...prev, activeCheckins: prev.activeCheckins + 1 } : null);
         setErrorMessage('');
@@ -357,34 +359,35 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   // 🔚 END JOURNEY
   const handleEndJourney = async () => {
     if (!activeJourney) return;
-    
+
     setIsLoading(true);
     try {
-      // ✅ HOOK TO RIGHT ENDPOINT: End journey
+      // ✅ FIXED: Use correct API parameters
       const response = await fetch('/api/journey/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          journeyId: activeJourney.id,
-          endLatitude: currentLocation?.lat,
-          endLongitude: currentLocation?.lng,
+          latitude: currentLocation?.lat, // ✅ FIXED: Changed from endLatitude
+          longitude: currentLocation?.lng, // ✅ FIXED: Changed from endLongitude
           journeyNotes: 'Journey completed via PWA tracker',
-          endReason: 'completed'
+          totalStops: dealerCheckins.length,
+          fuelUsed: 'Not specified',
+          expensesClaimed: 'Not specified'
         })
       });
 
       const data = await response.json();
       if (data.success) {
         // Show journey summary
-        const summary = data.data.summary || {
+        const summary = data.journeyStats || {
           duration: activeJourney.duration,
           totalDistance: activeJourney.totalDistance,
           dealersVisited: dealerCheckins.length
         };
-        
-        alert(`🎉 Journey Complete!\n\n📊 Summary:\n⏱️ Duration: ${summary.duration}\n📍 Distance: ${summary.totalDistance}\n🏪 Dealers Visited: ${summary.dealersVisited}\n\nGreat work! 👏`);
-        
+
+        alert(`🎉 Journey Complete!\n\n📊 Summary:\n⏱️ Duration: ${summary.duration}\n📍 Distance: ${summary.totalDistance}\n🏪 Dealers Visited: ${summary.stops || dealerCheckins.length}\n\nGreat work! 👏`);
+
         // Reset state
         setActiveJourney(null);
         setDealerCheckins([]);
@@ -392,7 +395,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           navigator.geolocation.clearWatch(locationWatchId);
           setLocationWatchId(null);
         }
-        
+
         onJourneyEnd();
       } else {
         setErrorMessage(data.error || 'Failed to end journey');
@@ -410,13 +413,13 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     if ('getBattery' in navigator) {
       (navigator as any).getBattery().then((battery: any) => {
         setBatteryLevel(Math.round(battery.level * 100));
-        
+
         battery.addEventListener('levelchange', () => {
           setBatteryLevel(Math.round(battery.level * 100));
         });
       });
     }
-    
+
     // Network status monitoring
     window.addEventListener('online', () => setNetworkStatus('online'));
     window.addEventListener('offline', () => setNetworkStatus('offline'));
@@ -438,7 +441,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     const diff = now.getTime() - start.getTime();
     const minutes = Math.floor(diff / 60000);
     const hours = Math.floor(minutes / 60);
-    
+
     if (hours > 0) {
       return `${hours}h ${minutes % 60}m`;
     }
@@ -473,7 +476,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
               <AlertDescription className="text-red-700">{errorMessage}</AlertDescription>
             </Alert>
           )}
-          
+
           <div className="space-y-4">
             {currentLocation && (
               <div className="flex items-center justify-between text-sm text-gray-600">
@@ -481,16 +484,16 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
                 <span>{currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}</span>
               </div>
             )}
-            
-            <Button 
-              onClick={handleStartJourney} 
+
+            <Button
+              onClick={handleStartJourney}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3"
               disabled={!currentLocation}
             >
               <Navigation className="w-5 h-5 mr-2" />
               Start New Journey
             </Button>
-            
+
             <p className="text-xs text-gray-500 text-center">
               {!currentLocation ? 'Getting your location...' : 'Ready to track your journey!'}
             </p>
@@ -518,7 +521,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           </div>
         </CardTitle>
       </CardHeader>
-      
+
       <CardContent>
         {errorMessage && (
           <Alert className="mb-4 border-red-200 bg-red-50">
@@ -526,7 +529,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
             <AlertDescription className="text-red-700">{errorMessage}</AlertDescription>
           </Alert>
         )}
-        
+
         <div className="space-y-4">
           {/* Journey Stats - Kid Friendly with Emojis */}
           <div className="grid grid-cols-3 gap-4 text-center">
@@ -560,7 +563,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
                 Updated {Math.round((new Date().getTime() - lastUpdate.getTime()) / 1000)}s ago
               </span>
             </div>
-            
+
             {currentLocation && (
               <div className="flex items-center justify-between text-xs text-gray-600">
                 <span>📱 GPS: {currentLocation.accuracy?.toFixed(0)}m accuracy</span>
@@ -568,7 +571,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
               </div>
             )}
           </div>
-          
+
           {/* Quick Actions */}
           <div className="grid grid-cols-2 gap-3">
             <Button
@@ -610,7 +613,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
                   <div key={checkin.id} className="flex items-center justify-between text-xs">
                     <span className="font-medium">{checkin.dealerName}</span>
                     <span className="text-gray-500">
-                      {new Date(checkin.checkInTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {new Date(checkin.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
                 ))}

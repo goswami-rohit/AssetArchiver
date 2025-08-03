@@ -2419,24 +2419,25 @@ export function setupWebRoutes(app: Express) {
       // ✅ PREPARE DATA FOR SCHEMA VALIDATION
       const trackingData = {
         userId: parseInt(userId),
-        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string
-        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string
+        latitude: parseFloat(latitude).toFixed(7),
+        longitude: parseFloat(longitude).toFixed(7),
         recordedAt: new Date(),
-        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null, // ✅ Decimal as string
-        speed: speed ? parseFloat(speed).toFixed(2) : "0.00", // ✅ Decimal as string
-        heading: heading ? parseFloat(heading).toFixed(2) : null, // ✅ Decimal as string
-        altitude: altitude ? parseFloat(altitude).toFixed(2) : null, // ✅ Decimal as string
+        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null,
+        speed: speed ? parseFloat(speed).toFixed(2) : "0.00",
+        heading: heading ? parseFloat(heading).toFixed(2) : null,
+        altitude: altitude ? parseFloat(altitude).toFixed(2) : null,
         locationType: 'journey_tracking',
         activityType: 'in_transit',
         appState: appState,
-        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null, // ✅ Decimal as string
+        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null,
         isCharging: null,
         networkStatus: networkStatus || null,
         ipAddress: null,
         siteName: 'Journey in progress',
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: totalDistance.toFixed(3) // ✅ Decimal as string
+        totalDistanceTravelled: totalDistance.toFixed(3),
+        updatedAt: new Date() // ✅ ONLY CHANGE: Added this line
       };
 
       // ✅ USE SCHEMA VALIDATION
@@ -2477,7 +2478,6 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-
   // 3. Check-in at Dealer Location (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/dealer-checkin', async (req: Request, res: Response) => {
     try {
@@ -2534,24 +2534,25 @@ export function setupWebRoutes(app: Express) {
       // ✅ PREPARE DATA FOR SCHEMA VALIDATION
       const dealerCheckinData = {
         userId: parseInt(userId),
-        latitude: parseFloat(latitude).toFixed(7), // ✅ Decimal as string
-        longitude: parseFloat(longitude).toFixed(7), // ✅ Decimal as string
+        latitude: parseFloat(latitude).toFixed(7),
+        longitude: parseFloat(longitude).toFixed(7),
         recordedAt: new Date(),
-        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null, // ✅ Decimal as string
-        speed: "0.00", // ✅ Decimal as string
+        accuracy: accuracy ? parseFloat(accuracy).toFixed(2) : null,
+        speed: "0.00",
         heading: null,
         altitude: null,
         locationType: 'dealer_checkin',
         activityType: visitPurpose,
         appState: 'active',
-        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null, // ✅ Decimal as string
+        batteryLevel: batteryLevel ? parseFloat(batteryLevel).toFixed(2) : null,
         isCharging: null,
         networkStatus: networkStatus || null,
         ipAddress: null,
         siteName: `${dealer.name} - ${dealer.type} (${dealer.region})`,
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled || '0') + (distanceFromStart / 1000)).toFixed(3) // ✅ Decimal as string
+        totalDistanceTravelled: (parseFloat(activeJourney.totalDistanceTravelled || '0') + (distanceFromStart / 1000)).toFixed(3),
+        updatedAt: new Date() // ✅ ONLY CHANGE: Added this line
       };
 
       // ✅ USE SCHEMA VALIDATION
@@ -2736,6 +2737,157 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+
+  // 6. Pause Journey
+  app.post('/api/journey/pause', async (req: Request, res: Response) => {
+    try {
+      const { userId, journeyId, location } = req.body;
+
+      // Find active journey
+      const activeJourney = await db.query.geoTracking.findFirst({
+        where: and(
+          eq(geoTracking.userId, parseInt(userId)),
+          eq(geoTracking.locationType, 'journey_start'),
+          isNull(geoTracking.checkOutTime)
+        )
+      });
+
+      if (!activeJourney) {
+        return res.status(400).json({
+          error: 'No active journey found to pause'
+        });
+      }
+
+      // Create pause record
+      const pauseData = {
+        userId: parseInt(userId),
+        latitude: location?.lat ? parseFloat(location.lat).toFixed(7) : activeJourney.latitude,
+        longitude: location?.lng ? parseFloat(location.lng).toFixed(7) : activeJourney.longitude,
+        recordedAt: new Date(),
+        accuracy: location?.accuracy ? parseFloat(location.accuracy).toFixed(2) : null,
+        speed: "0.00",
+        heading: null,
+        altitude: null,
+        locationType: 'journey_pause',
+        activityType: 'paused',
+        appState: 'background',
+        batteryLevel: null,
+        isCharging: null,
+        networkStatus: null,
+        ipAddress: null,
+        siteName: 'Journey Paused',
+        checkInTime: new Date(),
+        checkOutTime: null,
+        totalDistanceTravelled: activeJourney.totalDistanceTravelled,
+        updatedAt: new Date()
+      };
+
+      const validatedData = insertGeoTrackingSchema.parse(pauseData);
+      const result = await db.insert(geoTracking).values(validatedData).returning();
+
+      res.json({
+        success: true,
+        message: 'Journey paused successfully',
+        data: result[0]
+      });
+
+    } catch (error: any) {
+      console.error('Error pausing journey:', error);
+
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Journey pause validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      res.status(500).json({
+        error: 'Failed to pause journey',
+        details: errorMessage
+      });
+    }
+  });
+
+  // 7. Resume Journey
+  app.post('/api/journey/resume', async (req: Request, res: Response) => {
+    try {
+      const { userId, journeyId, location } = req.body;
+
+      // Find active journey
+      const activeJourney = await db.query.geoTracking.findFirst({
+        where: and(
+          eq(geoTracking.userId, parseInt(userId)),
+          eq(geoTracking.locationType, 'journey_start'),
+          isNull(geoTracking.checkOutTime)
+        )
+      });
+
+      if (!activeJourney) {
+        return res.status(400).json({
+          error: 'No active journey found to resume'
+        });
+      }
+
+      // Create resume record
+      const resumeData = {
+        userId: parseInt(userId),
+        latitude: location?.lat ? parseFloat(location.lat).toFixed(7) : activeJourney.latitude,
+        longitude: location?.lng ? parseFloat(location.lng).toFixed(7) : activeJourney.longitude,
+        recordedAt: new Date(),
+        accuracy: location?.accuracy ? parseFloat(location.accuracy).toFixed(2) : null,
+        speed: "0.00",
+        heading: null,
+        altitude: null,
+        locationType: 'journey_resume',
+        activityType: 'resumed',
+        appState: 'foreground',
+        batteryLevel: null,
+        isCharging: null,
+        networkStatus: null,
+        ipAddress: null,
+        siteName: 'Journey Resumed',
+        checkInTime: new Date(),
+        checkOutTime: null,
+        totalDistanceTravelled: activeJourney.totalDistanceTravelled,
+        updatedAt: new Date()
+      };
+
+      const validatedData = insertGeoTrackingSchema.parse(resumeData);
+      const result = await db.insert(geoTracking).values(validatedData).returning();
+
+      res.json({
+        success: true,
+        message: 'Journey resumed successfully',
+        data: result[0]
+      });
+
+    } catch (error: any) {
+      console.error('Error resuming journey:', error);
+
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'Journey resume validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      res.status(500).json({
+        error: 'Failed to resume journey',
+        details: errorMessage
+      });
+    }
+  });
+
   // 5. End Journey (FIXED WITH SCHEMA VALIDATION)
   app.post('/api/journey/end', async (req: Request, res: Response) => {
     try {
@@ -2803,7 +2955,8 @@ export function setupWebRoutes(app: Express) {
         siteName: 'Journey Completed',
         checkInTime: activeJourney.checkInTime,
         checkOutTime: new Date(),
-        totalDistanceTravelled: totalJourneyDistance.toFixed(3) // ✅ Decimal as string
+        totalDistanceTravelled: totalJourneyDistance.toFixed(3), // ✅ Decimal as string
+        updatedAt: new Date()
       };
 
       // ✅ USE SCHEMA VALIDATION
