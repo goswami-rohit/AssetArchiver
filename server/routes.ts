@@ -285,11 +285,12 @@ export function setupWebRoutes(app: Express) {
       const today = new Date();
       const todayDateString = today.toISOString().split('T')[0]; // ✅ Convert to YYYY-MM-DD string
 
-      // Check if user already punched in today
+      // 🔥 ONLY CHANGE: Check if user has an ACTIVE punch-in (not punched out) today
       const existingAttendance = await db.query.salesmanAttendance.findFirst({
         where: and(
           eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, todayDateString)
+          eq(salesmanAttendance.attendanceDate, todayDateString),
+          isNull(salesmanAttendance.outTimeTimestamp) // 🔑 ONLY ADDITION: Check for active session
         )
       });
 
@@ -300,7 +301,7 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // ✅ PREPARE DATA FOR SCHEMA VALIDATION
+      // ✅ PREPARE DATA FOR SCHEMA VALIDATION - UNCHANGED
       const attendanceData = {
         userId: parseInt(userId),
         attendanceDate: todayDateString, // ✅ String for date type
@@ -325,10 +326,10 @@ export function setupWebRoutes(app: Express) {
         outTimeAltitude: null
       };
 
-      // ✅ USE SCHEMA VALIDATION
+      // ✅ USE SCHEMA VALIDATION - UNCHANGED
       const validatedData = insertSalesmanAttendanceSchema.parse(attendanceData);
 
-      // ✅ INSERT WITH VALIDATED DATA
+      // ✅ INSERT WITH VALIDATED DATA - UNCHANGED
       const result = await db.insert(salesmanAttendance).values(validatedData).returning();
 
       res.status(201).json({
@@ -340,7 +341,7 @@ export function setupWebRoutes(app: Express) {
     } catch (error: any) {
       console.error('Error creating punch-in:', error);
 
-      // ✅ HANDLE SCHEMA VALIDATION ERRORS
+      // ✅ HANDLE SCHEMA VALIDATION ERRORS - UNCHANGED
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: 'Attendance validation error',
@@ -352,7 +353,7 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // ✅ DATABASE ERROR HANDLING
+      // ✅ DATABASE ERROR HANDLING - UNCHANGED
       if (error?.code === '23502') {
         return res.status(400).json({
           error: 'Missing required field',
@@ -398,12 +399,14 @@ export function setupWebRoutes(app: Express) {
       const today = new Date();
       const todayDateString = today.toISOString().split('T')[0];
 
-      // Find today's attendance record
+      // 🔥 ONLY CHANGE: Find today's ACTIVE attendance record (not punched out yet)
       const existingAttendance = await db.query.salesmanAttendance.findFirst({
         where: and(
           eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, todayDateString)
-        )
+          eq(salesmanAttendance.attendanceDate, todayDateString),
+          isNull(salesmanAttendance.outTimeTimestamp) // 🔑 ONLY ADDITION: Find active session
+        ),
+        orderBy: [desc(salesmanAttendance.inTimeTimestamp)] // 🔑 SAFETY: Get latest active session
       });
 
       if (!existingAttendance) {
@@ -412,14 +415,15 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      if (existingAttendance.outTimeTimestamp) {
-        return res.status(400).json({
-          error: 'Already punched out today',
-          data: existingAttendance
-        });
-      }
+      // 🔥 REMOVED: This check is now redundant since we already filter for null outTimeTimestamp
+      // if (existingAttendance.outTimeTimestamp) {
+      //   return res.status(400).json({
+      //     error: 'Already punched out today',
+      //     data: existingAttendance
+      //   });
+      // }
 
-      // ✅ PREPARE UPDATE DATA WITH PROPER TYPES
+      // ✅ PREPARE UPDATE DATA WITH PROPER TYPES - UNCHANGED
       const updateData = {
         outTimeTimestamp: new Date(), // ✅ Date object for timestamp
         outTimeImageCaptured: Boolean(imageCaptured), // ✅ Ensure boolean
@@ -433,12 +437,12 @@ export function setupWebRoutes(app: Express) {
         updatedAt: new Date() // ✅ Date object
       };
 
-      // ✅ VALIDATE IMAGE URL LENGTH
+      // ✅ VALIDATE IMAGE URL LENGTH - UNCHANGED
       if (imageUrl && imageUrl.length > 500) {
         return res.status(400).json({ error: 'Image URL exceeds 500 characters' });
       }
 
-      // Update attendance record
+      // Update attendance record - UNCHANGED
       const result = await db.update(salesmanAttendance)
         .set(updateData)
         .where(eq(salesmanAttendance.id, existingAttendance.id))
@@ -453,7 +457,7 @@ export function setupWebRoutes(app: Express) {
     } catch (error: any) {
       console.error('Error updating punch-out:', error);
 
-      // ✅ ERROR HANDLING
+      // ✅ ERROR HANDLING - UNCHANGED
       if (error?.code === '23502') {
         return res.status(400).json({
           error: 'Missing required field for punch-out',
@@ -473,7 +477,7 @@ export function setupWebRoutes(app: Express) {
     try {
       const { userId } = req.params;
 
-      // ✅ VALIDATE USER ID
+      // ✅ VALIDATE USER ID - UNCHANGED
       const userIdInt = parseInt(userId);
       if (isNaN(userIdInt)) {
         return res.status(400).json({ error: 'Invalid user ID' });
@@ -483,19 +487,33 @@ export function setupWebRoutes(app: Express) {
       const today = new Date();
       const todayDateString = today.toISOString().split('T')[0];
 
-      const todayAttendance = await db.query.salesmanAttendance.findFirst({
+      // 🔥 NEW: Get ALL today's attendance records (multiple cycles)
+      const todayAttendanceRecords = await db.query.salesmanAttendance.findMany({
         where: and(
           eq(salesmanAttendance.userId, userIdInt),
           eq(salesmanAttendance.attendanceDate, todayDateString)
-        )
+        ),
+        orderBy: [desc(salesmanAttendance.inTimeTimestamp)] // Latest first
       });
+
+      // 🔥 NEW: Find the current ACTIVE session (if any)
+      const activeSession = todayAttendanceRecords.find(record => !record.outTimeTimestamp);
+
+      // 🔥 NEW: Calculate useful statistics
+      const completedSessions = todayAttendanceRecords.filter(record => record.outTimeTimestamp);
+      const hasAnyAttendance = todayAttendanceRecords.length > 0;
+      const isCurrentlyPunchedIn = !!activeSession;
 
       res.json({
         success: true,
-        hasAttendance: !!todayAttendance,
-        punchedIn: !!todayAttendance,
-        punchedOut: !!todayAttendance?.outTimeTimestamp,
-        data: todayAttendance || null
+        hasAttendance: hasAnyAttendance,
+        punchedIn: isCurrentlyPunchedIn, // 🔥 UPDATED: Current status, not just "any attendance"
+        punchedOut: !isCurrentlyPunchedIn && hasAnyAttendance, // 🔥 NEW: True if has sessions but none active
+        activeSession: activeSession || null, // 🔥 NEW: Current active session
+        totalSessions: todayAttendanceRecords.length, // 🔥 NEW: Total cycles today
+        completedSessions: completedSessions.length, // 🔥 NEW: Completed cycles
+        data: todayAttendanceRecords, // 🔥 UPDATED: All sessions instead of just first one
+        latestSession: todayAttendanceRecords[0] || null // 🔥 NEW: Most recent session
       });
 
     } catch (error) {

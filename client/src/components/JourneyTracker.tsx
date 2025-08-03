@@ -48,6 +48,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   const [activeJourney, setActiveJourney] = useState<JourneyData | null>(null);
   const [dealerCheckins, setDealerCheckins] = useState<DealerCheckIn[]>([]);
   const [trackingMode, setTrackingMode] = useState<'conservative' | 'balanced' | 'precise'>('balanced');
+  const [journeyWakeLock, setJourneyWakeLock] = useState<WakeLockSentinel | null>(null);
 
   // Battery & Network Status
   const [batteryLevel, setBatteryLevel] = useState<number>(100);
@@ -227,20 +228,20 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
     setIsLoading(true);
 
-    // 🛡️ SAFE: Wake lock wrapped in try-catch, won't affect main logic
+    // 🛡️ SAFE: Wake lock wrapped in try-catch
     let wakeLock = null;
     try {
       if ('wakeLock' in navigator) {
         wakeLock = await navigator.wakeLock.request('screen');
+        setJourneyWakeLock(wakeLock); // Store in separate state
         console.log('Screen Wake Lock activated');
       }
     } catch (wakeLockError) {
-      // Silently fail - your app continues normally
       console.log('Wake lock not available, continuing without it');
     }
 
     try {
-      // ✅ HOOK TO RIGHT ENDPOINT: Start journey
+      // Your existing API call stays exactly the same
       const response = await fetch('/api/journey/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -262,6 +263,7 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
+        // Your existing setActiveJourney stays exactly the same
         setActiveJourney({
           id: data.data.id,
           startTime: data.data.checkInTime,
@@ -269,25 +271,24 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           totalDistance: '0.000 km',
           trackingPoints: 0,
           activeCheckins: 0,
-          status: 'active',
-          wakeLock: wakeLock // 🔥 Store wake lock reference for later cleanup
+          status: 'active'
         });
 
         startLocationTracking();
         setErrorMessage('');
       } else {
-        // 🛡️ Clean up wake lock if journey failed to start
+        // Clean up wake lock if journey failed
         if (wakeLock) {
           wakeLock.release();
-          console.log('Wake lock released due to journey start failure');
+          setJourneyWakeLock(null);
         }
         setErrorMessage(data.error || 'Failed to start journey');
       }
     } catch (error) {
-      // 🛡️ Clean up wake lock on any error
+      // Clean up wake lock on error
       if (wakeLock) {
         wakeLock.release();
-        console.log('Wake lock released due to error');
+        setJourneyWakeLock(null);
       }
       console.error('Error starting journey:', error);
       setErrorMessage('Failed to start journey');
@@ -296,14 +297,12 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     }
   };
 
-  // ⏸️ PAUSE/RESUME JOURNEY
   const handlePauseResume = async () => {
     if (!activeJourney) return;
 
     const newStatus = activeJourney.status === 'active' ? 'paused' : 'active';
 
     try {
-      // ✅ HOOK TO RIGHT ENDPOINT: Pause or resume journey
       const endpoint = newStatus === 'paused' ? '/api/journey/pause' : '/api/journey/resume';
       const response = await fetch(endpoint, {
         method: 'POST',
@@ -317,16 +316,14 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
-        // 🛡️ SAFE: Handle wake lock based on pause/resume
-        let updatedWakeLock = activeJourney.wakeLock;
-
+        // Handle wake lock
         if (newStatus === 'paused') {
           // Release wake lock when pausing
-          if (activeJourney.wakeLock) {
+          if (journeyWakeLock) {
             try {
-              activeJourney.wakeLock.release();
+              journeyWakeLock.release();
+              setJourneyWakeLock(null);
               console.log('Wake lock released - journey paused');
-              updatedWakeLock = null;
             } catch (wakeLockError) {
               console.log('Wake lock release failed, continuing normally');
             }
@@ -335,20 +332,16 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           // Request wake lock when resuming
           try {
             if ('wakeLock' in navigator) {
-              updatedWakeLock = await navigator.wakeLock.request('screen');
+              const newWakeLock = await navigator.wakeLock.request('screen');
+              setJourneyWakeLock(newWakeLock);
               console.log('Wake lock reactivated - journey resumed');
             }
           } catch (wakeLockError) {
             console.log('Wake lock not available on resume, continuing without it');
-            updatedWakeLock = null;
           }
         }
 
-        setActiveJourney(prev => prev ? {
-          ...prev,
-          status: newStatus,
-          wakeLock: updatedWakeLock // 🔥 Update wake lock reference
-        } : null);
+        setActiveJourney(prev => prev ? { ...prev, status: newStatus } : null);
 
         if (newStatus === 'paused') {
           if (locationWatchId) {
@@ -431,14 +424,13 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
     setIsLoading(true);
     try {
-      // ✅ FIXED: Use correct API parameters
       const response = await fetch('/api/journey/end', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          latitude: currentLocation?.lat, // ✅ FIXED: Changed from endLatitude
-          longitude: currentLocation?.lng, // ✅ FIXED: Changed from endLongitude
+          latitude: currentLocation?.lat,
+          longitude: currentLocation?.lng,
           journeyNotes: 'Journey completed via PWA tracker',
           totalStops: dealerCheckins.length,
           fuelUsed: 'Not specified',
@@ -448,17 +440,18 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
-        // 🛡️ SAFE: Release wake lock when journey ends
-        if (activeJourney.wakeLock) {
+        // Release wake lock when journey ends
+        if (journeyWakeLock) {
           try {
-            activeJourney.wakeLock.release();
+            journeyWakeLock.release();
+            setJourneyWakeLock(null);
             console.log('Wake lock released - journey ended');
           } catch (wakeLockError) {
             console.log('Wake lock release failed, continuing normally');
           }
         }
 
-        // Show journey summary
+        // Your existing logic stays the same
         const summary = data.journeyStats || {
           duration: activeJourney.duration,
           totalDistance: activeJourney.totalDistance,
@@ -467,7 +460,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
         alert(`🎉 Journey Complete!\n\n📊 Summary:\n⏱️ Duration: ${summary.duration}\n📍 Distance: ${summary.totalDistance}\n🏪 Dealers Visited: ${summary.stops || dealerCheckins.length}\n\nGreat work! 👏`);
 
-        // Reset state
         setActiveJourney(null);
         setDealerCheckins([]);
         if (locationWatchId) {
@@ -483,11 +475,11 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       console.error('Error ending journey:', error);
       setErrorMessage('Failed to end journey');
     } finally {
-      // 🛡️ SAFE: Fallback wake lock cleanup in finally block
-      if (activeJourney?.wakeLock) {
+      // Fallback cleanup
+      if (journeyWakeLock) {
         try {
-          activeJourney.wakeLock.release();
-          console.log('Wake lock released in finally block');
+          journeyWakeLock.release();
+          setJourneyWakeLock(null);
         } catch (wakeLockError) {
           console.log('Fallback wake lock release failed, no issues');
         }

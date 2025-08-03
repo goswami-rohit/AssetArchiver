@@ -235,24 +235,37 @@ export default function CRMDashboard() {
       console.log('🔍 API Response:', data); // DEBUG
 
       if (data.success) {
-        if (data.hasAttendance && data.data) {
-          console.log('🔍 Has attendance data:', data.data); // DEBUG
-          console.log('🔍 outTimeTimestamp:', data.data.outTimeTimestamp); // DEBUG
-          setAttendanceData(data.data);
-          const newStatus = data.data.outTimeTimestamp ? 'out' : 'in';
+        // 🔥 UPDATED: Handle new API response structure with multiple sessions
+        if (data.hasAttendance) {
+          console.log('🔍 Has attendance data'); // DEBUG
+          console.log('🔍 Active session:', data.activeSession); // DEBUG
+          console.log('🔍 Total sessions:', data.totalSessions); // DEBUG
+          console.log('🔍 Currently punched in:', data.punchedIn); // DEBUG
+
+          // 🔥 NEW: Set attendance data to active session or latest session
+          const attendanceToDisplay = data.activeSession || data.latestSession;
+          if (attendanceToDisplay) {
+            setAttendanceData(attendanceToDisplay);
+          }
+
+          // 🔥 UPDATED: Use the API's calculated punchedIn status
+          const newStatus = data.punchedIn ? 'in' : 'out';
           console.log('🔍 Setting status to:', newStatus); // DEBUG
           setAttendanceStatus(newStatus);
         } else {
           console.log('🔍 No attendance data, setting to out'); // DEBUG
           setAttendanceStatus('out');
+          setAttendanceData(null); // 🔥 SAFETY: Clear any old data
         }
       } else {
         console.log('🔍 API not successful, setting to out'); // DEBUG
         setAttendanceStatus('out');
+        setAttendanceData(null); // 🔥 SAFETY: Clear any old data
       }
     } catch (error) {
       console.error('Error fetching attendance:', error);
       setAttendanceStatus('out');
+      setAttendanceData(null); // 🔥 SAFETY: Clear any old data
     }
   };
 
@@ -280,7 +293,7 @@ export default function CRMDashboard() {
     if (!user) return;
 
     try {
-      // ✅ PARALLEL FETCH FROM MULTIPLE ENDPOINTS FOR COMPREHENSIVE STATS
+      // ✅ PARALLEL FETCH FROM MULTIPLE ENDPOINTS FOR COMPREHENSIVE STATS - UNCHANGED
       const [attendanceRes, journeyRes, reportsRes, tasksRes, dealersRes, leaveRes] = await Promise.all([
         fetch(`/api/attendance/recent?userId=${user.id}&limit=7`),
         fetch(`/api/journey/analytics/${user.id}?days=30`),
@@ -299,13 +312,30 @@ export default function CRMDashboard() {
         leaveRes.json()
       ]);
 
-      // Build comprehensive stats
+      // 🔥 UPDATED: Get current active session info for more accurate stats
+      let currentActiveSession = null;
+      let todayCheckInTime = null;
+
+      if (attendanceData.data && attendanceData.data.length > 0) {
+        // Find today's active session (if any)
+        const today = new Date().toISOString().split('T')[0];
+        const todaySessions = attendanceData.data.filter((session: any) =>
+          session.attendanceDate === today
+        );
+
+        // Get active session (not punched out) or latest session for check-in time
+        currentActiveSession = todaySessions.find((session: any) => !session.outTimeTimestamp);
+        todayCheckInTime = currentActiveSession?.inTimeTimestamp ||
+          (todaySessions.length > 0 ? todaySessions[0].inTimeTimestamp : null);
+      }
+
+      // Build comprehensive stats - MOSTLY UNCHANGED
       const stats: DashboardStats = {
         attendance: {
-          isCheckedIn: attendanceStatus === 'in',
-          checkInTime: attendanceData.data?.[0]?.inTimeTimestamp,
-          totalHours: calculateTotalHours(attendanceData.data || []),
-          weeklyHours: calculateWeeklyHours(attendanceData.data || [])
+          isCheckedIn: attendanceStatus === 'in', // ✅ UNCHANGED - uses existing state
+          checkInTime: todayCheckInTime, // 🔥 UPDATED - shows current/latest check-in time
+          totalHours: calculateTotalHours(attendanceData.data || []), // ✅ UNCHANGED - function will handle multiple sessions
+          weeklyHours: calculateWeeklyHours(attendanceData.data || []) // ✅ UNCHANGED - function will handle multiple sessions
         },
         journey: {
           isActive: isJourneyActive,
@@ -433,7 +463,7 @@ export default function CRMDashboard() {
     setIsLoading(true);
     try {
       if (attendanceStatus === 'out') {
-        // ✅ PUNCH IN
+        // ✅ PUNCH IN - UNCHANGED LOGIC
         const response = await fetch('/api/attendance/punch-in', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -453,36 +483,29 @@ export default function CRMDashboard() {
 
         const data = await response.json();
         if (data.success) {
-          // ✅ SUCCESS: New punch-in recorded
+          // ✅ SUCCESS: New punch-in recorded - UNCHANGED
           setAttendanceStatus('in');
           setAttendanceData(data.data);
           showSuccess('✅ Punched in successfully! Have a productive day!');
           await fetchDashboardStats();
         } else {
-          // ✅ HANDLE ALL ERROR CASES PROPERLY
+          // 🔥 UPDATED: Handle "already punched in" with better logic
           if (data.error && data.error.includes('Already punched in')) {
-            // User is already punched in - use the returned data
+            // For multiple cycles: this means they have an ACTIVE session
             if (data.data) {
               setAttendanceData(data.data);
-              // Check if they've punched out already
-              const newStatus = data.data.outTimeTimestamp ? 'out' : 'in';
-              setAttendanceStatus(newStatus);
-              if (newStatus === 'in') {
-                showSuccess('You are already punched in today! Ready to punch out.');
-              } else {
-                showSuccess('Your attendance is complete for today.');
-              }
+              setAttendanceStatus('in'); // They're currently punched in
+              showSuccess('You are already punched in! Ready to punch out when done.');
             } else {
-              // Fallback - just set to 'in' since they're already punched in
               setAttendanceStatus('in');
-              showSuccess('You are already punched in today! Ready to punch out.');
+              showSuccess('You are already punched in! Ready to punch out when done.');
             }
           } else {
             addError(`Punch in failed: ${data.error || 'Unknown error'}`);
           }
         }
       } else {
-        // ✅ PUNCH OUT
+        // ✅ PUNCH OUT - UNCHANGED LOGIC
         const response = await fetch('/api/attendance/punch-out', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
@@ -501,19 +524,16 @@ export default function CRMDashboard() {
 
         const data = await response.json();
         if (data.success) {
-          // ✅ SUCCESS: Punch-out recorded
+          // ✅ SUCCESS: Punch-out recorded - UNCHANGED
           setAttendanceStatus('out');
           setAttendanceData(data.data);
           showSuccess('✅ Punched out successfully! Great work today!');
           await fetchDashboardStats();
         } else {
-          // ✅ HANDLE PUNCH-OUT ERRORS
-          if (data.error && data.error.includes('Already punched out')) {
-            // User already punched out - set correct status
-            setAttendanceStatus('out');
-            showSuccess('You have already punched out today.');
-          } else if (data.error && data.error.includes('No punch-in record')) {
-            // No punch-in found - set to 'out' status
+          // 🔥 UPDATED: Better error handling for multiple cycles
+          if (data.error && data.error.includes('No punch-in record') ||
+            data.error && data.error.includes('No active punch-in session')) {
+            // For multiple cycles: no active session found
             setAttendanceStatus('out');
             addError('Please punch in first before punching out.');
           } else {
