@@ -3926,6 +3926,85 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  // GET /api/dealers/recent - List all available dealers
+  app.get('/api/dealers/recent', async (req: Request, res: Response) => {
+    try {
+      const { limit = 1000, userId } = req.query;
+
+      // ✅ SAFE: Build where clause conditionally
+      let whereClause = undefined;
+      if (userId) {
+        const userIdInt = parseInt(userId as string);
+        if (isNaN(userIdInt)) {
+          return res.status(400).json({ error: 'Invalid user ID' });
+        }
+        whereClause = eq(dealers.userId, userIdInt);
+      }
+
+      // ✅ SAFE: Parse limit with validation
+      const limitInt = parseInt(limit as string);
+      if (isNaN(limitInt) || limitInt < 1 || limitInt > 10000) {
+        return res.status(400).json({ error: 'Invalid limit. Must be between 1 and 10000' });
+      }
+
+      // ✅ SAFE: Fetch dealers with proper ordering
+      const dealersList = await db.query.dealers.findMany({
+        where: whereClause,
+        orderBy: [desc(dealers.createdAt), asc(dealers.name)], // Latest first, then alphabetical
+        limit: limitInt,
+        columns: {
+          id: true,
+          userId: true,
+          type: true,
+          parentDealerId: true,
+          name: true,
+          region: true,
+          area: true,
+          phoneNo: true,
+          address: true,
+          totalPotential: true,
+          bestPotential: true,
+          brandSelling: true,
+          feedbacks: true,
+          remarks: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
+
+      // ✅ SAFE: Response with proper structure
+      res.json({
+        success: true,
+        data: dealersList,
+        total: dealersList.length,
+        message: `Found ${dealersList.length} dealers`
+      });
+
+    } catch (error: any) {
+      console.error('Error fetching dealers:', error);
+
+      // ✅ SAFE: Handle database errors properly
+      if (error?.code === '42P01') {
+        return res.status(500).json({
+          error: 'Database table not found',
+          details: 'Dealers table may not exist'
+        });
+      }
+
+      if (error?.code === '42703') {
+        return res.status(500).json({
+          error: 'Database column error',
+          details: 'One or more columns may not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to fetch dealers',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   app.get('/api/dealers/:id', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
