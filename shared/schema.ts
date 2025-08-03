@@ -366,7 +366,11 @@ export const insertSalesmanAttendanceSchema = createInsertSchema(salesmanAttenda
 export const insertSalesmanLeaveApplicationSchema = createInsertSchema(salesmanLeaveApplications);
 export const insertClientReportSchema = createInsertSchema(clientReports);
 export const insertCompetitionReportSchema = createInsertSchema(competitionReports);
-export const insertGeoTrackingSchema = createInsertSchema(geoTracking);
+export const insertGeoTrackingSchema = createInsertSchema(geoTracking, {
+  // ✅ These fields will still exist in DB, just not required in validation
+  createdAt: undefined,  // DB will auto-set with defaultNow()
+  updatedAt: undefined,  // DB will auto-set with defaultNow()
+});
 export const insertDailyTaskSchema = createInsertSchema(dailyTasks);
 
 // Export types
