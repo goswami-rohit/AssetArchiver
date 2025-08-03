@@ -31,6 +31,7 @@ interface JourneyData {
   trackingPoints: number;
   activeCheckins: number;
   status: 'active' | 'paused';
+  wakeLock?: WakeLockSentinel | null;
 }
 
 interface DealerCheckIn {
@@ -225,6 +226,19 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     }
 
     setIsLoading(true);
+
+    // 🛡️ SAFE: Wake lock wrapped in try-catch, won't affect main logic
+    let wakeLock = null;
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        console.log('Screen Wake Lock activated');
+      }
+    } catch (wakeLockError) {
+      // Silently fail - your app continues normally
+      console.log('Wake lock not available, continuing without it');
+    }
+
     try {
       // ✅ HOOK TO RIGHT ENDPOINT: Start journey
       const response = await fetch('/api/journey/start', {
@@ -255,15 +269,26 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
           totalDistance: '0.000 km',
           trackingPoints: 0,
           activeCheckins: 0,
-          status: 'active'
+          status: 'active',
+          wakeLock: wakeLock // 🔥 Store wake lock reference for later cleanup
         });
 
         startLocationTracking();
         setErrorMessage('');
       } else {
+        // 🛡️ Clean up wake lock if journey failed to start
+        if (wakeLock) {
+          wakeLock.release();
+          console.log('Wake lock released due to journey start failure');
+        }
         setErrorMessage(data.error || 'Failed to start journey');
       }
     } catch (error) {
+      // 🛡️ Clean up wake lock on any error
+      if (wakeLock) {
+        wakeLock.release();
+        console.log('Wake lock released due to error');
+      }
       console.error('Error starting journey:', error);
       setErrorMessage('Failed to start journey');
     } finally {
@@ -292,7 +317,38 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
-        setActiveJourney(prev => prev ? { ...prev, status: newStatus } : null);
+        // 🛡️ SAFE: Handle wake lock based on pause/resume
+        let updatedWakeLock = activeJourney.wakeLock;
+
+        if (newStatus === 'paused') {
+          // Release wake lock when pausing
+          if (activeJourney.wakeLock) {
+            try {
+              activeJourney.wakeLock.release();
+              console.log('Wake lock released - journey paused');
+              updatedWakeLock = null;
+            } catch (wakeLockError) {
+              console.log('Wake lock release failed, continuing normally');
+            }
+          }
+        } else {
+          // Request wake lock when resuming
+          try {
+            if ('wakeLock' in navigator) {
+              updatedWakeLock = await navigator.wakeLock.request('screen');
+              console.log('Wake lock reactivated - journey resumed');
+            }
+          } catch (wakeLockError) {
+            console.log('Wake lock not available on resume, continuing without it');
+            updatedWakeLock = null;
+          }
+        }
+
+        setActiveJourney(prev => prev ? {
+          ...prev,
+          status: newStatus,
+          wakeLock: updatedWakeLock // 🔥 Update wake lock reference
+        } : null);
 
         if (newStatus === 'paused') {
           if (locationWatchId) {
@@ -335,6 +391,19 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
+        // 🛡️ SAFE: Refresh wake lock during check-in (optional safety measure)
+        if (activeJourney.wakeLock) {
+          try {
+            // Just check if wake lock is still active, don't change anything
+            if (activeJourney.wakeLock.released) {
+              console.log('Wake lock was released, journey still continues normally');
+            }
+          } catch (wakeLockError) {
+            // Silently continue - this is just a health check
+            console.log('Wake lock check during checkin - no issues');
+          }
+        }
+
         const newCheckin: DealerCheckIn = {
           id: data.data.id,
           dealerName: data.dealerVisit?.dealer?.name || 'Quick Check-in Location',
@@ -379,6 +448,16 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
       const data = await response.json();
       if (data.success) {
+        // 🛡️ SAFE: Release wake lock when journey ends
+        if (activeJourney.wakeLock) {
+          try {
+            activeJourney.wakeLock.release();
+            console.log('Wake lock released - journey ended');
+          } catch (wakeLockError) {
+            console.log('Wake lock release failed, continuing normally');
+          }
+        }
+
         // Show journey summary
         const summary = data.journeyStats || {
           duration: activeJourney.duration,
@@ -404,6 +483,15 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       console.error('Error ending journey:', error);
       setErrorMessage('Failed to end journey');
     } finally {
+      // 🛡️ SAFE: Fallback wake lock cleanup in finally block
+      if (activeJourney?.wakeLock) {
+        try {
+          activeJourney.wakeLock.release();
+          console.log('Wake lock released in finally block');
+        } catch (wakeLockError) {
+          console.log('Fallback wake lock release failed, no issues');
+        }
+      }
       setIsLoading(false);
     }
   };
