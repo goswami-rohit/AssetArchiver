@@ -2316,7 +2316,8 @@ export function setupWebRoutes(app: Express) {
         siteName: siteName || (dealersToVisit.length > 0 ? `Visiting ${dealersToVisit.map(d => d.name).join(', ')}` : 'Simple Journey'),
         checkInTime: new Date(),
         checkOutTime: null,
-        totalDistanceTravelled: "0.000" // ✅ Decimal as string with 3 decimal places
+        totalDistanceTravelled: "0.000",// ✅ Decimal as string with 3 decimal places 
+        updatedAt: new Date()
       };
 
       // ✅ USE SCHEMA VALIDATION

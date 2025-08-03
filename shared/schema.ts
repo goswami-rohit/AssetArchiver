@@ -369,7 +369,6 @@ export const insertCompetitionReportSchema = createInsertSchema(competitionRepor
 export const insertGeoTrackingSchema = createInsertSchema(geoTracking, {
   // ✅ These fields will still exist in DB, just not required in validation
   createdAt: undefined,  // DB will auto-set with defaultNow()
-  updatedAt: undefined,  // DB will auto-set with defaultNow()
 });
 export const insertDailyTaskSchema = createInsertSchema(dailyTasks);
 
