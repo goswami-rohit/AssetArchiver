@@ -5,9 +5,9 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Send, Mic, Camera, MapPin, Bot, User, Clock, CheckCircle, Calendar, Users, Building2, FileText, 
-  TrendingUp, Zap, Upload, Download, ChevronUp, ChevronDown, Minimize2, Maximize2, Star, 
+import {
+  Send, Mic, Camera, MapPin, Bot, User, Clock, CheckCircle, Calendar, Users, Building2, FileText,
+  TrendingUp, Zap, Upload, Download, ChevronUp, ChevronDown, Minimize2, Maximize2, Star,
   Heart, Sparkles, Target, Route, Store, BarChart3, Settings, AlertCircle, Loader2,
   MessageSquare, PlusCircle, Search, Filter, RefreshCw, Eye, Edit, Trash2
 } from 'lucide-react';
@@ -31,16 +31,16 @@ interface ActionButton {
 
 interface ChatInterfaceProps {
   context: string;
-  currentLocation: {lat: number, lng: number} | null;
+  currentLocation: { lat: number, lng: number } | null;
   userId: number;
   onContextChange: (context: string) => void;
 }
 
-export default function ChatInterface({ 
-  context, 
-  currentLocation, 
-  userId, 
-  onContextChange 
+export default function ChatInterface({
+  context,
+  currentLocation,
+  userId,
+  onContextChange
 }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
@@ -72,7 +72,7 @@ export default function ChatInterface({
     const welcomeMessage = await getContextWelcomeMessage(context);
     const actions = getQuickActions(context);
     setQuickActions(actions);
-    
+
     setMessages([{
       id: Date.now().toString(),
       type: 'ai',
@@ -157,7 +157,7 @@ export default function ChatInterface({
   // 🤖 ENHANCED WELCOME MESSAGES WITH REAL DATA
   const getContextWelcomeMessage = async (ctx: string): Promise<string> => {
     const timeOfDay = new Date().getHours() < 12 ? 'Morning' : new Date().getHours() < 17 ? 'Afternoon' : 'Evening';
-    
+
     switch (ctx) {
       case 'attendance':
         return `🌟 Good ${timeOfDay}! **Attendance Assistant Ready!**\n\n🕐 **Today's Status:**\n${recentData?.hasAttendance ? '✅ You\'re checked in!' : '⏰ Ready to punch in?'}\n\n🎯 **Quick Actions:**\n• Check attendance status\n• View weekly summary\n• Export attendance report\n\n💫 **AI Magic:** Just say "punch in" or "check my attendance" and I'll handle it!`;
@@ -243,7 +243,7 @@ export default function ChatInterface({
   // 🧠 SMART AI REQUEST PROCESSOR - HOOKS TO YOUR ENDPOINTS
   const processUserRequest = async (input: string, ctx: string): Promise<string> => {
     const lowerInput = input.toLowerCase();
-    
+
     try {
       // 🎯 ATTENDANCE REQUESTS
       if (ctx === 'attendance' || lowerInput.includes('punch') || lowerInput.includes('attendance')) {
@@ -389,7 +389,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **Punch In Successful!**\n\n🕐 **Time:** ${new Date().toLocaleTimeString()}\n📍 **Location:** ${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}\n\n🎉 Have a productive day ahead!`;
       } else {
@@ -419,7 +419,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **Punch Out Complete!**\n\n🕐 **Time:** ${new Date().toLocaleTimeString()}\n📍 **Location:** ${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}\n\n🎉 Great work today! See you tomorrow!`;
       } else {
@@ -434,13 +434,13 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/attendance/today/${userId}`);
       const data = await response.json();
-      
+
       if (data.success) {
         if (data.hasAttendance) {
           const attendance = data.data;
           const punchInTime = new Date(attendance.inTimeTimestamp).toLocaleTimeString();
           const punchOutTime = attendance.outTimeTimestamp ? new Date(attendance.outTimeTimestamp).toLocaleTimeString() : null;
-          
+
           return `📊 **Today's Attendance**\n\n✅ **Status:** ${punchOutTime ? 'Completed' : 'Active'}\n🕐 **Punch In:** ${punchInTime}\n${punchOutTime ? `🕐 **Punch Out:** ${punchOutTime}` : '⏰ **Still Active**'}\n📍 **Location:** ${attendance.locationName}\n\n${punchOutTime ? '🎉 Day completed!' : '💪 Keep up the good work!'}`;
         } else {
           return `📊 **Today's Attendance**\n\n⏰ **Status:** Not punched in yet\n\n💡 **Ready to start?** Just say "punch in" and I'll handle it!`;
@@ -457,18 +457,18 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/attendance/recent?userId=${userId}&limit=7`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         let history = `📈 **Attendance History (Last 7 Days)**\n\n`;
-        
+
         data.data.forEach((record: any, index: number) => {
           const date = new Date(record.attendanceDate).toLocaleDateString();
           const punchIn = new Date(record.inTimeTimestamp).toLocaleTimeString();
           const punchOut = record.outTimeTimestamp ? new Date(record.outTimeTimestamp).toLocaleTimeString() : 'N/A';
-          
+
           history += `${index + 1}. **${date}**\n   In: ${punchIn} | Out: ${punchOut}\n\n`;
         });
-        
+
         return history + `📊 **Total Days:** ${data.data.length}\n✅ **Perfect attendance!**`;
       } else {
         return `📊 **No attendance history found.**\n\nStart punching in to build your attendance record!`;
@@ -509,7 +509,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `🚗 **Journey Started Successfully!**\n\n📍 **Starting Point:** ${siteName}\n🕐 **Start Time:** ${new Date().toLocaleTimeString()}\n🎯 **Journey ID:** ${data.data.id}\n\n📡 **GPS Tracking:** Active\n🔋 **Battery:** Optimized\n\n💫 I'll track your location and help with dealer check-ins along the way!`;
       } else {
@@ -524,11 +524,11 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/journey/active/${userId}`);
       const data = await response.json();
-      
+
       if (data.success && data.hasActiveJourney) {
         const journey = data.data.journey;
         const status = data.data.status;
-        
+
         return `🗺️ **Active Journey Status**\n\n📍 **Location:** ${journey.siteName}\n⏱️ **Duration:** ${status.duration}\n📏 **Distance:** ${status.totalDistance}\n📊 **Tracking Points:** ${status.trackingPoints}\n🏪 **Active Check-ins:** ${status.activeCheckins}\n\n🚗 **Status:** Journey in progress\n💫 **AI Monitoring:** Your route and activities`;
       } else {
         return `🗺️ **No Active Journey**\n\n💡 **Ready to start?** Just say "start journey" or "begin route to [destination]" and I'll get you moving!`;
@@ -542,10 +542,10 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/journey/analytics/${userId}?days=30`);
       const data = await response.json();
-      
+
       if (data.success) {
         const analytics = data.analytics;
-        
+
         return `📊 **Journey Analytics (Last 30 Days)**\n\n🚗 **Total Journeys:** ${analytics.totalJourneys}\n✅ **Completed:** ${analytics.completedJourneys}\n📏 **Total Distance:** ${analytics.totalDistance}\n⏱️ **Total Duration:** ${analytics.totalDuration}\n📈 **Average Distance:** ${analytics.averageDistance}\n🏪 **Dealer Visits:** ${analytics.dealerVisits.total}\n\n🎯 **Performance:** ${analytics.completedJourneys > 10 ? 'Excellent!' : 'Keep it up!'}`;
       } else {
         return `📊 **No journey data available.**\n\nStart tracking journeys to see your analytics!`;
@@ -559,7 +559,7 @@ export default function ChatInterface({
     try {
       const activeResponse = await fetch(`/api/journey/active/${userId}`);
       const activeData = await activeResponse.json();
-      
+
       if (!activeData.hasActiveJourney) {
         return `⚠️ **No Active Journey**\n\nYou don't have any active journey to end.`;
       }
@@ -578,7 +578,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         const summary = data.data.summary;
         return `🏁 **Journey Completed!**\n\n📊 **Final Summary:**\n⏱️ **Duration:** ${summary.duration}\n📏 **Distance:** ${summary.totalDistance}\n🏪 **Dealers Visited:** ${summary.dealersVisited}\n📍 **Waypoints:** ${summary.waypoints}\n\n🎉 **Excellent work!** Your journey data has been saved and analyzed.`;
@@ -593,49 +593,156 @@ export default function ChatInterface({
   // 📊 DVR HANDLERS
   const handleCreateDVR = async (input: string): Promise<string> => {
     setTypingIndicator(true);
-    
+
     try {
-      // Extract information from natural language input using AI
-      const response = await fetch('/api/dvr', {
+      // ✅ STEP 1: Simple extraction (no complex parsing needed)
+      const dealerName = extractDealerName(input);
+      const visitPurpose = extractVisitPurpose(input);
+      const visitOutcome = extractVisitOutcome(input);
+
+      if (!dealerName) {
+        return `⚠️ **Missing Information**\n\nPlease provide the **dealer name** you visited.\n\n💡 Example: "Visited ABC Dealers for routine check"`;
+      }
+
+      // ✅ STEP 2: SAFELY query dealers database to validate/find the dealer
+      let matchedDealer = null;
+      try {
+        const dealersResponse = await fetch(`/api/dealers/recent?userId=${userId}&limit=1000`);
+
+        if (dealersResponse.ok) {
+          const dealersData = await dealersResponse.json();
+
+          if (dealersData.success && dealersData.data) {
+            // ✅ SAFE: Find matching dealer (case-insensitive, partial match)
+            const searchName = dealerName.toLowerCase().trim();
+
+            matchedDealer = dealersData.data.find((dealer: any) => {
+              const dealerNameLower = dealer.name.toLowerCase();
+              return dealerNameLower.includes(searchName) || searchName.includes(dealerNameLower);
+            });
+
+            // ✅ SAFE: If exact match not found, try fuzzy matching
+            if (!matchedDealer) {
+              matchedDealer = dealersData.data.find((dealer: any) => {
+                const dealerWords = dealer.name.toLowerCase().split(' ');
+                const searchWords = searchName.split(' ');
+
+                return dealerWords.some(word =>
+                  searchWords.some(searchWord =>
+                    word.includes(searchWord) || searchWord.includes(word)
+                  )
+                );
+              });
+            }
+          }
+        }
+      } catch (dealerError) {
+        console.log('Dealer lookup failed, continuing with user input:', dealerError);
+      }
+
+      // ✅ STEP 3: Create DVR using your exact API endpoint format
+      const response = await fetch('/api/dvr/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          useAI: true,
-          userInput: input,
-          userId,
-          location: currentLocation,
-          dealerName: extractDealerName(input),
-          alsoCreateClientReport: true
+          // ✅ MATCHES YOUR API EXACTLY
+          userId: userId,
+          dealerName: matchedDealer ? matchedDealer.name : dealerName,
+          visitPurpose: visitPurpose || 'routine visit',
+          visitOutcome: visitOutcome || undefined,
+          latitude: currentLocation?.lat || 0,
+          longitude: currentLocation?.lng || 0,
+          locationName: currentLocation?.address || 'Field Location',
+          checkInTime: new Date().toISOString(),
+          checkOutTime: null,
+          inTimeImageUrl: null,
+          outTimeImageUrl: null
         })
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
-        return `✅ **DVR Created Successfully!**\n\n🏪 **Dealer:** ${data.data.dealerName}\n📅 **Date:** ${data.data.reportDate}\n💰 **Order:** ₹${data.data.todayOrderMt}\n💳 **Collection:** ₹${data.data.todayCollectionRupees}\n📍 **Location:** ${data.data.location}\n\n📝 **Report ID:** ${data.data.id}\n${data.aiGenerated ? '🤖 **AI Generated:** Professional formatting applied!' : ''}\n\n🎉 Your DVR is ready and saved to the system!`;
+        // ✅ SAFE: Enhanced success message using your API response structure
+        const dealerStatus = matchedDealer
+          ? `✅ **Found in Database** (${matchedDealer.type})`
+          : `ℹ️ **New Dealer** (Added to report)`;
+
+        return `✅ **DVR Created Successfully!**\n\n🏪 **Dealer:** ${data.data.dealerName}\n${dealerStatus}\n📅 **Date:** ${data.data.reportDate}\n🏷️ **Type:** ${data.data.dealerType} - ${data.data.visitType}\n💰 **Order:** ${data.data.todayOrderMt} MT\n💳 **Collection:** ₹${data.data.todayCollectionRupees}\n🏢 **Brands:** ${data.data.brandSelling?.join(', ') || 'N/A'}\n📍 **Location:** ${data.data.location}\n\n💬 **Feedback:** ${data.data.feedbacks}\n🔧 **Solutions:** ${data.data.solutionBySalesperson}\n📝 **Remarks:** ${data.data.anyRemarks}\n\n${matchedDealer ? `📊 **Dealer Info:**\n• Region: ${matchedDealer.region}\n• Area: ${matchedDealer.area}\n• Phone: ${matchedDealer.phoneNo}\n\n` : ''}📝 **Report ID:** ${data.data.id}\n🤖 **${data.message}**\n\n🎉 Your comprehensive DVR is ready!`;
       } else {
-        return `⚠️ **DVR Creation Issue**\n\n${data.error || 'Unable to create DVR.'}\n\n💡 Try providing dealer name and visit details.`;
+        // ✅ SAFE: Handle API error response
+        return `⚠️ **DVR Creation Failed**\n\n${data.error || 'Unable to create DVR.'}\n\n${data.details ? `**Details:** ${data.details}` : ''}\n\n💡 Try providing dealer name and visit purpose clearly.`;
       }
-    } catch (error) {
-      return `❌ **Connection Error**\n\nUnable to create DVR. Please check your connection.`;
+    } catch (error: any) {
+      console.error('DVR Creation Error:', error);
+      return `❌ **Connection Error**\n\nUnable to create DVR. Please check your connection and try again.\n\n**Error:** ${error?.message || 'Unknown error'}`;
     } finally {
       setTypingIndicator(false);
     }
   };
 
+  // ✅ SIMPLE: Basic extraction functions (lightweight and safe)
+  const extractDealerName = (input: string): string => {
+    const patterns = [
+      /visited\s+([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+for|\s+to|,|\.|$)/i,
+      /went\s+to\s+([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+for|\s+to|,|\.|$)/i,
+      /at\s+([^,\s]+(?:\s+[^,\s]+)*?)(?:\s+dealer|\s+for|,|\.|$)/i,
+      /([^,\s]+(?:\s+[^,\s]+)*?)\s+dealer/i,
+      /([^,\s]+(?:\s+[^,\s]+)*?)\s+construction/i,
+      /([^,\s]+(?:\s+[^,\s]+)*?)\s+enterprises/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = input.match(pattern);
+      if (match && match[1] && match[1].trim().length > 1) {
+        return match[1].trim();
+      }
+    }
+
+    // ✅ FALLBACK: If no pattern matches, try to extract first meaningful word(s)
+    const words = input.split(/\s+/).filter(word =>
+      word.length > 2 &&
+      !['visited', 'went', 'for', 'the', 'and', 'with', 'routine', 'collection', 'order'].includes(word.toLowerCase())
+    );
+
+    return words.slice(0, 2).join(' ') || '';
+  };
+
+  const extractVisitPurpose = (input: string): string => {
+    const lowerInput = input.toLowerCase();
+
+    if (lowerInput.includes('collection') || lowerInput.includes('collect')) return 'collection';
+    if (lowerInput.includes('order') || lowerInput.includes('booking')) return 'order taking';
+    if (lowerInput.includes('complaint') || lowerInput.includes('issue') || lowerInput.includes('problem')) return 'complaint resolution';
+    if (lowerInput.includes('new') || lowerInput.includes('onboard')) return 'new dealer onboarding';
+
+    return 'routine visit';
+  };
+
+  const extractVisitOutcome = (input: string): string => {
+    const lowerInput = input.toLowerCase();
+
+    if (lowerInput.includes('good') || lowerInput.includes('successful') || lowerInput.includes('positive')) return 'good';
+    if (lowerInput.includes('poor') || lowerInput.includes('bad') || lowerInput.includes('negative')) return 'poor';
+    if (lowerInput.includes('average') || lowerInput.includes('okay') || lowerInput.includes('normal')) return 'average';
+
+    return '';
+  };
+
+  // ✅ ALREADY PERFECT - Uses your /api/dvr/recent endpoint optimally
   const handleRecentDVR = async (): Promise<string> => {
     try {
       const response = await fetch(`/api/dvr/recent?userId=${userId}&limit=5`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         let recent = `📊 **Recent DVR Reports**\n\n`;
-        
+
         data.data.forEach((dvr: any, index: number) => {
           const date = new Date(dvr.reportDate).toLocaleDateString();
-          recent += `${index + 1}. **${dvr.dealerName}** (${date})\n   Order: ₹${dvr.todayOrderMt} | Collection: ₹${dvr.todayCollectionRupees}\n\n`;
+          recent += `${index + 1}. **${dvr.dealerName}** (${date})\n   Order: ${dvr.todayOrderMt} MT | Collection: ₹${dvr.todayCollectionRupees}\n\n`;
         });
-        
+
         return recent + `📈 **Total Reports:** ${data.total}\n\n💡 Need to create a new DVR? Just describe your dealer visit!`;
       } else {
         return `📊 **No DVR reports found.**\n\n💡 Start creating DVRs by describing your dealer visits!`;
@@ -645,17 +752,18 @@ export default function ChatInterface({
     }
   };
 
+  // ✅ ALREADY PERFECT - Uses your /api/dvr/recent endpoint with analytics
   const handleDVRAnalytics = async (): Promise<string> => {
     try {
       const response = await fetch(`/api/dvr/recent?userId=${userId}&limit=30`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         const totalOrders = data.data.reduce((sum: number, dvr: any) => sum + parseFloat(dvr.todayOrderMt || '0'), 0);
         const totalCollection = data.data.reduce((sum: number, dvr: any) => sum + parseFloat(dvr.todayCollectionRupees || '0'), 0);
         const avgOrder = totalOrders / data.data.length;
-        
-        return `📈 **DVR Analytics (Last 30 Days)**\n\n📊 **Total Reports:** ${data.data.length}\n💰 **Total Orders:** ₹${totalOrders.toLocaleString()}\n💳 **Total Collection:** ₹${totalCollection.toLocaleString()}\n📊 **Average Order:** ₹${avgOrder.toFixed(0)}\n🎯 **Performance:** ${data.data.length > 20 ? 'Excellent!' : 'Good progress!'}\n\n💡 Keep up the great work with dealer visits!`;
+
+        return `📈 **DVR Analytics (Last 30 Days)**\n\n📊 **Total Reports:** ${data.data.length}\n💰 **Total Orders:** ${totalOrders.toLocaleString()} MT\n💳 **Total Collection:** ₹${totalCollection.toLocaleString()}\n📊 **Average Order:** ${avgOrder.toFixed(2)} MT\n🎯 **Performance:** ${data.data.length > 20 ? 'Excellent!' : 'Good progress!'}\n\n💡 Keep up the great work with dealer visits!`;
       } else {
         return `📊 **No DVR data available.**\n\nStart creating DVRs to see your analytics!`;
       }
@@ -663,11 +771,10 @@ export default function ChatInterface({
       return `❌ **Unable to fetch DVR analytics.**\n\nPlease try again later.`;
     }
   };
-
   // 🔧 TVR HANDLERS
   const handleCreateTVR = async (input: string): Promise<string> => {
     setTypingIndicator(true);
-    
+
     try {
       const response = await fetch('/api/tvr', {
         method: 'POST',
@@ -683,7 +790,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **TVR Created Successfully!**\n\n🏢 **Site:** ${data.data.siteNameConcernedPerson}\n🔧 **Work Type:** ${data.data.visitType}\n⚡ **Issue:** ${data.data.technicalIssue}\n✅ **Service:** ${data.data.serviceProvided}\n📝 **Feedback:** ${data.data.customerFeedback}\n\n📝 **Report ID:** ${data.data.id}\n${data.aiGenerated ? '🤖 **AI Generated:** Technical details formatted professionally!' : ''}\n\n🎉 Your TVR is ready and logged!`;
       } else {
@@ -700,15 +807,15 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/tvr/recent?userId=${userId}&limit=5`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         let recent = `🔧 **Recent TVR Reports**\n\n`;
-        
+
         data.data.forEach((tvr: any, index: number) => {
           const date = new Date(tvr.reportDate).toLocaleDateString();
           recent += `${index + 1}. **${tvr.siteNameConcernedPerson}** (${date})\n   Type: ${tvr.visitType} | Issue: ${tvr.technicalIssue.substring(0, 50)}...\n\n`;
         });
-        
+
         return recent + `📈 **Total Reports:** ${data.total}\n\n💡 Need to create a new TVR? Describe your technical work!`;
       } else {
         return `🔧 **No TVR reports found.**\n\n💡 Start creating TVRs by describing your technical work!`;
@@ -723,17 +830,17 @@ export default function ChatInterface({
     try {
       // Extract search terms from input
       const searchTerm = input.replace(/find|search|locate|dealer/gi, '').trim();
-      
+
       const response = await fetch(`/api/dealers/search?q=${encodeURIComponent(searchTerm)}&limit=10`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         let results = `🔍 **Dealer Search Results**\n\n`;
-        
+
         data.data.forEach((dealer: any, index: number) => {
           results += `${index + 1}. **${dealer.name}**\n   📱 ${dealer.phone || 'N/A'} | 📧 ${dealer.email || 'N/A'}\n   📍 ${dealer.address || 'No address'}\n\n`;
         });
-        
+
         return results + `📊 Found ${data.data.length} dealers\n\n💡 Need more details about a specific dealer? Just ask!`;
       } else {
         return `🔍 **No dealers found** matching "${searchTerm}"\n\n💡 Try a different search term or add a new dealer if needed.`;
@@ -748,7 +855,7 @@ export default function ChatInterface({
     const nameMatch = input.match(/name\s+([^,\n]+)/i) || input.match(/dealer\s+([^,\n]+)/i);
     const phoneMatch = input.match(/phone\s+([0-9\-\+\s]+)/i) || input.match(/mobile\s+([0-9\-\+\s]+)/i);
     const emailMatch = input.match(/email\s+([^\s,\n]+)/i);
-    
+
     if (!nameMatch) {
       return `⚠️ **Missing Dealer Name**\n\n💡 Please provide the dealer name. Example:\n"Add dealer ABC Store, phone 9876543210, email abc@store.com"`;
     }
@@ -769,7 +876,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **Dealer Added Successfully!**\n\n🏢 **Name:** ${data.data.name}\n📱 **Phone:** ${data.data.phone || 'Not provided'}\n📧 **Email:** ${data.data.email || 'Not provided'}\n📝 **ID:** ${data.data.id}\n\n🎉 Dealer is now in your system and ready for visits!`;
       } else {
@@ -784,11 +891,11 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/dealers/recent?limit=100`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         const totalDealers = data.total;
         const activeDealers = data.data.filter((d: any) => d.isActive !== false).length;
-        
+
         return `📊 **Dealer Analytics**\n\n🏢 **Total Dealers:** ${totalDealers}\n✅ **Active Dealers:** ${activeDealers}\n📈 **Growth Rate:** ${totalDealers > 50 ? 'Excellent' : 'Growing'}\n\n💡 **Performance:** Your dealer network is ${totalDealers > 100 ? 'impressive!' : 'expanding!'}`;
       } else {
         return `📊 **No dealer data available.**\n\nStart adding dealers to see analytics!`;
@@ -804,7 +911,7 @@ export default function ChatInterface({
     const daysMatch = input.match(/(\d+)\s*days?/i);
     const fromMatch = input.match(/from\s+([^\s,]+)/i) || input.match(/starting\s+([^\s,]+)/i);
     const reasonMatch = input.match(/for\s+([^,\n]+)/i) || input.match(/because\s+([^,\n]+)/i);
-    
+
     const days = daysMatch ? parseInt(daysMatch[1]) : 1;
     const startDate = fromMatch ? fromMatch[1] : 'tomorrow';
     const reason = reasonMatch ? reasonMatch[1].trim() : 'Personal work';
@@ -822,7 +929,7 @@ export default function ChatInterface({
         start.setTime(parsed.getTime());
       }
     }
-    
+
     const end = new Date(start);
     end.setDate(end.getDate() + days - 1);
 
@@ -840,7 +947,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **Leave Application Submitted!**\n\n📅 **Duration:** ${days} day(s)\n📆 **From:** ${start.toLocaleDateString()}\n📆 **To:** ${end.toLocaleDateString()}\n📝 **Reason:** ${reason}\n🔄 **Status:** Pending Approval\n📝 **Application ID:** ${data.data.id}\n\n⏰ You'll be notified once your leave is reviewed.`;
       } else {
@@ -855,17 +962,17 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/leave/user/${userId}?limit=10`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         const pending = data.data.filter((l: any) => l.status === 'Pending').length;
         const approved = data.data.filter((l: any) => l.status === 'Approved').length;
         const rejected = data.data.filter((l: any) => l.status === 'Rejected').length;
-        
+
         let status = `📊 **Leave Status Summary**\n\n`;
         status += `⏰ **Pending:** ${pending}\n`;
         status += `✅ **Approved:** ${approved}\n`;
         status += `❌ **Rejected:** ${rejected}\n\n`;
-        
+
         if (pending > 0) {
           status += `🔄 **Latest Pending Applications:**\n`;
           data.data.filter((l: any) => l.status === 'Pending').slice(0, 3).forEach((leave: any, index: number) => {
@@ -874,7 +981,7 @@ export default function ChatInterface({
             status += `${index + 1}. ${start} to ${end} - ${leave.reason}\n`;
           });
         }
-        
+
         return status + `\n💡 Need to apply for more leave? Just describe when and why!`;
       } else {
         return `📊 **No leave applications found.**\n\n💡 Apply for leave by saying something like "Need 2 days leave from tomorrow for family function"`;
@@ -888,18 +995,18 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/leave/user/${userId}?limit=20`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         let history = `📅 **Leave History**\n\n`;
-        
+
         data.data.slice(0, 10).forEach((leave: any, index: number) => {
           const start = new Date(leave.startDate).toLocaleDateString();
           const end = new Date(leave.endDate).toLocaleDateString();
           const statusIcon = leave.status === 'Approved' ? '✅' : leave.status === 'Rejected' ? '❌' : '⏰';
-          
+
           history += `${index + 1}. ${statusIcon} **${start} to ${end}**\n   Reason: ${leave.reason}\n   Status: ${leave.status}\n\n`;
         });
-        
+
         return history + `📊 **Total Applications:** ${data.total}`;
       } else {
         return `📅 **No leave history found.**\n\nStart applying for leave to build your history!`;
@@ -912,7 +1019,7 @@ export default function ChatInterface({
   // 🏆 COMPETITION HANDLERS
   const handleCompetitionAnalysis = async (input: string): Promise<string> => {
     setTypingIndicator(true);
-    
+
     try {
       const response = await fetch('/api/competition', {
         method: 'POST',
@@ -926,7 +1033,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `🏆 **Competition Report Created!**\n\n🏢 **Brand:** ${data.data.brandName}\n💰 **Billing:** ${data.data.billing}\n📊 **NOD:** ${data.data.nod}\n🏪 **Retail:** ${data.data.retail}\n🎯 **Schemes:** ${data.data.schemesYesNo}\n💵 **Avg Scheme Cost:** ₹${data.data.avgSchemeCost}\n📝 **Remarks:** ${data.data.remarks}\n\n📝 **Report ID:** ${data.data.id}\n${data.aiGenerated ? '🤖 **AI Analyzed:** Market intelligence processed!' : ''}\n\n📈 Your competitive intelligence is updated!`;
       } else {
@@ -943,11 +1050,11 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/competition/analysis/${userId}?days=30`);
       const data = await response.json();
-      
+
       if (data.success) {
         const analysis = data.analysis;
-        
-        return `📈 **Market Trends Analysis**\n\n📊 **Total Reports:** ${analysis.totalReports}\n🏢 **Unique Brands:** ${analysis.uniqueBrands}\n🎯 **With Schemes:** ${analysis.schemesAnalysis.withSchemes}\n💵 **Avg Scheme Cost:** ₹${analysis.avgSchemeCost.overall.toFixed(0)}\n\n🔥 **Recent Trends:**\n${analysis.recentTrends.map((trend: any, index: number) => 
+
+        return `📈 **Market Trends Analysis**\n\n📊 **Total Reports:** ${analysis.totalReports}\n🏢 **Unique Brands:** ${analysis.uniqueBrands}\n🎯 **With Schemes:** ${analysis.schemesAnalysis.withSchemes}\n💵 **Avg Scheme Cost:** ₹${analysis.avgSchemeCost.overall.toFixed(0)}\n\n🔥 **Recent Trends:**\n${analysis.recentTrends.map((trend: any, index: number) =>
           `${index + 1}. ${trend.brand} - ${trend.hasSchemes ? '🎯 Scheme Active' : '📊 No Schemes'} (${new Date(trend.date).toLocaleDateString()})`
         ).join('\n')}\n\n💡 Keep monitoring competition for market advantage!`;
       } else {
@@ -963,13 +1070,13 @@ export default function ChatInterface({
     try {
       const response = await fetch(`/api/tasks/recent?userId=${userId}&limit=10`);
       const data = await response.json();
-      
+
       if (data.success && data.data.length > 0) {
         const pending = data.data.filter((t: any) => t.status === 'pending');
         const completed = data.data.filter((t: any) => t.status === 'completed');
-        
+
         let tasks = `✅ **Your Tasks Overview**\n\n📋 **Pending Tasks (${pending.length}):**\n`;
-        
+
         if (pending.length > 0) {
           pending.slice(0, 5).forEach((task: any, index: number) => {
             tasks += `${index + 1}. **${task.title}**\n   Due: ${new Date(task.dueDate).toLocaleDateString()}\n   Priority: ${task.priority}\n\n`;
@@ -977,9 +1084,9 @@ export default function ChatInterface({
         } else {
           tasks += `🎉 All caught up! No pending tasks.\n\n`;
         }
-        
+
         tasks += `✅ **Completed: ${completed.length}**\n\n💡 Need to update a task? Just say "mark task [title] complete"`;
-        
+
         return tasks;
       } else {
         return `📋 **No tasks found.**\n\n💡 Create tasks by saying "create task for dealer follow-up tomorrow"`;
@@ -994,10 +1101,10 @@ export default function ChatInterface({
     const titleMatch = input.match(/task\s+for\s+([^,\n]+)/i) || input.match(/create\s+([^,\n]+)/i);
     const dueDateMatch = input.match(/(tomorrow|today|next week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i);
     const priorityMatch = input.match(/(urgent|high|medium|low)\s+priority/i);
-    
+
     const title = titleMatch ? titleMatch[1].trim() : 'New Task';
     const priority = priorityMatch ? priorityMatch[1].toLowerCase() : 'medium';
-    
+
     // Calculate due date
     const dueDate = new Date();
     if (dueDateMatch) {
@@ -1028,7 +1135,7 @@ export default function ChatInterface({
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         return `✅ **Task Created Successfully!**\n\n📋 **Title:** ${data.data.title}\n📅 **Due Date:** ${new Date(data.data.dueDate).toLocaleDateString()}\n🎯 **Priority:** ${data.data.priority}\n📝 **Task ID:** ${data.data.id}\n\n⏰ You'll be reminded as the due date approaches!`;
       } else {
@@ -1042,25 +1149,25 @@ export default function ChatInterface({
   const handleCompleteTask = async (input: string): Promise<string> => {
     // Extract task identifier from input
     const taskMatch = input.match(/task\s+(\d+)/i) || input.match(/mark\s+([^,\n]+)\s+complete/i);
-    
+
     if (!taskMatch) {
       return `⚠️ **Task Not Specified**\n\n💡 Please specify which task to complete. Example:\n"Mark task 123 complete" or "Complete dealer follow-up task"`;
     }
 
     const taskIdentifier = taskMatch[1].trim();
-    
+
     try {
       // First, get the task list to find matching task
       const listResponse = await fetch(`/api/tasks/recent?userId=${userId}&limit=50`);
       const listData = await listResponse.json();
-      
+
       if (listData.success && listData.data.length > 0) {
         // Find task by ID or title
-        const task = listData.data.find((t: any) => 
-          t.id === taskIdentifier || 
+        const task = listData.data.find((t: any) =>
+          t.id === taskIdentifier ||
           t.title.toLowerCase().includes(taskIdentifier.toLowerCase())
         );
-        
+
         if (!task) {
           return `⚠️ **Task Not Found**\n\n💡 Couldn't find task matching "${taskIdentifier}". Try being more specific.`;
         }
@@ -1076,7 +1183,7 @@ export default function ChatInterface({
         });
 
         const data = await response.json();
-        
+
         if (data.success) {
           return `✅ **Task Completed!**\n\n📋 **Task:** ${task.title}\n🕐 **Completed:** ${new Date().toLocaleTimeString()}\n📅 **Due Date:** ${new Date(task.dueDate).toLocaleDateString()}\n\n🎉 Great job! Task marked as complete.`;
         } else {
@@ -1128,26 +1235,26 @@ export default function ChatInterface({
       ]);
 
       let analytics = `📊 **Comprehensive Analytics (Last 30 Days)**\n\n`;
-      
+
       if (attendance.success) {
         analytics += `🕐 **Attendance:** ${attendance.data.length} days\n`;
       }
-      
+
       if (journey.success) {
         analytics += `🗺️ **Journeys:** ${journey.analytics.totalJourneys} (${journey.analytics.totalDistance})\n`;
       }
-      
+
       if (dvr.success) {
         const totalOrders = dvr.data.reduce((sum: number, d: any) => sum + parseFloat(d.todayOrderMt || '0'), 0);
         analytics += `📊 **DVR Reports:** ${dvr.data.length} (₹${totalOrders.toLocaleString()} orders)\n`;
       }
-      
+
       if (tvr.success) {
         analytics += `🔧 **TVR Reports:** ${tvr.data.length}\n`;
       }
-      
+
       analytics += `\n🎯 **Performance Rating:** ${getPerformanceRating(attendance.data?.length || 0, (dvr.data?.length || 0) + (tvr.data?.length || 0))}\n\n💡 Keep up the excellent work!`;
-      
+
       return analytics;
     } catch (error) {
       return `❌ **Unable to fetch comprehensive analytics.**\n\nPlease try again later.`;
@@ -1224,12 +1331,12 @@ export default function ChatInterface({
 
     try {
       setTypingIndicator(true);
-      
+
       // Add a small delay to show typing indicator
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       const aiResponse = await processUserRequest(currentInput, context);
-      
+
       const aiMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
@@ -1296,9 +1403,8 @@ export default function ChatInterface({
   }
 
   return (
-    <div className={`fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl transition-all duration-300 z-40 ${
-      isExpanded ? 'h-[85vh]' : 'h-auto'
-    }`}>
+    <div className={`fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl transition-all duration-300 z-40 ${isExpanded ? 'h-[85vh]' : 'h-auto'
+      }`}>
       {/* 🎨 Enhanced Header */}
       <div className="px-4 py-3 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-b">
         <div className="flex items-center justify-between">
@@ -1310,12 +1416,12 @@ export default function ChatInterface({
               </Badge>
               <Sparkles className="w-3 h-3 text-yellow-500 absolute -top-1 -right-1 animate-pulse" />
             </div>
-            
+
             <Badge variant="outline" className="text-green-700 border-green-300 bg-green-50">
               <Zap className="w-3 h-3 mr-1" />
               56+ Endpoints
             </Badge>
-            
+
             {recentData && (
               <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">
                 <BarChart3 className="w-3 h-3 mr-1" />
@@ -1323,7 +1429,7 @@ export default function ChatInterface({
               </Badge>
             )}
           </div>
-          
+
           <div className="flex items-center space-x-2">
             {currentLocation && (
               <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50">
@@ -1331,7 +1437,7 @@ export default function ChatInterface({
                 GPS Active
               </Badge>
             )}
-            
+
             <Button
               variant="outline"
               size="sm"
@@ -1340,7 +1446,7 @@ export default function ChatInterface({
             >
               {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
             </Button>
-            
+
             <Button
               variant="outline"
               size="sm"
@@ -1351,7 +1457,7 @@ export default function ChatInterface({
             </Button>
           </div>
         </div>
-        
+
         {/* 🚀 Quick Action Buttons - Enhanced */}
         {!isExpanded && (
           <div className="flex space-x-2 mt-3 overflow-x-auto pb-2">
@@ -1379,11 +1485,10 @@ export default function ChatInterface({
               className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${
-                  message.type === 'user'
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
-                    : 'bg-white text-gray-900 border border-gray-200'
-                }`}
+                className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${message.type === 'user'
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                  : 'bg-white text-gray-900 border border-gray-200'
+                  }`}
               >
                 <div className="flex items-start space-x-3">
                   {message.type === 'ai' && (
@@ -1393,7 +1498,7 @@ export default function ChatInterface({
                   )}
                   <div className="flex-1">
                     <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
-                    
+
                     {/* 🎯 Action Buttons for AI messages */}
                     {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-3">
@@ -1411,7 +1516,7 @@ export default function ChatInterface({
                         ))}
                       </div>
                     )}
-                    
+
                     <p className="text-xs opacity-75 mt-2">
                       {message.timestamp.toLocaleTimeString()}
                     </p>
@@ -1420,7 +1525,7 @@ export default function ChatInterface({
               </div>
             </div>
           ))}
-          
+
           {/* 💭 Typing Indicator */}
           {typingIndicator && (
             <div className="flex justify-start">
@@ -1431,14 +1536,14 @@ export default function ChatInterface({
                   </div>
                   <div className="flex space-x-1">
                     <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                   </div>
                 </div>
               </div>
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </div>
       )}
@@ -1482,7 +1587,7 @@ export default function ChatInterface({
               </div>
             </div>
           </div>
-          
+
           <Button
             onClick={() => handleSendMessage()}
             disabled={isLoading || !inputValue.trim()}
@@ -1496,7 +1601,7 @@ export default function ChatInterface({
             )}
           </Button>
         </div>
-        
+
         <div className="flex items-center justify-between mt-3">
           <p className="text-xs text-gray-500">
             💡 Connected to 56+ endpoints • AI-powered responses • Real-time data

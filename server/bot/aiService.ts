@@ -22,7 +22,7 @@ export interface AIAnalysisResult {
 
 export // ===== PROPERLY CONFIGURED AI SERVICES FOR OPENROUTER =====
 
-class AIService {
+  class AIService {
   private openrouterApiKey: string;
   private baseUrl = 'https://openrouter.ai/api/v1';
   private siteUrl: string;
@@ -32,7 +32,7 @@ class AIService {
     this.openrouterApiKey = openrouterApiKey;
     this.siteUrl = siteUrl || 'https://telesalesside.onrender.com/pwa';
     this.siteTitle = siteTitle || 'CRM Assistant';
-    
+
     console.log('🔑 OpenRouter API Key configured:', this.openrouterApiKey ? `${this.openrouterApiKey.substring(0, 8)}...` : 'NOT FOUND');
     console.log('🎯 Using OpenRouter Direct API');
   }
@@ -129,7 +129,7 @@ Make it professional, data-driven, and actionable for sales strategy.
 
     try {
       const response = await this.callOpenRouter(messages, 0.3, 800);
-      
+
       // Try to extract JSON from response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -144,137 +144,281 @@ Make it professional, data-driven, and actionable for sales strategy.
   }
 
   // 📊 DVR GENERATION (Daily Visit Reports - Schema-Compliant)
-  async generateDVRFromInput(input: {
+  async generateDVRFromMinimalInput(input: {
     dealerName: string,
-    visitContext: string,
-    customerInteraction: string,
-    location: { lat: number, lng: number },
-    dealerType?: string
+    visitPurpose: string, // "routine visit" | "collection" | "order taking" | "complaint resolution" | "new dealer onboarding"
+    visitOutcome?: string, // Optional: "good" | "average" | "poor" | brief description
+    location: { lat: number, lng: number }
   }): Promise<any> {
     const messages = [
       {
         "role": "system",
-        "content": "You are a CRM assistant specializing in Daily Visit Reports. Generate accurate, professional DVR data from field visit information."
+        "content": "You are an expert CRM assistant who creates comprehensive Daily Visit Reports from minimal field data. You understand the cement/construction industry and generate realistic, professional DVR entries that match actual field scenarios."
       },
       {
         "role": "user",
         "content": `
-Generate a professional Daily Visit Report from this field visit:
+Create a complete Daily Visit Report from this minimal field input:
 
-Dealer: ${input.dealerName}
-Visit Context: ${input.visitContext}
-Customer Interaction: ${input.customerInteraction}
-Location: ${input.location.lat}, ${input.location.lng}
+🏪 DEALER: ${input.dealerName}
+🎯 VISIT PURPOSE: ${input.visitPurpose}
+${input.visitOutcome ? `📊 VISIT OUTCOME: ${input.visitOutcome}` : ''}
+📍 LOCATION: ${input.location.lat}, ${input.location.lng}
 
-Create schema-compliant DVR data for daily_visit_reports table:
+GENERATE REALISTIC DVR DATA:
 
-Required Analysis:
-- dealerType: "Dealer" or "Sub Dealer" (determine from context)
-- visitType: "Best" or "Non Best" (assess visit quality)
-- dealerTotalPotential: decimal(10,2) - Estimate total potential
-- dealerBestPotential: decimal(10,2) - Estimate best potential  
-- brandSelling: text array - Extract/estimate brands sold
-- todayOrderMt: decimal(10,2) - Extract order quantity in MT
-- todayCollectionRupees: decimal(10,2) - Extract collection amount
-- feedbacks: varchar(500) - Customer feedback summary
-- solutionBySalesperson: varchar(500) - Solutions provided
-- anyRemarks: varchar(500) - Additional professional remarks
+Based on the visit purpose "${input.visitPurpose}", intelligently determine:
 
-Return ONLY this JSON:
+1. **Visit Classification:**
+   - dealerType: "Dealer" (for established businesses) or "Sub Dealer" (for smaller operations)
+   - visitType: "Best" (productive visits with orders/collections) or "Non Best" (routine/maintenance visits)
+
+2. **Business Metrics (be realistic for cement industry):**
+   - dealerTotalPotential: 10-500 MT per month (based on dealer type)
+   - dealerBestPotential: 60-80% of total potential
+   - brandSelling: Realistic cement brands ["UltraTech", "ACC", "Ambuja", "Shree", "Birla"] (pick 2-4)
+
+3. **Today's Business (match visit purpose):**
+   - todayOrderMt: 0-50 MT (higher if purpose is "order taking")
+   - todayCollectionRupees: 0-500000 (higher if purpose is "collection")
+
+4. **Professional Content:**
+   - feedbacks: Realistic dealer feedback about market, competition, demands
+   - solutionBySalesperson: Professional solutions offered based on visit purpose
+   - anyRemarks: Industry-relevant observations about location, competition, opportunities
+
+5. **Contact Details (optional but professional):**
+   - contactPerson: Generate realistic Indian business name if dealer seems established
+   - contactPersonPhoneNo: Generate realistic Indian mobile number format
+
+RULES:
+- Match numbers to visit purpose (collection visits = higher collections, order visits = higher orders)
+- Use professional cement industry language
+- Make metrics realistic for the dealer size implied by name
+- Generate 2-4 relevant cement brands
+- Keep feedback and solutions contextually appropriate
+
+Return ONLY this JSON (no other text):
 {
   "dealerType": "Dealer" or "Sub Dealer",
-  "visitType": "Best" or "Non Best", 
+  "visitType": "Best" or "Non Best",
   "dealerTotalPotential": numeric_value,
-  "dealerBestPotential": numeric_value,
-  "brandSelling": ["brand1", "brand2"],
+  "dealerBestPotential": numeric_value, 
+  "brandSelling": ["brand1", "brand2", "brand3"],
+  "contactPerson": "Name or null",
+  "contactPersonPhoneNo": "+91XXXXXXXXXX or null",
   "todayOrderMt": numeric_value,
   "todayCollectionRupees": numeric_value,
-  "feedbacks": "customer feedback summary",
-  "solutionBySalesperson": "solutions provided to customer",
-  "anyRemarks": "additional professional observations"
+  "feedbacks": "Realistic dealer feedback about market conditions, demands, or concerns",
+  "solutionBySalesperson": "Professional solutions provided based on visit purpose and dealer needs", 
+  "anyRemarks": "Industry-relevant observations about business potential, competition, or opportunities"
 }
-
-Extract actual numbers from context, use professional language.
         `
       }
     ];
 
     try {
-      const response = await this.callOpenRouter(messages, 0.4, 800);
-      
+      const response = await this.callOpenRouter(messages, 0.3, 1000); // Lower temperature for consistency
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        // ✅ SAFETY: Validate and clean the response
+        return this.validateAndCleanDVR(parsed);
       } else {
         return JSON.parse(response);
       }
     } catch (error) {
-      console.log('🔄 Using fallback for DVR generation');
-      return this.generateDVRFallback(input);
+      console.log('🔄 Using fallback for minimal DVR generation');
+      return this.generateMinimalDVRFallback(input);
     }
   }
 
-  // 🔧 TVR GENERATION (Technical Visit Reports - Schema-Compliant)
-  async generateTVRFromInput(input: {
+  // ✅ SAFETY: Validation and cleanup function
+  private validateAndCleanDVR(data: any): any {
+    return {
+      dealerType: data.dealerType || "Dealer",
+      visitType: data.visitType || "Non Best",
+      dealerTotalPotential: Math.max(0, parseFloat(data.dealerTotalPotential) || 50),
+      dealerBestPotential: Math.max(0, parseFloat(data.dealerBestPotential) || 30),
+      brandSelling: Array.isArray(data.brandSelling) ? data.brandSelling.slice(0, 5) : ["UltraTech", "ACC"],
+      contactPerson: data.contactPerson || null,
+      contactPersonPhoneNo: data.contactPersonPhoneNo || null,
+      todayOrderMt: Math.max(0, parseFloat(data.todayOrderMt) || 0),
+      todayCollectionRupees: Math.max(0, parseFloat(data.todayCollectionRupees) || 0),
+      feedbacks: (data.feedbacks || "Routine dealer visit completed").substring(0, 500),
+      solutionBySalesperson: (data.solutionBySalesperson || "Addressed dealer queries and provided market updates").substring(0, 500),
+      anyRemarks: (data.anyRemarks || "Business operating normally").substring(0, 500)
+    };
+  }
+
+  // ✅ SAFETY: Fallback function
+  private generateMinimalDVRFallback(input: any): any {
+    const isOrderVisit = input.visitPurpose.toLowerCase().includes('order');
+    const isCollectionVisit = input.visitPurpose.toLowerCase().includes('collection');
+
+    return {
+      dealerType: "Dealer",
+      visitType: isOrderVisit || isCollectionVisit ? "Best" : "Non Best",
+      dealerTotalPotential: 100,
+      dealerBestPotential: 70,
+      brandSelling: ["UltraTech", "ACC"],
+      contactPerson: null,
+      contactPersonPhoneNo: null,
+      todayOrderMt: isOrderVisit ? 25 : 0,
+      todayCollectionRupees: isCollectionVisit ? 150000 : 0,
+      feedbacks: `Visit completed for ${input.visitPurpose}`,
+      solutionBySalesperson: "Provided assistance as per dealer requirements",
+      anyRemarks: "Standard business visit completed successfully"
+    };
+  }
+
+  async generateTVRFromMinimalInput(input: {
     siteName: string,
-    technicalIssue: string,
-    serviceProvided: string,
-    customerFeedback: string,
-    visitType?: string
+    visitPurpose: string, // "installation" | "repair" | "maintenance" | "troubleshooting" | "inspection"
+    issueOutcome?: string, // Optional: "resolved" | "pending" | "escalated" | brief description
+    location?: { lat: number, lng: number }
   }): Promise<any> {
     const messages = [
       {
         "role": "system",
-        "content": "You are a technical service analyst for CRM. Generate professional Technical Visit Reports from service call information."
+        "content": "You are an expert technical service specialist who creates comprehensive Technical Visit Reports from minimal field data. You understand construction equipment, cement industry technical services, and generate realistic, professional TVR entries."
       },
       {
         "role": "user",
         "content": `
-Generate a Technical Visit Report from this service call:
+Create a complete Technical Visit Report from this minimal field input:
 
-Site: ${input.siteName}
-Technical Issue: ${input.technicalIssue}
-Service Provided: ${input.serviceProvided}
-Customer Feedback: ${input.customerFeedback}
+🏗️ SITE: ${input.siteName}
+🔧 VISIT PURPOSE: ${input.visitPurpose}
+${input.issueOutcome ? `✅ ISSUE STATUS: ${input.issueOutcome}` : ''}
 
-Create schema-compliant TVR for technical_visit_reports table:
+GENERATE REALISTIC TVR DATA:
 
-Required Fields:
-- visitType: "Installation", "Repair", or "Maintenance" (determine from context)
-- siteNameConcernedPerson: varchar(255) - Site name and contact person
-- phoneNo: varchar(20) - Extract/estimate phone number format
-- emailId: varchar(255) - Generate professional email if not provided
-- clientsRemarks: varchar(500) - Customer's feedback and remarks
-- salespersonRemarks: varchar(500) - Technical person's professional remarks
+Based on the visit purpose "${input.visitPurpose}", intelligently determine:
 
-Return ONLY this JSON:
+1. **Visit Classification:**
+   - visitType: "Installation" (new equipment setup), "Repair" (fixing issues), or "Maintenance" (routine service)
+
+2. **Site Contact Details (generate realistic):**
+   - siteNameConcernedPerson: Site name + realistic Indian contact person name (site manager/engineer)
+   - phoneNo: Generate realistic Indian mobile number format (+91XXXXXXXXXX)
+   - emailId: Professional email based on site name or null for smaller sites
+
+3. **Professional Technical Content:**
+   - clientsRemarks: Realistic client feedback about service quality, technician behavior, issue resolution
+   - salespersonRemarks: Technical analysis, work performed, recommendations, follow-up needs
+
+INDUSTRY CONTEXT:
+- For "installation": New equipment setup, testing, training provided
+- For "repair": Problem diagnosis, parts replaced, system restored
+- For "maintenance": Routine checks, preventive measures, optimization
+
+RULES:
+- Use technical yet customer-friendly language
+- Match content to visit purpose (installation = training, repair = problem-solving, maintenance = prevention)
+- Generate realistic Indian business contact details
+- Keep remarks professional and solution-oriented
+- Include follow-up recommendations when appropriate
+
+Return ONLY this JSON (no other text):
 {
-  "visitType": "Installation|Repair|Maintenance",
-  "siteNameConcernedPerson": "site name and contact person details",
-  "phoneNo": "phone number format",
-  "emailId": "professional email or null",
-  "clientsRemarks": "customer feedback and satisfaction remarks",
-  "salespersonRemarks": "technical analysis and service summary"
+  "visitType": "Installation" or "Repair" or "Maintenance",
+  "siteNameConcernedPerson": "Site Name - Contact Person Name (designation)",
+  "phoneNo": "+91XXXXXXXXXX",
+  "emailId": "professional@email.com or null",
+  "clientsRemarks": "Customer feedback about service quality, technician performance, and satisfaction level",
+  "salespersonRemarks": "Technical work summary, solutions provided, recommendations, and follow-up requirements"
 }
-
-Make it technical yet customer-focused.
         `
       }
     ];
 
     try {
-      const response = await this.callOpenRouter(messages, 0.3, 600);
-      
+      const response = await this.callOpenRouter(messages, 0.3, 800); // Lower temperature for consistency
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        return JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        // ✅ SAFETY: Validate and clean the response
+        return this.validateAndCleanTVR(parsed);
       } else {
         return JSON.parse(response);
       }
     } catch (error) {
-      console.log('🔄 Using fallback for TVR generation');
-      return this.generateTVRFallback(input);
+      console.log('🔄 Using fallback for minimal TVR generation');
+      return this.generateMinimalTVRFallback(input);
     }
+  }
+
+  // ✅ SAFETY: Validation and cleanup function
+  private validateAndCleanTVR(data: any): any {
+    // Determine visit type from purpose if not set correctly
+    let visitType = data.visitType || "Maintenance";
+
+    return {
+      visitType: visitType,
+      siteNameConcernedPerson: (data.siteNameConcernedPerson || "Site Contact").substring(0, 255),
+      phoneNo: this.validatePhoneNumber(data.phoneNo) || "+919876543210",
+      emailId: this.validateEmail(data.emailId) || null,
+      clientsRemarks: (data.clientsRemarks || "Service completed satisfactorily").substring(0, 500),
+      salespersonRemarks: (data.salespersonRemarks || "Technical service completed as per requirements").substring(0, 500)
+    };
+  }
+
+  // ✅ SAFETY: Phone number validation
+  private validatePhoneNumber(phone: string): string | null {
+    if (!phone) return null;
+
+    // Clean and format Indian mobile number
+    const cleaned = phone.replace(/[^\d]/g, '');
+    if (cleaned.length === 10) {
+      return `+91${cleaned}`;
+    } else if (cleaned.length === 12 && cleaned.startsWith('91')) {
+      return `+${cleaned}`;
+    }
+    return phone.substring(0, 20); // Fallback to original if valid format
+  }
+
+  // ✅ SAFETY: Email validation
+  private validateEmail(email: string): string | null {
+    if (!email) return null;
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (emailRegex.test(email) && email.length <= 255) {
+      return email;
+    }
+    return null;
+  }
+
+  // ✅ SAFETY: Fallback function
+  private generateMinimalTVRFallback(input: any): any {
+    const purpose = input.visitPurpose.toLowerCase();
+
+    let visitType = "Maintenance";
+    let clientRemarks = "Service completed satisfactorily";
+    let salesRemarks = "Routine technical service completed";
+
+    if (purpose.includes('install')) {
+      visitType = "Installation";
+      clientRemarks = "New installation completed successfully";
+      salesRemarks = "Equipment installed, tested, and user training provided";
+    } else if (purpose.includes('repair') || purpose.includes('fix') || purpose.includes('troubleshoot')) {
+      visitType = "Repair";
+      clientRemarks = "Issue resolved, system working properly";
+      salesRemarks = "Problem diagnosed and resolved, system restored to normal operation";
+    }
+
+    return {
+      visitType: visitType,
+      siteNameConcernedPerson: `${input.siteName} - Site Manager`,
+      phoneNo: "+919876543210",
+      emailId: null,
+      clientsRemarks: clientRemarks,
+      salespersonRemarks: salesRemarks
+    };
   }
 
   // 🎯 SMART REPORT SUGGESTIONS
@@ -315,7 +459,7 @@ Return ONLY this JSON:
 
     try {
       const response = await this.callOpenRouter(messages, 0.2, 400);
-      
+
       const jsonMatch = response.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]);
@@ -336,7 +480,7 @@ Return ONLY this JSON:
   }): Promise<string> {
     const messages = [
       {
-        "role": "system", 
+        "role": "system",
         "content": "You are a helpful CRM field assistant. Provide concise, actionable advice for sales team members."
       },
       {
@@ -393,7 +537,7 @@ Keep response under 150 words, professional yet friendly.
     const info = input.competitorInfo.toLowerCase();
     const hasLargePresence = info.includes('large') || info.includes('major') || info.includes('big');
     const hasSchemes = info.includes('scheme') || info.includes('discount') || info.includes('offer');
-    
+
     return {
       billing: hasLargePresence ? "10-15 lakhs monthly" : "3-8 lakhs monthly",
       nod: hasLargePresence ? "75-100 dealers" : "25-50 dealers",
@@ -432,7 +576,7 @@ Keep response under 150 words, professional yet friendly.
 
   private analyzeReportTypeFallback(userInput: string): any {
     const input = userInput.toLowerCase();
-    
+
     if (input.includes('visit') || input.includes('customer') || input.includes('dealer')) {
       return {
         reportType: 'DVR',

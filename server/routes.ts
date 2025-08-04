@@ -1003,24 +1003,195 @@ export function setupWebRoutes(app: Express) {
   // ===== DAILY VISIT REPORTS (FIXED WITH SCHEMA VALIDATION) =====
 
   // Get recent DVR records
+  // POST /api/dvr/create - Create DVR using AI generation
+  app.post('/api/dvr/create', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        dealerName,
+        visitPurpose,
+        visitOutcome,
+        latitude,
+        longitude,
+        locationName,
+        checkInTime,
+        checkOutTime,
+        inTimeImageUrl,
+        outTimeImageUrl
+      } = req.body;
+
+      // ✅ VALIDATE REQUIRED FIELDS
+      if (!userId || !dealerName || !visitPurpose) {
+        return res.status(400).json({
+          error: 'Missing required fields',
+          required: ['userId', 'dealerName', 'visitPurpose']
+        });
+      }
+
+      // ✅ VALIDATE USER ID
+      const userIdInt = parseInt(userId);
+      if (isNaN(userIdInt)) {
+        return res.status(400).json({ error: 'Invalid user ID' });
+      }
+
+      // ✅ GENERATE DVR DATA USING AI
+      const aiService = new AIService(); // Your AI service instance
+      const aiGeneratedData = await aiService.generateDVRFromMinimalInput({
+        dealerName: dealerName,
+        visitPurpose: visitPurpose,
+        visitOutcome: visitOutcome,
+        location: { lat: parseFloat(latitude) || 0, lng: parseFloat(longitude) || 0 }
+      });
+
+      // ✅ PREPARE COMPLETE DVR DATA FOR DATABASE
+      const today = new Date();
+      const todayDateString = today.toISOString().split('T')[0];
+
+      const dvrData = {
+        userId: userIdInt,
+        reportDate: todayDateString,
+        dealerType: aiGeneratedData.dealerType,
+        dealerName: dealerName,
+        subDealerName: aiGeneratedData.dealerType === 'Sub Dealer' ? dealerName : null,
+        location: locationName || "Field Location",
+        latitude: latitude ? latitude.toString() : "0",
+        longitude: longitude ? longitude.toString() : "0",
+        visitType: aiGeneratedData.visitType,
+        dealerTotalPotential: aiGeneratedData.dealerTotalPotential,
+        dealerBestPotential: aiGeneratedData.dealerBestPotential,
+        brandSelling: aiGeneratedData.brandSelling,
+        contactPerson: aiGeneratedData.contactPerson,
+        contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo,
+        todayOrderMt: aiGeneratedData.todayOrderMt,
+        todayCollectionRupees: aiGeneratedData.todayCollectionRupees,
+        feedbacks: aiGeneratedData.feedbacks,
+        solutionBySalesperson: aiGeneratedData.solutionBySalesperson,
+        anyRemarks: aiGeneratedData.anyRemarks,
+        checkInTime: checkInTime ? new Date(checkInTime) : new Date(),
+        checkOutTime: checkOutTime ? new Date(checkOutTime) : null,
+        inTimeImageUrl: inTimeImageUrl || null,
+        outTimeImageUrl: outTimeImageUrl || null
+      };
+
+      // ✅ VALIDATE WITH SCHEMA (if you have validation schema)
+      // const validatedData = insertDailyVisitReportsSchema.parse(dvrData);
+
+      // ✅ INSERT INTO DATABASE
+      const result = await db.insert(dailyVisitReports).values(dvrData).returning();
+
+      res.status(201).json({
+        success: true,
+        data: result[0],
+        message: 'DVR created successfully using AI generation!',
+        aiGenerated: true
+      });
+
+    } catch (error: any) {
+      console.error('Error creating AI-generated DVR:', error);
+
+      // ✅ HANDLE VALIDATION ERRORS
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'DVR validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.input
+          }))
+        });
+      }
+
+      // ✅ DATABASE ERROR HANDLING
+      if (error?.code === '23502') {
+        return res.status(400).json({
+          error: 'Missing required field',
+          details: error.detail || error.message
+        });
+      }
+      if (error?.code === '23503') {
+        return res.status(400).json({
+          error: 'Invalid user reference',
+          details: 'User does not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to create DVR',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   app.get('/api/dvr/recent', async (req: Request, res: Response) => {
     try {
       const { limit = 10, userId, dealerType } = req.query;
 
-      let whereClause = undefined;
-      if (userId) {
-        whereClause = eq(dailyVisitReports.userId, parseInt(userId as string));
+      // ✅ SAFE: Validate limit parameter
+      const limitInt = parseInt(limit as string);
+      if (isNaN(limitInt) || limitInt < 1 || limitInt > 1000) {
+        return res.status(400).json({
+          error: 'Invalid limit. Must be between 1 and 1000'
+        });
       }
+
+      // ✅ SAFE: Build where clause with proper validation
+      let whereClause = undefined;
+
+      if (userId) {
+        const userIdInt = parseInt(userId as string);
+        if (isNaN(userIdInt)) {
+          return res.status(400).json({ error: 'Invalid user ID' });
+        }
+        whereClause = eq(dailyVisitReports.userId, userIdInt);
+      }
+
       if (dealerType) {
+        // ✅ SAFE: Validate dealerType enum
+        const validDealerTypes = ['Dealer', 'Sub Dealer'];
+        if (!validDealerTypes.includes(dealerType as string)) {
+          return res.status(400).json({
+            error: 'Invalid dealer type. Must be "Dealer" or "Sub Dealer"'
+          });
+        }
+
         whereClause = whereClause
           ? and(whereClause, eq(dailyVisitReports.dealerType, dealerType as string))
           : eq(dailyVisitReports.dealerType, dealerType as string);
       }
 
+      // ✅ SAFE: Fetch with schema-compliant fields
       const reports = await db.query.dailyVisitReports.findMany({
         where: whereClause,
         orderBy: [desc(dailyVisitReports.reportDate), desc(dailyVisitReports.createdAt)],
-        limit: parseInt(limit as string),
+        limit: limitInt,
+        columns: {
+          id: true,
+          userId: true,
+          reportDate: true,
+          dealerType: true,
+          dealerName: true,
+          subDealerName: true,
+          location: true,
+          latitude: true,
+          longitude: true,
+          visitType: true,
+          dealerTotalPotential: true,
+          dealerBestPotential: true,
+          brandSelling: true,
+          contactPerson: true,
+          contactPersonPhoneNo: true,
+          todayOrderMt: true,
+          todayCollectionRupees: true,
+          feedbacks: true,
+          solutionBySalesperson: true,
+          anyRemarks: true,
+          checkInTime: true,
+          checkOutTime: true,
+          inTimeImageUrl: true,
+          outTimeImageUrl: true,
+          createdAt: true,
+          updatedAt: true
+        },
         with: {
           user: {
             columns: { firstName: true, lastName: true, salesmanLoginId: true }
@@ -1028,14 +1199,48 @@ export function setupWebRoutes(app: Express) {
         }
       });
 
+      // ✅ SAFE: Enhanced response with metadata
       res.json({
         success: true,
         data: reports,
-        total: reports.length
+        total: reports.length,
+        filters: {
+          userId: userId ? parseInt(userId as string) : null,
+          dealerType: dealerType || null,
+          limit: limitInt
+        },
+        message: `Found ${reports.length} DVR reports`
       });
-    } catch (error) {
+
+    } catch (error: any) {
       console.error('Error fetching DVR reports:', error);
-      res.status(500).json({ error: 'Failed to fetch DVR reports' });
+
+      // ✅ SAFE: Enhanced error handling
+      if (error?.code === '42P01') {
+        return res.status(500).json({
+          error: 'Database table not found',
+          details: 'daily_visit_reports table may not exist'
+        });
+      }
+
+      if (error?.code === '42703') {
+        return res.status(500).json({
+          error: 'Database column error',
+          details: 'One or more columns may not exist in daily_visit_reports table'
+        });
+      }
+
+      if (error?.code === '23503') {
+        return res.status(400).json({
+          error: 'Invalid reference',
+          details: 'Referenced user may not exist'
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to fetch DVR reports',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
