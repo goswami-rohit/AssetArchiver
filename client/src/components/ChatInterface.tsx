@@ -1269,12 +1269,6 @@ export default function ChatInterface({
     return '💪 Keep improving!';
   };
 
-  // 🔧 UTILITY FUNCTIONS
-  const extractDealerName = (input: string): string => {
-    const dealerMatch = input.match(/(?:visited|dealer|store)\s+([A-Za-z\s]+?)(?:\s|,|$)/i);
-    return dealerMatch ? dealerMatch[1].trim() : 'Dealer';
-  };
-
   const extractSiteName = (input: string): string => {
     const siteMatch = input.match(/(?:at|site|location)\s+([A-Za-z\s]+?)(?:\s|,|$)/i);
     return siteMatch ? siteMatch[1].trim() : 'Customer Site';
