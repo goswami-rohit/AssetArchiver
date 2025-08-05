@@ -1493,128 +1493,74 @@ export default function ChatInterface({
   }
 
   return (
-    <div className={`fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl transition-all duration-300 z-40 ${isExpanded ? 'h-[85vh]' : 'h-auto'
-      }`}>
-      {/* 🎨 Enhanced Header */}
-      <div className="px-4 py-3 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-b">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="relative">
-              <Badge variant="default" className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600">
-                {getContextIcon(context)}
-                <span className="capitalize font-semibold text-white">{context.replace('_', ' ')} AI</span>
-              </Badge>
-              <Sparkles className="w-3 h-3 text-yellow-500 absolute -top-1 -right-1 animate-pulse" />
-            </div>
-
-            <Badge variant="outline" className="text-green-700 border-green-300 bg-green-50">
-              <Zap className="w-3 h-3 mr-1" />
-              56+ Endpoints
+  <div className={`fixed bottom-0 left-0 right-0 bg-white border-t shadow-2xl transition-all duration-300 z-40 ${isExpanded ? 'h-[85vh]' : 'h-auto'}`}>
+    {/* 🎨 Enhanced Header */}
+    <div className="px-4 py-3 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-b">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <div className="relative">
+            <Badge variant="default" className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600">
+              {getContextIcon(context)}
+              <span className="capitalize font-semibold text-white">{context.replace('_', ' ')} AI</span>
             </Badge>
-
-            {recentData && (
-              <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">
-                <BarChart3 className="w-3 h-3 mr-1" />
-                Live Data
-              </Badge>
-            )}
+            <Sparkles className="w-3 h-3 text-yellow-500 absolute -top-1 -right-1 animate-pulse" />
           </div>
 
-          <div className="flex items-center space-x-2">
-            {currentLocation && (
-              <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50">
-                <MapPin className="w-3 h-3 mr-1" />
-                GPS Active
-              </Badge>
-            )}
+          <Badge variant="outline" className="text-green-700 border-green-300 bg-green-50">
+            <Zap className="w-3 h-3 mr-1" />
+            56+ Endpoints
+          </Badge>
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleExpanded}
-              className="p-2 hover:bg-blue-50"
-            >
-              {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-            </Button>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleMinimized}
-              className="p-2 hover:bg-red-50"
-            >
-              <ChevronDown className="w-4 h-4" />
-            </Button>
-          </div>
+          {recentData && (
+            <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">
+              <BarChart3 className="w-3 h-3 mr-1" />
+              Live Data
+            </Badge>
+          )}
         </div>
 
-        {/* 🚀 Quick Action Buttons - Enhanced */}
-        {!isExpanded && (
-          <div className="flex space-x-2 mt-3 overflow-x-auto pb-2">
-            {context === 'dvr' && punchState === 'ready' ? (
-              <>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => handleSendMessage('punch in')}
-                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700"
-                >
-                  📍 Punch In
-                </Button>
-                {quickActions.map((action, index) => (
-                  <Button
-                    key={index}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleQuickAction(action)}
-                    className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
-                  >
-                    {action}
-                  </Button>
-                ))}
-              </>
-            ) : context === 'dvr' && punchState === 'punched-in' ? (
-              <>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setInputValue('Collection visit, got payment')}
-                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 text-white"
-                >
-                  💰 Collection
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setInputValue('Routine check, discussed products')}
-                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-orange-600 to-red-600 text-white"
-                >
-                  🔄 Routine
-                </Button>
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={() => setInputValue('Order booking, confirmed delivery')}
-                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-purple-600 to-pink-600 text-white"
-                >
-                  📋 Order
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setPunchState('ready');
-                    setPunchInData(null);
-                    setSelectedDealer(null);
-                    setNewDealerName(null);
-                  }}
-                  className="whitespace-nowrap text-xs font-medium border-red-200 text-red-700 hover:bg-red-50"
-                >
-                  ❌ Cancel
-                </Button>
-              </>
-            ) : (
-              quickActions.map((action, index) => (
+        <div className="flex items-center space-x-2">
+          {currentLocation && (
+            <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50">
+              <MapPin className="w-3 h-3 mr-1" />
+              GPS Active
+            </Badge>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleExpanded}
+            className="p-2 hover:bg-blue-50"
+          >
+            {isExpanded ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={toggleMinimized}
+            className="p-2 hover:bg-red-50"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* 🚀 Quick Action Buttons - Enhanced */}
+      {!isExpanded && (
+        <div className="flex space-x-2 mt-3 overflow-x-auto pb-2">
+          {context === 'dvr' && punchState === 'ready' ? (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => handleSendMessage('punch in')}
+                className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700"
+              >
+                📍 Punch In
+              </Button>
+              {quickActions.map((action, index) => (
                 <Button
                   key={index}
                   variant="outline"
@@ -1624,148 +1570,202 @@ export default function ChatInterface({
                 >
                   {action}
                 </Button>
-              ))
-            )}
-          </div>
-
-        {/* 💬 Messages Area - Enhanced */}
-        {isExpanded && messages.length > 0 && (
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white max-h-[60vh]">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                <div
-                  className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${message.type === 'user'
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
-                    : 'bg-white text-gray-900 border border-gray-200'
-                    }`}
-                >
-                  <div className="flex items-start space-x-3">
-                    {message.type === 'ai' && (
-                      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center flex-shrink-0">
-                        <Bot className="w-4 h-4 text-white" />
-                      </div>
-                    )}
-                    <div className="flex-1">
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
-
-                      {/* 🎯 Action Buttons for AI messages */}
-                      {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mt-3">
-                          {message.actionButtons.map((button, index) => (
-                            <Button
-                              key={index}
-                              variant={button.variant}
-                              size="sm"
-                              onClick={() => handleActionButton(button.action)}
-                              className="text-xs"
-                            >
-                              {button.icon && <span className="mr-1">{button.icon}</span>}
-                              {button.label}
-                            </Button>
-                          ))}
-                        </div>
-                      )}
-
-                      <p className="text-xs opacity-75 mt-2">
-                        {message.timestamp.toLocaleTimeString()}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* 💭 Typing Indicator */}
-            {typingIndicator && (
-              <div className="flex justify-start">
-                <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center">
-                      <Bot className="w-4 h-4 text-white" />
-                    </div>
-                    <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-
-        {/* 🚀 Quick Actions - Expanded View */}
-        {isExpanded && (
-          <div className="px-4 py-3 bg-gray-50 border-b">
-            <div className="flex space-x-2 overflow-x-auto">
-              {quickActions.map((action, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleQuickAction(action)}
-                  className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50"
-                >
-                  {action}
-                </Button>
               ))}
+            </>
+          ) : context === 'dvr' && punchState === 'punched-in' ? (
+            <>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setInputValue('Collection visit, got payment')}
+                className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 text-white"
+              >
+                💰 Collection
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setInputValue('Routine check, discussed products')}
+                className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-orange-600 to-red-600 text-white"
+              >
+                🔄 Routine
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setInputValue('Order booking, confirmed delivery')}
+                className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-purple-600 to-pink-600 text-white"
+              >
+                📋 Order
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPunchState('ready');
+                  setPunchInData(null);
+                  setSelectedDealer(null);
+                  setNewDealerName(null);
+                }}
+                className="whitespace-nowrap text-xs font-medium border-red-200 text-red-700 hover:bg-red-50"
+              >
+                ❌ Cancel
+              </Button>
+            </>
+          ) : (
+            quickActions.map((action, index) => (
+              <Button
+                key={index}
+                variant="outline"
+                size="sm"
+                onClick={() => handleQuickAction(action)}
+                className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+              >
+                {action}
+              </Button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+
+    {/* 💬 Messages Area - Enhanced */}
+    {isExpanded && messages.length > 0 && (
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white max-h-[60vh]">
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            <div
+              className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${message.type === 'user'
+                ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                : 'bg-white text-gray-900 border border-gray-200'
+                }`}
+            >
+              <div className="flex items-start space-x-3">
+                {message.type === 'ai' && (
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center flex-shrink-0">
+                    <Bot className="w-4 h-4 text-white" />
+                  </div>
+                )}
+                <div className="flex-1">
+                  <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
+
+                  {/* 🎯 Action Buttons for AI messages */}
+                  {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {message.actionButtons.map((button, index) => (
+                        <Button
+                          key={index}
+                          variant={button.variant}
+                          size="sm"
+                          onClick={() => handleActionButton(button.action)}
+                          className="text-xs"
+                        >
+                          {button.icon && <span className="mr-1">{button.icon}</span>}
+                          {button.label}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-xs opacity-75 mt-2">
+                    {message.timestamp.toLocaleTimeString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* 💭 Typing Indicator */}
+        {typingIndicator && (
+          <div className="flex justify-start">
+            <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center">
+                  <Bot className="w-4 h-4 text-white" />
+                </div>
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* 💬 Input Area - Enhanced */}
-        <div className="p-4 bg-white">
-          <div className="flex items-center space-x-3">
-            <div className="flex-1 relative">
-              <Input
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                onKeyPress={handleKeyPress}
-                onFocus={() => !isExpanded && setIsExpanded(true)}
-                placeholder={`🚀 Ask about ${context.replace('_', ' ')}... I'll connect to the right systems!`}
-                disabled={isLoading}
-                className="w-full pr-12 py-3 text-sm border-2 border-gray-200 focus:border-blue-500 rounded-xl bg-gray-50 focus:bg-white transition-all"
-              />
-              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-                <div className="flex items-center space-x-1">
-                  <Sparkles className="w-4 h-4 text-purple-500" />
-                  <Zap className="w-4 h-4 text-blue-500" />
-                </div>
-              </div>
-            </div>
+        <div ref={messagesEndRef} />
+      </div>
+    )}
 
+    {/* 🚀 Quick Actions - Expanded View */}
+    {isExpanded && (
+      <div className="px-4 py-3 bg-gray-50 border-b">
+        <div className="flex space-x-2 overflow-x-auto">
+          {quickActions.map((action, index) => (
             <Button
-              onClick={() => handleSendMessage()}
-              disabled={isLoading || !inputValue.trim()}
-              size="lg"
-              className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-lg"
+              key={index}
+              variant="outline"
+              size="sm"
+              onClick={() => handleQuickAction(action)}
+              className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50"
             >
-              {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Send className="w-5 h-5" />
-              )}
+              {action}
             </Button>
-          </div>
+          ))}
+        </div>
+      </div>
+    )}
 
-          <div className="flex items-center justify-between mt-3">
-            <p className="text-xs text-gray-500">
-              💡 Connected to 56+ endpoints • AI-powered responses • Real-time data
-            </p>
-            <div className="flex items-center space-x-2">
-              <Badge variant="outline" className="text-xs text-green-600 border-green-300">
-                <Heart className="w-3 h-3 mr-1" />
-                {messages.length} messages
-              </Badge>
+    {/* 💬 Input Area - Enhanced */}
+    <div className="p-4 bg-white">
+      <div className="flex items-center space-x-3">
+        <div className="flex-1 relative">
+          <Input
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyPress={handleKeyPress}
+            onFocus={() => !isExpanded && setIsExpanded(true)}
+            placeholder={`🚀 Ask about ${context.replace('_', ' ')}... I'll connect to the right systems!`}
+            disabled={isLoading}
+            className="w-full pr-12 py-3 text-sm border-2 border-gray-200 focus:border-blue-500 rounded-xl bg-gray-50 focus:bg-white transition-all"
+          />
+          <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+            <div className="flex items-center space-x-1">
+              <Sparkles className="w-4 h-4 text-purple-500" />
+              <Zap className="w-4 h-4 text-blue-500" />
             </div>
           </div>
         </div>
+
+        <Button
+          onClick={() => handleSendMessage()}
+          disabled={isLoading || !inputValue.trim()}
+          size="lg"
+          className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-lg"
+        >
+          {isLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Send className="w-5 h-5" />
+          )}
+        </Button>
       </div>
-      );
-}
+
+      <div className="flex items-center justify-between mt-3">
+        <p className="text-xs text-gray-500">
+          💡 Connected to 56+ endpoints • AI-powered responses • Real-time data
+        </p>
+        <div className="flex items-center space-x-2">
+          <Badge variant="outline" className="text-xs text-green-600 border-green-300">
+            <Heart className="w-3 h-3 mr-1" />
+            {messages.length} messages
+          </Badge>
+        </div>
+      </div>
+    </div>
+  </div>
+);}
