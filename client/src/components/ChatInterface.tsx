@@ -593,59 +593,131 @@ export default function ChatInterface({
   // 📊 DVR HANDLERS
   const handleCreateDVR = async (input: string): Promise<string> => {
     setTypingIndicator(true);
-
     try {
-      // ✅ STEP 1: Simple extraction (no complex parsing needed)
+      const lowerInput = input.toLowerCase().trim();
+      // 🆕 NEW: Enhanced punch-in with dealer detection
+      if (lowerInput === 'punch in' || lowerInput === 'punch-in' || lowerInput === 'start visit') {
+        const location = await getCurrentLocationPrecise();
+        if (!location) {
+          return `📍 **Location Required**\n\nCannot punch in without location access. Please enable location services.`;
+        }
+        const response = await fetch('/api/dvr/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId,
+            action: 'punch-in',
+            latitude: location.lat,
+            longitude: location.lng,
+            locationName: location.address || 'Field Location'
+          })
+        });
+        const data = await response.json();
+        if (data.success && data.action === 'punch-in') {
+          setPunchState('punched-in');
+          setPunchInData(data.data);
+
+          let response = `✅ **PUNCH-IN SUCCESSFUL!**\n\n📍 **Location:** ${data.data.locationName}\n🕐 **Time:** ${new Date(data.data.checkInTime).toLocaleTimeString()}\n\n`;
+          if (data.data.nearbyDealers && data.data.nearbyDealers.length > 0) {
+            response += `🏪 **NEARBY DEALERS FOUND:**\n\n`;
+            data.data.nearbyDealers.forEach((dealer: any, index: number) => {
+              response += `${index + 1}. **${dealer.name}** (${dealer.distance})\n   ${dealer.type} | ${dealer.totalPotential}MT potential\n   Brands: ${dealer.brands?.join(', ') || 'N/A'}\n\n`;
+            });
+            response += `💡 **Next Steps:**\n📝 Select: "select dealer 1" or "select dealer 2"\n🆕 New: "new dealer [name]"\n📋 Direct: "Visited [dealer] for [purpose]"`;
+          } else {
+            response += `🆕 **NO EXISTING DEALERS AT THIS LOCATION**\n\n💡 **Next:** Describe your visit to auto-create dealer:\n"Visited [dealer name] for [purpose]"`;
+          }
+          return response;
+        }
+        return `❌ **Punch-in failed:** ${data.error || 'Unknown error'}`;
+      }
+      // 🆕 NEW: Handle dealer selection from nearby dealers
+      if (punchState === 'punched-in' && lowerInput.startsWith('select dealer ')) {
+        const dealerIndex = parseInt(lowerInput.replace('select dealer ', '')) - 1;
+        if (punchInData?.nearbyDealers && punchInData.nearbyDealers[dealerIndex]) {
+          const selectedDealer = punchInData.nearbyDealers[dealerIndex];
+          setSelectedDealer(selectedDealer);
+          return `✅ **DEALER SELECTED**\n\n🏪 **${selectedDealer.name}**\n📊 **Potential:** ${selectedDealer.totalPotential}MT\n🏢 **Brands:** ${selectedDealer.brands?.join(', ')}\n📞 **Contact:** ${selectedDealer.contactPerson || 'N/A'}\n\n💡 **Ready!** Now describe your visit:\n"Collection visit, got payment" or "Routine check, discussed new products"`;
+        } else {
+          return `❌ **Invalid dealer selection.** Please choose from 1 to ${punchInData?.nearbyDealers?.length || 0}.`;
+        }
+      }
+      // 🆕 NEW: Handle new dealer creation
+      if (punchState === 'punched-in' && lowerInput.startsWith('new dealer ')) {
+        const newDealerName = input.replace(/new dealer /i, '').trim();
+        if (newDealerName.length < 2) {
+          return `❌ **Please provide a valid dealer name:**\n"new dealer ABC Construction"`;
+        }
+        setNewDealerName(newDealerName);
+        return `🆕 **CREATING NEW DEALER**\n\n🏪 **Name:** ${newDealerName}\n\n💡 **Next:** Describe your visit and dealer details:\n"First visit to ${newDealerName}, 50MT potential, sells UltraTech"`;
+      }
+      // 🔄 ENHANCED: DVR completion with dealer context
+      if (punchState === 'punched-in') {
+        if (input.trim().length < 10) {
+          return `📝 **Please provide more details about your visit:**\n\n💡 Examples:\n• "Collection visit, got ₹50K payment"\n• "Routine check, discussed new cement grades"\n• "Order booking, confirmed 30MT delivery"`;
+        }
+        const response = await fetch('/api/dvr/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId,
+            action: 'complete-dvr',
+            dvrPrompt: input,
+            latitude: punchInData.latitude,
+            longitude: punchInData.longitude,
+            locationName: punchInData.locationName,
+            checkInTime: punchInData.checkInTime,
+            selectedDealerId: selectedDealer?.id || null,
+            isNewDealer: !!newDealerName,
+            newDealerInfo: newDealerName ? {
+              name: newDealerName,
+              type: 'Dealer'
+            } : null
+          })
+        });
+        const data = await response.json();
+        if (data.success) {
+          // Reset punch state
+          setPunchState('ready');
+          setPunchInData(null);
+          setSelectedDealer(null);
+          setNewDealerName(null);
+          const dealerSource = data.dealerSource === 'existing_database' ? '(Database)' : '(AI Generated)';
+
+          return `🎉 **DVR COMPLETED!**\n\n🏪 **Dealer:** ${data.data.dealerName} ${dealerSource}\n📅 **Date:** ${data.data.reportDate}\n💰 **Order:** ${data.data.todayOrderMt}MT\n💳 **Collection:** ₹${Number(data.data.todayCollectionRupees).toLocaleString()}\n🏢 **Brands:** ${data.data.brandSelling?.join(', ')}\n📍 **Location:** ${data.data.location}\n\n${data.newDealerCreated ? '🆕 **New dealer created in database**\n\n' : ''}💡 **Ready for next visit!** Type "punch in" to start.`;
+        } else {
+          return `❌ **DVR Creation Failed:** ${data.error}\n\n💡 Try describing your visit differently.`;
+        }
+      }
+      // ✅ BACKWARD COMPATIBILITY: Traditional DVR creation (existing logic)
       const dealerName = extractDealerName(input);
       const visitPurpose = extractVisitPurpose(input);
       const visitOutcome = extractVisitOutcome(input);
-
       if (!dealerName) {
-        return `⚠️ **Missing Information**\n\nPlease provide the **dealer name** you visited.\n\n💡 Example: "Visited ABC Dealers for routine check"`;
+        return `⚠️ **Missing Information**\n\nPlease provide the **dealer name** you visited.\n\n💡 Examples:\n• "Visited ABC Dealers for routine check"\n• Or use new workflow: "punch in"`;
       }
-
-      // ✅ STEP 2: SAFELY query dealers database to validate/find the dealer
+      // ✅ SAFE: Query dealers database for validation
       let matchedDealer = null;
       try {
         const dealersResponse = await fetch(`/api/dealers/recent?userId=${userId}&limit=1000`);
-
         if (dealersResponse.ok) {
           const dealersData = await dealersResponse.json();
-
           if (dealersData.success && dealersData.data) {
-            // ✅ SAFE: Find matching dealer (case-insensitive, partial match)
             const searchName = dealerName.toLowerCase().trim();
-
             matchedDealer = dealersData.data.find((dealer: any) => {
               const dealerNameLower = dealer.name.toLowerCase();
               return dealerNameLower.includes(searchName) || searchName.includes(dealerNameLower);
             });
-
-            // ✅ SAFE: If exact match not found, try fuzzy matching
-            if (!matchedDealer) {
-              matchedDealer = dealersData.data.find((dealer: any) => {
-                const dealerWords = dealer.name.toLowerCase().split(' ');
-                const searchWords = searchName.split(' ');
-
-                return dealerWords.some(word =>
-                  searchWords.some(searchWord =>
-                    word.includes(searchWord) || searchWord.includes(word)
-                  )
-                );
-              });
-            }
           }
         }
       } catch (dealerError) {
         console.log('Dealer lookup failed, continuing with user input:', dealerError);
       }
-
-      // ✅ STEP 3: Create DVR using your exact API endpoint format
+      // ✅ Traditional DVR creation
       const response = await fetch('/api/dvr/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          // ✅ MATCHES YOUR API EXACTLY
           userId: userId,
           dealerName: matchedDealer ? matchedDealer.name : dealerName,
           visitPurpose: visitPurpose || 'routine visit',
@@ -659,19 +731,14 @@ export default function ChatInterface({
           outTimeImageUrl: null
         })
       });
-
       const data = await response.json();
-
       if (data.success) {
-        // ✅ SAFE: Enhanced success message using your API response structure
         const dealerStatus = matchedDealer
           ? `✅ **Found in Database** (${matchedDealer.type})`
           : `ℹ️ **New Dealer** (Added to report)`;
-
-        return `✅ **DVR Created Successfully!**\n\n🏪 **Dealer:** ${data.data.dealerName}\n${dealerStatus}\n📅 **Date:** ${data.data.reportDate}\n🏷️ **Type:** ${data.data.dealerType} - ${data.data.visitType}\n💰 **Order:** ${data.data.todayOrderMt} MT\n💳 **Collection:** ₹${data.data.todayCollectionRupees}\n🏢 **Brands:** ${data.data.brandSelling?.join(', ') || 'N/A'}\n📍 **Location:** ${data.data.location}\n\n💬 **Feedback:** ${data.data.feedbacks}\n🔧 **Solutions:** ${data.data.solutionBySalesperson}\n📝 **Remarks:** ${data.data.anyRemarks}\n\n${matchedDealer ? `📊 **Dealer Info:**\n• Region: ${matchedDealer.region}\n• Area: ${matchedDealer.area}\n• Phone: ${matchedDealer.phoneNo}\n\n` : ''}📝 **Report ID:** ${data.data.id}\n🤖 **${data.message}**\n\n🎉 Your comprehensive DVR is ready!`;
+        return `✅ **DVR Created Successfully!**\n\n🏪 **Dealer:** ${data.data.dealerName}\n${dealerStatus}\n📅 **Date:** ${data.data.reportDate}\n🏷️ **Type:** ${data.data.dealerType} - ${data.data.visitType}\n💰 **Order:** ${data.data.todayOrderMt} MT\n💳 **Collection:** ₹${data.data.todayCollectionRupees}\n🏢 **Brands:** ${data.data.brandSelling?.join(', ') || 'N/A'}\n📍 **Location:** ${data.data.location}\n\n💡 **Try new workflow:** "punch in" for location-based visits!`;
       } else {
-        // ✅ SAFE: Handle API error response
-        return `⚠️ **DVR Creation Failed**\n\n${data.error || 'Unable to create DVR.'}\n\n${data.details ? `**Details:** ${data.details}` : ''}\n\n💡 Try providing dealer name and visit purpose clearly.`;
+        return `⚠️ **DVR Creation Failed**\n\n${data.error || 'Unable to create DVR.'}\n\n💡 Try: "punch in" for enhanced workflow.`;
       }
     } catch (error: any) {
       console.error('DVR Creation Error:', error);
@@ -679,6 +746,34 @@ export default function ChatInterface({
     } finally {
       setTypingIndicator(false);
     }
+  };
+  // 🆕 NEW: State variables needed (add these to your component state)
+  const [punchState, setPunchState] = useState<'ready' | 'punched-in'>('ready');
+  const [punchInData, setPunchInData] = useState<any>(null);
+  const [selectedDealer, setSelectedDealer] = useState<any>(null);
+  const [newDealerName, setNewDealerName] = useState<string | null>(null);
+  // 🆕 NEW: Enhanced location function for precise GPS
+  const getCurrentLocationPrecise = (): Promise<{ lat: number, lng: number, address?: string } | null> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            address: 'Current Location'
+          });
+        },
+        (error) => {
+          console.log('Location error:', error);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      );
+    });
   };
 
   // ✅ SIMPLE: Basic extraction functions (lightweight and safe)
@@ -1307,6 +1402,7 @@ export default function ChatInterface({
     setIsExpanded(!isExpanded);
   };
 
+
   const handleSendMessage = async (customInput?: string) => {
     const currentInput = customInput || inputValue;
     if (!currentInput.trim()) return;
@@ -1455,159 +1551,221 @@ export default function ChatInterface({
         {/* 🚀 Quick Action Buttons - Enhanced */}
         {!isExpanded && (
           <div className="flex space-x-2 mt-3 overflow-x-auto pb-2">
-            {quickActions.map((action, index) => (
-              <Button
-                key={index}
-                variant="outline"
-                size="sm"
-                onClick={() => handleQuickAction(action)}
-                className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
-              >
-                {action}
-              </Button>
-            ))}
+            {context === 'dvr' && punchState === 'ready' ? (
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => handleSendMessage('punch in')}
+                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:from-green-700 hover:to-emerald-700"
+                >
+                  📍 Punch In
+                </Button>
+                {quickActions.map((action, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleQuickAction(action)}
+                    className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+                  >
+                    {action}
+                  </Button>
+                ))}
+              </>
+            ) : context === 'dvr' && punchState === 'punched-in' ? (
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setInputValue('Collection visit, got payment')}
+                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-blue-600 to-purple-600 text-white"
+                >
+                  💰 Collection
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setInputValue('Routine check, discussed products')}
+                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-orange-600 to-red-600 text-white"
+                >
+                  🔄 Routine
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setInputValue('Order booking, confirmed delivery')}
+                  className="whitespace-nowrap text-xs font-medium bg-gradient-to-r from-purple-600 to-pink-600 text-white"
+                >
+                  📋 Order
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setPunchState('ready');
+                    setPunchInData(null);
+                    setSelectedDealer(null);
+                    setNewDealerName(null);
+                  }}
+                  className="whitespace-nowrap text-xs font-medium border-red-200 text-red-700 hover:bg-red-50"
+                >
+                  ❌ Cancel
+                </Button>
+              </>
+            ) : (
+              quickActions.map((action, index) => (
+                <Button
+                  key={index}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleQuickAction(action)}
+                  className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300"
+                >
+                  {action}
+                </Button>
+              ))
+            )}
           </div>
-        )}
-      </div>
 
-      {/* 💬 Messages Area - Enhanced */}
-      {isExpanded && messages.length > 0 && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white max-h-[60vh]">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
+        {/* 💬 Messages Area - Enhanced */}
+        {isExpanded && messages.length > 0 && (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white max-h-[60vh]">
+            {messages.map((message) => (
               <div
-                className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${message.type === 'user'
-                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
-                  : 'bg-white text-gray-900 border border-gray-200'
-                  }`}
+                key={message.id}
+                className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
               >
-                <div className="flex items-start space-x-3">
-                  {message.type === 'ai' && (
-                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center flex-shrink-0">
-                      <Bot className="w-4 h-4 text-white" />
-                    </div>
-                  )}
-                  <div className="flex-1">
-                    <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
-
-                    {/* 🎯 Action Buttons for AI messages */}
-                    {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {message.actionButtons.map((button, index) => (
-                          <Button
-                            key={index}
-                            variant={button.variant}
-                            size="sm"
-                            onClick={() => handleActionButton(button.action)}
-                            className="text-xs"
-                          >
-                            {button.icon && <span className="mr-1">{button.icon}</span>}
-                            {button.label}
-                          </Button>
-                        ))}
+                <div
+                  className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all hover:shadow-md ${message.type === 'user'
+                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                    : 'bg-white text-gray-900 border border-gray-200'
+                    }`}
+                >
+                  <div className="flex items-start space-x-3">
+                    {message.type === 'ai' && (
+                      <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center flex-shrink-0">
+                        <Bot className="w-4 h-4 text-white" />
                       </div>
                     )}
+                    <div className="flex-1">
+                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{message.content}</p>
 
-                    <p className="text-xs opacity-75 mt-2">
-                      {message.timestamp.toLocaleTimeString()}
-                    </p>
+                      {/* 🎯 Action Buttons for AI messages */}
+                      {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {message.actionButtons.map((button, index) => (
+                            <Button
+                              key={index}
+                              variant={button.variant}
+                              size="sm"
+                              onClick={() => handleActionButton(button.action)}
+                              className="text-xs"
+                            >
+                              {button.icon && <span className="mr-1">{button.icon}</span>}
+                              {button.label}
+                            </Button>
+                          ))}
+                        </div>
+                      )}
+
+                      <p className="text-xs opacity-75 mt-2">
+                        {message.timestamp.toLocaleTimeString()}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-
-          {/* 💭 Typing Indicator */}
-          {typingIndicator && (
-            <div className="flex justify-start">
-              <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex space-x-1">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-      )}
-
-      {/* 🚀 Quick Actions - Expanded View */}
-      {isExpanded && (
-        <div className="px-4 py-3 bg-gray-50 border-b">
-          <div className="flex space-x-2 overflow-x-auto">
-            {quickActions.map((action, index) => (
-              <Button
-                key={index}
-                variant="outline"
-                size="sm"
-                onClick={() => handleQuickAction(action)}
-                className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50"
-              >
-                {action}
-              </Button>
             ))}
-          </div>
-        </div>
-      )}
 
-      {/* 💬 Input Area - Enhanced */}
-      <div className="p-4 bg-white">
-        <div className="flex items-center space-x-3">
-          <div className="flex-1 relative">
-            <Input
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              onFocus={() => !isExpanded && setIsExpanded(true)}
-              placeholder={`🚀 Ask about ${context.replace('_', ' ')}... I'll connect to the right systems!`}
-              disabled={isLoading}
-              className="w-full pr-12 py-3 text-sm border-2 border-gray-200 focus:border-blue-500 rounded-xl bg-gray-50 focus:bg-white transition-all"
-            />
-            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-              <div className="flex items-center space-x-1">
-                <Sparkles className="w-4 h-4 text-purple-500" />
-                <Zap className="w-4 h-4 text-blue-500" />
+            {/* 💭 Typing Indicator */}
+            {typingIndicator && (
+              <div className="flex justify-start">
+                <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center">
+                      <Bot className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                  </div>
+                </div>
               </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+        )}
+
+        {/* 🚀 Quick Actions - Expanded View */}
+        {isExpanded && (
+          <div className="px-4 py-3 bg-gray-50 border-b">
+            <div className="flex space-x-2 overflow-x-auto">
+              {quickActions.map((action, index) => (
+                <Button
+                  key={index}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleQuickAction(action)}
+                  className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50"
+                >
+                  {action}
+                </Button>
+              ))}
             </div>
           </div>
+        )}
 
-          <Button
-            onClick={() => handleSendMessage()}
-            disabled={isLoading || !inputValue.trim()}
-            size="lg"
-            className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-lg"
-          >
-            {isLoading ? (
-              <Loader2 className="w-5 h-5 animate-spin" />
-            ) : (
-              <Send className="w-5 h-5" />
-            )}
-          </Button>
-        </div>
+        {/* 💬 Input Area - Enhanced */}
+        <div className="p-4 bg-white">
+          <div className="flex items-center space-x-3">
+            <div className="flex-1 relative">
+              <Input
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                onFocus={() => !isExpanded && setIsExpanded(true)}
+                placeholder={`🚀 Ask about ${context.replace('_', ' ')}... I'll connect to the right systems!`}
+                disabled={isLoading}
+                className="w-full pr-12 py-3 text-sm border-2 border-gray-200 focus:border-blue-500 rounded-xl bg-gray-50 focus:bg-white transition-all"
+              />
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                <div className="flex items-center space-x-1">
+                  <Sparkles className="w-4 h-4 text-purple-500" />
+                  <Zap className="w-4 h-4 text-blue-500" />
+                </div>
+              </div>
+            </div>
 
-        <div className="flex items-center justify-between mt-3">
-          <p className="text-xs text-gray-500">
-            💡 Connected to 56+ endpoints • AI-powered responses • Real-time data
-          </p>
-          <div className="flex items-center space-x-2">
-            <Badge variant="outline" className="text-xs text-green-600 border-green-300">
-              <Heart className="w-3 h-3 mr-1" />
-              {messages.length} messages
-            </Badge>
+            <Button
+              onClick={() => handleSendMessage()}
+              disabled={isLoading || !inputValue.trim()}
+              size="lg"
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-lg"
+            >
+              {isLoading ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Send className="w-5 h-5" />
+              )}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-gray-500">
+              💡 Connected to 56+ endpoints • AI-powered responses • Real-time data
+            </p>
+            <div className="flex items-center space-x-2">
+              <Badge variant="outline" className="text-xs text-green-600 border-green-300">
+                <Heart className="w-3 h-3 mr-1" />
+                {messages.length} messages
+              </Badge>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  );
+      );
 }

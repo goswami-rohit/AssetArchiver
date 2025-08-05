@@ -27,12 +27,13 @@ export // ===== PROPERLY CONFIGURED AI SERVICES FOR OPENROUTER =====
   private baseUrl = 'https://openrouter.ai/api/v1';
   private siteUrl: string;
   private siteTitle: string;
-
-  constructor(openrouterApiKey: string, siteUrl?: string, siteTitle?: string) {
-    this.openrouterApiKey = openrouterApiKey;
+  constructor(openrouterApiKey?: string, siteUrl?: string, siteTitle?: string) {
+    this.openrouterApiKey = openrouterApiKey || process.env.OPENROUTER_API_KEY || '';
     this.siteUrl = siteUrl || 'https://telesalesside.onrender.com/pwa';
     this.siteTitle = siteTitle || 'CRM Assistant';
-
+    if (!this.openrouterApiKey) {
+      console.warn('⚠️ OpenRouter API Key not found in constructor or environment variables');
+    }
     console.log('🔑 OpenRouter API Key configured:', this.openrouterApiKey ? `${this.openrouterApiKey.substring(0, 8)}...` : 'NOT FOUND');
     console.log('🎯 Using OpenRouter Direct API');
   }
@@ -144,6 +145,7 @@ Make it professional, data-driven, and actionable for sales strategy.
   }
 
   // 📊 DVR GENERATION (Daily Visit Reports - Schema-Compliant)
+  // ✅ KEEP EXISTING: Your original function stays EXACTLY the same for backward compatibility
   async generateDVRFromMinimalInput(input: {
     dealerName: string,
     visitPurpose: string, // "routine visit" | "collection" | "order taking" | "complaint resolution" | "new dealer onboarding"
@@ -213,7 +215,7 @@ Return ONLY this JSON (no other text):
   "solutionBySalesperson": "Professional solutions provided based on visit purpose and dealer needs", 
   "anyRemarks": "Industry-relevant observations about business potential, competition, or opportunities"
 }
-        `
+    `
       }
     ];
 
@@ -233,6 +235,332 @@ Return ONLY this JSON (no other text):
       console.log('🔄 Using fallback for minimal DVR generation');
       return this.generateMinimalDVRFallback(input);
     }
+  }
+
+  // ✅ KEEP EXISTING: Single prompt function stays the same
+  async generateDVRFromSinglePrompt(input: {
+    userId: number,
+    prompt: string,
+    location: { lat: number, lng: number },
+    checkInTime: Date,
+    checkOutTime: Date
+  }): Promise<any> {
+    const messages = [
+      {
+        "role": "system",
+        "content": "You are an expert DVR assistant who parses single field prompts and creates comprehensive Daily Visit Reports. You understand the cement/construction industry and can extract dealer information, visit details, and business metrics from natural language descriptions. Always generate realistic, professional data for missing information."
+      },
+      {
+        "role": "user",
+        "content": `
+Parse this field visit prompt and create a complete DVR:
+
+👤 USER ID: ${input.userId}
+💬 FIELD PROMPT: "${input.prompt}"
+📍 LOCATION: ${input.location.lat}, ${input.location.lng}
+🕐 CHECK-IN: ${input.checkInTime.toISOString()}
+🕐 CHECK-OUT: ${input.checkOutTime.toISOString()}
+
+INTELLIGENT EXTRACTION & GENERATION:
+
+From the prompt "${input.prompt}", extract and intelligently determine:
+
+1. **Dealer Information:**
+   - dealerName: Extract dealer/shop name or generate realistic one if not mentioned
+   - dealerType: "Dealer" (for established businesses) or "Sub Dealer" (for smaller operations)
+   - location: Descriptive location name based on coordinates
+
+2. **Visit Analysis:**
+   - visitType: "Best" (if orders/collections mentioned) or "Non Best" (routine visits)
+   - Extract visit purpose from context (collection, order taking, routine, complaint, etc.)
+
+3. **Business Metrics (realistic for cement industry):**
+   - dealerTotalPotential: 10-500 MT per month (based on dealer size hints)
+   - dealerBestPotential: 60-80% of total potential
+   - brandSelling: ["UltraTech", "ACC", "Ambuja", "Shree", "Birla"] (pick 2-4 relevant)
+
+4. **Today's Business (extract from prompt or generate realistic):**
+   - todayOrderMt: Extract order quantity or generate realistic amount (0-50 MT)
+   - todayCollectionRupees: Extract collection amount or generate realistic sum (0-500000)
+
+5. **Professional Content:**
+   - feedbacks: Extract dealer concerns/feedback or generate realistic industry feedback
+   - solutionBySalesperson: Generate appropriate solutions based on extracted issues
+   - anyRemarks: Extract additional observations or generate relevant business insights
+
+6. **Contact Details:**
+   - contactPerson: Extract contact name or generate realistic Indian business name
+   - contactPersonPhoneNo: Extract phone or generate realistic Indian mobile format
+
+EXTRACTION RULES:
+- If prompt mentions specific numbers (orders, collections), use them
+- If dealer name mentioned, extract it; otherwise generate realistic one
+- Match business metrics to visit context (good visits = higher numbers)
+- Generate professional, industry-appropriate language
+- Ensure all fields are filled with realistic data
+
+Return ONLY this JSON (no other text):
+{
+  "dealerName": "extracted or generated dealer name",
+  "dealerType": "Dealer" or "Sub Dealer",
+  "visitType": "Best" or "Non Best",
+  "location": "descriptive location name",
+  "dealerTotalPotential": numeric_value,
+  "dealerBestPotential": numeric_value,
+  "brandSelling": ["brand1", "brand2", "brand3"],
+  "contactPerson": "extracted or generated name",
+  "contactPersonPhoneNo": "+91XXXXXXXXXX or null",
+  "todayOrderMt": numeric_value,
+  "todayCollectionRupees": numeric_value,
+  "feedbacks": "extracted or generated dealer feedback about market, demands, concerns",
+  "solutionBySalesperson": "generated solutions based on visit context and extracted issues",
+  "anyRemarks": "extracted observations or generated business insights"
+}
+    `
+      }
+    ];
+
+    try {
+      const response = await this.callOpenRouter(messages, 0.3, 1200); // Slightly higher token limit for complex parsing
+
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        // ✅ SAFETY: Validate and clean the response using existing method
+        return this.validateAndCleanDVR(parsed);
+      } else {
+        return JSON.parse(response);
+      }
+    } catch (error) {
+      console.log('🔄 Using fallback for single prompt DVR generation');
+      return this.generateSinglePromptFallback(input);
+    }
+  }
+
+  // 🆕 NEW: Enhanced function with dealer database context
+  async generateDVRFromSinglePromptWithDealerContext(input: {
+    userId: number,
+    prompt: string,
+    location: { lat: number, lng: number },
+    checkInTime: Date,
+    checkOutTime: Date,
+    existingDealer: any | null // ← NEW: Existing dealer data from DB
+  }): Promise<any> {
+    const messages = [
+      {
+        "role": "system",
+        "content": "You are an expert DVR assistant who creates visit reports using existing dealer database information. You focus on generating visit-specific insights while preserving known dealer data. You understand the cement/construction industry and generate realistic, professional content."
+      },
+      {
+        "role": "user",
+        "content": `
+Parse this field visit and generate DVR data:
+
+👤 USER ID: ${input.userId}
+💬 VISIT PROMPT: "${input.prompt}"
+📍 LOCATION: ${input.location.lat}, ${input.location.lng}
+🕐 VISIT TIME: ${input.checkInTime.toISOString()} → ${input.checkOutTime.toISOString()}
+
+${input.existingDealer ? `
+🏪 EXISTING DEALER FOUND IN DATABASE:
+   Name: ${input.existingDealer.name}
+   Type: ${input.existingDealer.type || 'Dealer'}
+   Total Potential: ${input.existingDealer.totalPotential || input.existingDealer.total_potential || 'Unknown'} MT/month
+   Best Potential: ${input.existingDealer.bestPotential || input.existingDealer.best_potential || 'Unknown'} MT/month
+   Brands Selling: ${input.existingDealer.brandsSelling?.join(', ') || input.existingDealer.brands_selling?.join(', ') || 'Unknown'}
+   Contact: ${input.existingDealer.contactPerson || input.existingDealer.contact_person || 'Not available'}
+   Phone: ${input.existingDealer.phoneNumber || input.existingDealer.phone_number || 'Not available'}
+
+✅ GENERATE VISIT-SPECIFIC DATA ONLY:
+- Use existing dealer information above (DO NOT change dealer profile data)
+- Generate today's business based on prompt context
+- Create realistic visit feedback and remarks
+- Focus on visit outcomes and interactions
+` : `
+🆕 NEW DEALER DETECTED:
+- Extract dealer name from prompt
+- Generate realistic dealer profile for cement industry
+- Create complete business metrics
+- Generate professional contact information
+`}
+
+EXTRACT FROM PROMPT & GENERATE:
+
+1. **Today's Business Analysis:**
+   - todayOrderMt: Extract actual order quantity from prompt or realistic estimate (0-50 MT)
+   - todayCollectionRupees: Extract collection amount from prompt or realistic estimate (0-500000)
+
+2. **Visit Assessment:**
+   - visitType: "Best" (if productive/orders/collections) or "Non Best" (routine/maintenance)
+   - feedbacks: Realistic dealer feedback about market conditions, demands, satisfaction based on prompt context
+
+3. **Professional Analysis:**
+   - solutionBySalesperson: Solutions provided based on dealer needs/issues mentioned in prompt
+   - anyRemarks: Professional observations about business potential, competition, opportunities
+
+RESPONSE RULES:
+- If existing dealer: Use their exact data, generate only visit-specific insights
+- If new dealer: Generate complete realistic profile for cement industry
+- Match business numbers to visit context (good visits = higher numbers)
+- Use professional cement industry language
+- Extract specific numbers if mentioned in prompt, otherwise generate realistic amounts
+
+Return ONLY this JSON:
+{
+  ${input.existingDealer ? `
+  "dealerName": "${input.existingDealer.name}",
+  "dealerType": "${input.existingDealer.type || 'Dealer'}",
+  "dealerTotalPotential": ${input.existingDealer.totalPotential || input.existingDealer.total_potential || 100},
+  "dealerBestPotential": ${input.existingDealer.bestPotential || input.existingDealer.best_potential || 70},
+  "brandSelling": ${JSON.stringify(input.existingDealer.brandsSelling || input.existingDealer.brands_selling || ['UltraTech', 'ACC'])},
+  "contactPerson": "${input.existingDealer.contactPerson || input.existingDealer.contact_person || 'Contact Person'}",
+  "contactPersonPhoneNo": "${input.existingDealer.phoneNumber || input.existingDealer.phone_number || '+91XXXXXXXXXX'}",` : `
+  "dealerName": "extracted or generated dealer name",
+  "dealerType": "Dealer" or "Sub Dealer", 
+  "dealerTotalPotential": realistic_numeric_value,
+  "dealerBestPotential": realistic_numeric_value,
+  "brandSelling": ["brand1", "brand2", "brand3"],
+  "contactPerson": "realistic name or null",
+  "contactPersonPhoneNo": "+91XXXXXXXXXX or null",`}
+  "location": "descriptive location name",
+  "visitType": "Best" or "Non Best",
+  "todayOrderMt": extracted_or_realistic_numeric_value,
+  "todayCollectionRupees": extracted_or_realistic_numeric_value,
+  "feedbacks": "dealer feedback based on visit context and prompt analysis",
+  "solutionBySalesperson": "solutions provided during visit based on prompt context",
+  "anyRemarks": "professional observations and insights about the visit and business potential"
+}
+    `
+      }
+    ];
+
+    try {
+      const response = await this.callOpenRouter(messages, 0.3, 1500); // Higher token limit for dealer context
+
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        // ✅ SAFETY: Validate and clean the response using existing method
+        return this.validateAndCleanDVR(parsed);
+      } else {
+        return JSON.parse(response);
+      }
+    } catch (error) {
+      console.log('🔄 Using fallback for dealer-context DVR generation');
+      return this.generateDealerContextFallback(input);
+    }
+  }
+
+  // 🆕 NEW: Fallback method for dealer context DVR generation
+  private generateDealerContextFallback(input: {
+    userId: number,
+    prompt: string,
+    location: { lat: number, lng: number },
+    checkInTime: Date,
+    checkOutTime: Date,
+    existingDealer: any | null
+  }): any {
+    // ✅ SAFE: Generate realistic fallback data when AI fails
+    const hasOrderKeywords = /order|booking|purchase|MT|mt/i.test(input.prompt);
+    const hasCollectionKeywords = /collection|payment|money|cash|rupees/i.test(input.prompt);
+
+    // Extract numbers from prompt for orders and collections
+    const orderMatch = input.prompt.match(/(\d+)\s*(MT|mt|ton)/i);
+    const collectionMatch = input.prompt.match(/(\d+)\s*(k|thousand|lakh|crore|rupees)/i);
+
+    const extractedOrder = orderMatch ? parseFloat(orderMatch[1]) : (hasOrderKeywords ? 15.00 : 0.00);
+    const extractedCollection = collectionMatch ?
+      (parseFloat(collectionMatch[1]) * (collectionMatch[2].toLowerCase().includes('lakh') ? 100000 : 1000)) :
+      (hasCollectionKeywords ? 35000.00 : 0.00);
+
+    if (input.existingDealer) {
+      // ✅ Use existing dealer data, generate only visit-specific info
+      return {
+        dealerName: input.existingDealer.name,
+        dealerType: input.existingDealer.type || 'Dealer',
+        dealerTotalPotential: input.existingDealer.totalPotential || input.existingDealer.total_potential || 100.00,
+        dealerBestPotential: input.existingDealer.bestPotential || input.existingDealer.best_potential || 70.00,
+        brandSelling: input.existingDealer.brandsSelling || input.existingDealer.brands_selling || ['UltraTech', 'ACC'],
+        contactPerson: input.existingDealer.contactPerson || input.existingDealer.contact_person || 'Contact Person',
+        contactPersonPhoneNo: input.existingDealer.phoneNumber || input.existingDealer.phone_number || '+91XXXXXXXXXX',
+        location: "Field Visit Location",
+        visitType: hasOrderKeywords || hasCollectionKeywords ? "Best" : "Non Best",
+        todayOrderMt: extractedOrder,
+        todayCollectionRupees: extractedCollection,
+        feedbacks: "Standard dealer interaction completed based on existing relationship",
+        solutionBySalesperson: "Provided ongoing support and product information",
+        anyRemarks: "Continued business relationship with established dealer"
+      };
+    } else {
+      // ✅ Generate new dealer data
+      const dealerName = this.extractDealerNameFromPrompt(input.prompt) || "Field Dealer";
+      return {
+        dealerName: dealerName,
+        dealerType: "Dealer",
+        dealerTotalPotential: 100.00,
+        dealerBestPotential: 70.00,
+        brandSelling: ["UltraTech", "ACC"],
+        contactPerson: null,
+        contactPersonPhoneNo: null,
+        location: "Field Visit Location",
+        visitType: hasOrderKeywords || hasCollectionKeywords ? "Best" : "Non Best",
+        todayOrderMt: extractedOrder,
+        todayCollectionRupees: extractedCollection,
+        feedbacks: "New dealer interaction completed successfully",
+        solutionBySalesperson: "Provided product information and established initial relationship",
+        anyRemarks: "Potential new business opportunity identified"
+      };
+    }
+  }
+
+  // ✅ KEEP EXISTING: Your other fallback methods stay the same
+  private generateSinglePromptFallback(input: {
+    userId: number,
+    prompt: string,
+    location: { lat: number, lng: number },
+    checkInTime: Date,
+    checkOutTime: Date
+  }): any {
+    // ✅ SAFE: Generate realistic fallback data when AI fails
+    const dealerName = this.extractDealerNameFromPrompt(input.prompt) || "Field Dealer";
+    const hasOrderKeywords = /order|booking|purchase/i.test(input.prompt);
+    const hasCollectionKeywords = /collection|payment|money|cash/i.test(input.prompt);
+
+    return {
+      dealerName: dealerName,
+      dealerType: "Dealer",
+      visitType: hasOrderKeywords || hasCollectionKeywords ? "Best" : "Non Best",
+      location: "Field Visit Location",
+      dealerTotalPotential: 100.00,
+      dealerBestPotential: 70.00,
+      brandSelling: ["UltraTech", "ACC"],
+      contactPerson: null,
+      contactPersonPhoneNo: null,
+      todayOrderMt: hasOrderKeywords ? 15.00 : 0.00,
+      todayCollectionRupees: hasCollectionKeywords ? 35000.00 : 0.00,
+      feedbacks: "Standard dealer interaction completed",
+      solutionBySalesperson: "Provided product information and support",
+      anyRemarks: "Regular business visit completed successfully"
+    };
+  }
+
+  // ✅ KEEP EXISTING: Helper method for dealer name extraction
+  private extractDealerNameFromPrompt(prompt: string): string | null {
+    const patterns = [
+      /visited\s+([A-Za-z\s&]+?)(?:\s+for|\s+to|\s+dealer|\s+shop|$)/i,
+      /dealer\s+([A-Za-z\s&]+?)(?:\s+for|\s+to|\s+visit|$)/i,
+      /([A-Za-z\s&]+?)\s+dealer/i,
+      /([A-Za-z\s&]+?)\s+shop/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = prompt.match(pattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+    return null;
   }
 
   // ✅ SAFETY: Validation and cleanup function
