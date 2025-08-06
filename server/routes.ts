@@ -1176,27 +1176,42 @@ export function setupWebRoutes(app: Express) {
 
           // Create DVR with EXACT SCHEMA FIELDS ONLY
           // ✅ CORRECTED INSERT - matches your exact schema
+          // 🔧 SAFE INSERT with null checks
           const dvrRecord = await db.insert(dailyVisitReports).values({
             userId: userId,
             reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
-            dealerType: dvrData.dealerType,
+            dealerType: dvrData.dealerType || 'Dealer',
             dealerName: dvrData.dealerName || dealerInfo.name,
             subDealerName: dvrData.subDealerName || null,
-            location: dvrData.location,
-            latitude: lat.toString(), // ← String for decimal type
-            longitude: lng.toString(), // ← String for decimal type  
-            visitType: dvrData.visitType,
-            dealerTotalPotential: dvrData.dealerTotalPotential.toString(), // ← String for decimal
-            dealerBestPotential: dvrData.dealerBestPotential.toString(), // ← String for decimal
-            brandSelling: Array.isArray(dvrData.brandSelling) ? dvrData.brandSelling : [dvrData.brandSelling], // ← Fix array
+            location: dvrData.location || `${dealerInfo.name} Location`,
+            latitude: lat.toString(),
+            longitude: lng.toString(),
+            visitType: dvrData.visitType || 'Non Best',
+
+            // 🔥 SAFE DECIMAL CONVERSIONS - prevent undefined.toString()
+            dealerTotalPotential: (dvrData.dealerTotalPotential !== undefined && dvrData.dealerTotalPotential !== null)
+              ? dvrData.dealerTotalPotential.toString()
+              : '0',
+            dealerBestPotential: (dvrData.dealerBestPotential !== undefined && dvrData.dealerBestPotential !== null)
+              ? dvrData.dealerBestPotential.toString()
+              : '0',
+
+            brandSelling: Array.isArray(dvrData.brandSelling) ? dvrData.brandSelling : [dvrData.brandSelling || 'Unknown'],
             contactPerson: dvrData.contactPerson || null,
             contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
-            todayOrderMt: dvrData.todayOrderMt.toString(), // ← String for decimal
-            todayCollectionRupees: dvrData.todayCollectionRupees.toString(), // ← String for decimal
-            feedbacks: dvrData.feedbacks,
+
+            // 🔥 SAFE DECIMAL CONVERSIONS
+            todayOrderMt: (dvrData.todayOrderMt !== undefined && dvrData.todayOrderMt !== null)
+              ? dvrData.todayOrderMt.toString()
+              : '0',
+            todayCollectionRupees: (dvrData.todayCollectionRupees !== undefined && dvrData.todayCollectionRupees !== null)
+              ? dvrData.todayCollectionRupees.toString()
+              : '0',
+
+            feedbacks: dvrData.feedbacks || 'No feedback provided',
             solutionBySalesperson: dvrData.solutionBySalesperson || null,
             anyRemarks: dvrData.anyRemarks || null,
-            checkInTime: new Date(), // ← Current timestamp
+            checkInTime: new Date(),
             checkOutTime: null,
             inTimeImageUrl: dvrData.inTimeImageUrl || null,
             outTimeImageUrl: dvrData.outTimeImageUrl || null
