@@ -899,7 +899,7 @@ export default function CRMDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col pb-32">
       {/* 🎨 ENHANCED HEADER WITH REAL-TIME STATUS */}
       <div className="bg-white shadow-lg border-b-2 border-blue-100 p-4">
         <div className="flex items-center justify-between">
@@ -1967,12 +1967,14 @@ export default function CRMDashboard() {
       </Dialog>
 
       {/* 🎨 FIXED CHAT INTERFACE AT BOTTOM */}
-      <ChatInterface
-        context={chatContext}
-        currentLocation={currentLocation}
-        userId={user.id}
-        onContextChange={setChatContext}
-      />
+      <div className="chat-interface">
+        <ChatInterface
+          context={chatContext}
+          currentLocation={currentLocation}
+          userId={user?.id}
+          onContextChange={setChatContext}
+        />
+      </div>
     </div>
   );
 }

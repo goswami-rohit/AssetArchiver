@@ -1059,25 +1059,25 @@ export function setupWebRoutes(app: Express) {
           // ✅ SAFE: Query dealers within radius using Haversine formula
           // Note: Adjust this query based on your actual dealers table structure
           const dealersQuery = `
-          SELECT *, 
-            (6371 * acos(
-              cos(radians(${lat})) * 
-              cos(radians(CAST(latitude AS FLOAT))) * 
-              cos(radians(CAST(longitude AS FLOAT)) - radians(${lng})) + 
-              sin(radians(${lat})) * 
-              sin(radians(CAST(latitude AS FLOAT)))
-            )) AS distance
-          FROM dealers 
-          WHERE (6371 * acos(
+        SELECT *, 
+          (6371 * acos(
             cos(radians(${lat})) * 
             cos(radians(CAST(latitude AS FLOAT))) * 
             cos(radians(CAST(longitude AS FLOAT)) - radians(${lng})) + 
             sin(radians(${lat})) * 
             sin(radians(CAST(latitude AS FLOAT)))
-          )) <= ${radiusKm}
-          ORDER BY distance ASC
-          LIMIT 10
-        `;
+          )) AS distance
+        FROM dealers 
+        WHERE (6371 * acos(
+          cos(radians(${lat})) * 
+          cos(radians(CAST(latitude AS FLOAT))) * 
+          cos(radians(CAST(longitude AS FLOAT)) - radians(${lng})) + 
+          sin(radians(${lat})) * 
+          sin(radians(CAST(latitude AS FLOAT)))
+        )) <= ${radiusKm}
+        ORDER BY distance ASC
+        LIMIT 10
+      `;
 
           // ✅ SAFE: Execute raw query with proper error handling
           const result = await db.execute(sql`${dealersQuery}`);
@@ -1197,6 +1197,7 @@ export function setupWebRoutes(app: Express) {
         const today = new Date();
         const todayDateString = today.toISOString().split('T')[0];
 
+        // 🔧 FIXED: Convert numeric fields to strings for Zod validation
         const dvrData = {
           userId: userIdInt,
           reportDate: todayDateString,
@@ -1207,13 +1208,13 @@ export function setupWebRoutes(app: Express) {
           latitude: latitude.toString(),
           longitude: longitude.toString(),
           visitType: aiGeneratedData.visitType,
-          dealerTotalPotential: aiGeneratedData.dealerTotalPotential,
-          dealerBestPotential: aiGeneratedData.dealerBestPotential,
+          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential?.toString()) || "0",
+          dealerBestPotential: (aiGeneratedData.dealerBestPotential?.toString()) || "0",
           brandSelling: aiGeneratedData.brandSelling,
           contactPerson: aiGeneratedData.contactPerson,
           contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo,
-          todayOrderMt: aiGeneratedData.todayOrderMt,
-          todayCollectionRupees: aiGeneratedData.todayCollectionRupees,
+          todayOrderMt: (aiGeneratedData.todayOrderMt?.toString()) || "0",
+          todayCollectionRupees: (aiGeneratedData.todayCollectionRupees?.toString()) || "0",
           feedbacks: aiGeneratedData.feedbacks,
           solutionBySalesperson: aiGeneratedData.solutionBySalesperson,
           anyRemarks: aiGeneratedData.anyRemarks,
@@ -1262,6 +1263,7 @@ export function setupWebRoutes(app: Express) {
       const today = new Date();
       const todayDateString = today.toISOString().split('T')[0];
 
+      // 🔧 FIXED: Convert numeric fields to strings for Zod validation
       const dvrData = {
         userId: userIdInt,
         reportDate: todayDateString,
@@ -1272,13 +1274,13 @@ export function setupWebRoutes(app: Express) {
         latitude: latitude ? latitude.toString() : "0",
         longitude: longitude ? longitude.toString() : "0",
         visitType: aiGeneratedData.visitType,
-        dealerTotalPotential: aiGeneratedData.dealerTotalPotential,
-        dealerBestPotential: aiGeneratedData.dealerBestPotential,
+        dealerTotalPotential: (aiGeneratedData.dealerTotalPotential?.toString()) || "0",
+        dealerBestPotential: (aiGeneratedData.dealerBestPotential?.toString()) || "0",
         brandSelling: aiGeneratedData.brandSelling,
         contactPerson: aiGeneratedData.contactPerson,
         contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo,
-        todayOrderMt: aiGeneratedData.todayOrderMt,
-        todayCollectionRupees: aiGeneratedData.todayCollectionRupees,
+        todayOrderMt: (aiGeneratedData.todayOrderMt?.toString()) || "0",
+        todayCollectionRupees: (aiGeneratedData.todayCollectionRupees?.toString()) || "0",
         feedbacks: aiGeneratedData.feedbacks,
         solutionBySalesperson: aiGeneratedData.solutionBySalesperson,
         anyRemarks: aiGeneratedData.anyRemarks,
@@ -1294,45 +1296,28 @@ export function setupWebRoutes(app: Express) {
       // ✅ INSERT INTO DATABASE - SAFE: Keep existing database logic
       const result = await db.insert(dailyVisitReports).values(validatedData).returning();
 
-      res.status(201).json({
+      return res.status(201).json({
         success: true,
         data: result[0],
-        message: 'DVR created successfully using AI generation!',
+        message: 'DVR created successfully!',
         aiGenerated: true
       });
 
-    } catch (error: any) {
-      console.error('Error creating DVR:', error);
+    } catch (error) {
+      console.error('DVR Creation Error:', error);
 
-      // ✅ HANDLE VALIDATION ERRORS - SAFE: Keep existing error handling
-      if (error instanceof z.ZodError) {
+      // ✅ ENHANCED ERROR HANDLING - Handle Zod validation errors specifically
+      if (error?.name === 'ZodError') {
         return res.status(400).json({
           error: 'DVR validation error',
-          details: error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message,
-            received: err.input
-          }))
+          details: error.issues,
+          message: 'Please check the data format and try again'
         });
       }
 
-      // ✅ DATABASE ERROR HANDLING - SAFE: Keep existing database error handling
-      if (error?.code === '23502') {
-        return res.status(400).json({
-          error: 'Missing required field',
-          details: error.detail || error.message
-        });
-      }
-      if (error?.code === '23503') {
-        return res.status(400).json({
-          error: 'Invalid user reference',
-          details: 'User does not exist'
-        });
-      }
-
-      res.status(500).json({
+      return res.status(500).json({
         error: 'Failed to create DVR',
-        details: error instanceof Error ? error.message : 'Unknown error'
+        message: 'Internal server error occurred'
       });
     }
   });

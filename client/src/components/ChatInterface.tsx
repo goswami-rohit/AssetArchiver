@@ -1757,7 +1757,7 @@ export default function ChatInterface({
 
       <div className="flex items-center justify-between mt-3">
         <p className="text-xs text-gray-500">
-          💡 Connected to 56+ endpoints • AI-powered responses • Real-time data
+          • AI-powered responses • Real-time data
         </p>
         <div className="flex items-center space-x-2">
           <Badge variant="outline" className="text-xs text-green-600 border-green-300">
