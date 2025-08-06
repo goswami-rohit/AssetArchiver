@@ -1006,319 +1006,220 @@ export function setupWebRoutes(app: Express) {
   // POST /api/dvr/create - Create DVR using AI generation
   app.post('/api/dvr/create', async (req: Request, res: Response) => {
     try {
-      const {
-        userId,
-        action, // NEW: "punch-in" | "punch-out" | "complete-dvr" (for backward compatibility, defaults to existing flow)
-        dealerName,
-        visitPurpose,
-        visitOutcome,
-        latitude,
-        longitude,
-        locationName,
-        checkInTime,
-        checkOutTime,
-        inTimeImageUrl,
-        outTimeImageUrl,
-        dvrPrompt, // NEW: Single prompt for AI-powered completion
-        selectedDealerId, // NEW: Pre-selected dealer from punch-in
-        isNewDealer,      // NEW: Flag if creating new dealer
-        newDealerInfo     // NEW: New dealer details if creating
-      } = req.body;
+      const { action, lat, lng, userId, conversationState, guidedResponses, prompt } = req.body;
 
-      // ✅ VALIDATE REQUIRED FIELDS - SAFE: Keep existing validation
-      if (!userId) {
-        return res.status(400).json({
-          error: 'Missing required fields',
-          required: ['userId']
-        });
-      }
-
-      // ✅ VALIDATE USER ID - SAFE: Keep existing validation
-      const userIdInt = parseInt(userId);
-      if (isNaN(userIdInt)) {
-        return res.status(400).json({ error: 'Invalid user ID' });
-      }
-
-      // NEW: Enhanced punch-in workflow with nearby dealer detection
       if (action === 'punch-in') {
-        // Validate location for punch-in
-        if (!latitude || !longitude) {
-          return res.status(400).json({
-            error: 'Location required for punch-in',
-            required: ['latitude', 'longitude']
+        // Check for existing dealer at exact coordinates
+        const existingDealer = await db.query.dealers.findFirst({
+          where: and(
+            eq(dealers.latitude, lat.toString()),
+            eq(dealers.longitude, lng.toString())
+          )
+        });
+
+        if (existingDealer) {
+          return res.json({
+            success: true,
+            dealerFound: true,
+            dealer: existingDealer,
+            nextAction: 'dvr-questions',
+            agentMessage: `Dealer found: ${existingDealer.name}. Let's create your DVR. What was the main purpose of your visit today?`
+          });
+        } else {
+          return res.json({
+            success: true,
+            dealerFound: false,
+            nextAction: 'dealer-questions',
+            agentMessage: 'No dealer found at this location. CREATE ONE',
+            showCreateButton: true,
+            firstQuestion: 'What is the name and type of this dealer? (e.g., "ABC Electronics - Retailer")'
           });
         }
-
-        // ✅ NEW: STEP 1 - Query nearby dealers within radius
-        let nearbyDealers = [];
-        try {
-          const lat = parseFloat(latitude);
-          const lng = parseFloat(longitude);
-          const radiusKm = 1.0; // 1km radius for dealer detection
-
-          // ✅ SAFE: Query dealers within radius using Haversine formula
-          // Note: Adjust this query based on your actual dealers table structure
-          const dealersQuery = `
-        SELECT *, 
-          (6371 * acos(
-            cos(radians(${lat})) * 
-            cos(radians(CAST(latitude AS FLOAT))) * 
-            cos(radians(CAST(longitude AS FLOAT)) - radians(${lng})) + 
-            sin(radians(${lat})) * 
-            sin(radians(CAST(latitude AS FLOAT)))
-          )) AS distance
-        FROM dealers 
-        WHERE (6371 * acos(
-          cos(radians(${lat})) * 
-          cos(radians(CAST(latitude AS FLOAT))) * 
-          cos(radians(CAST(longitude AS FLOAT)) - radians(${lng})) + 
-          sin(radians(${lat})) * 
-          sin(radians(CAST(latitude AS FLOAT)))
-        )) <= ${radiusKm}
-        ORDER BY distance ASC
-        LIMIT 10
-      `;
-
-          // ✅ SAFE: Execute raw query with proper error handling
-          const result = await db.execute(sql`${dealersQuery}`);
-          nearbyDealers = result.rows || [];
-
-          console.log(`✅ Found ${nearbyDealers.length} dealers within ${radiusKm}km`);
-
-        } catch (dealerError) {
-          console.log('⚠️ Nearby dealers query failed, continuing with punch-in:', dealerError);
-          // ✅ SAFE: Continue even if dealer lookup fails - system remains functional
-        }
-
-        // ✅ STEP 2 - Enhanced punch-in response with nearby dealers
-        return res.status(200).json({
-          success: true,
-          action: 'punch-in',
-          data: {
-            userId: userIdInt,
-            latitude: parseFloat(latitude),
-            longitude: parseFloat(longitude),
-            locationName: locationName || "Punch-in Location",
-            checkInTime: new Date().toISOString(),
-            // ✅ NEW: Include nearby dealers information
-            nearbyDealers: nearbyDealers.map(dealer => ({
-              id: dealer.id,
-              name: dealer.name,
-              type: dealer.type || 'Dealer',
-              distance: `${Math.round((dealer.distance || 0) * 1000)}m`, // Convert to meters
-              totalPotential: dealer.totalPotential || dealer.total_potential || 0,
-              bestPotential: dealer.bestPotential || dealer.best_potential || 0,
-              brands: dealer.brandsSelling || dealer.brands_selling || [],
-              contactPerson: dealer.contactPerson || dealer.contact_person || null,
-              phoneNumber: dealer.phoneNumber || dealer.phone_number || null,
-              lastVisit: dealer.lastVisitDate || dealer.last_visit_date || null
-            })),
-            dealersFound: nearbyDealers.length
-          },
-          message: nearbyDealers.length > 0
-            ? `Punched in successfully! Found ${nearbyDealers.length} dealer(s) within 1km radius.`
-            : 'Punched in successfully! No existing dealers found at this location.',
-          nextStep: nearbyDealers.length > 0
-            ? 'Select a dealer or create new one, then describe your visit'
-            : 'Describe your visit to create DVR with new dealer',
-          instructions: {
-            selectDealer: "To select: 'dealer 1' or 'dealer 2'",
-            newDealer: "To create new: describe visit with dealer name",
-            directVisit: "Or directly: 'Visited [dealer] for [purpose]'"
-          }
-        });
       }
 
-      // 🔄 UPDATED: Enhanced punch-out with dealer context
-      if (action === 'punch-out' || action === 'complete-dvr') {
-        // Validate DVR prompt for completion
-        if (!dvrPrompt || !latitude || !longitude) {
-          return res.status(400).json({
-            error: 'DVR prompt and location required for completion',
-            required: ['dvrPrompt', 'latitude', 'longitude']
-          });
-        }
+      if (action === 'dealer-questions') {
+        // Handle guided dealer creation prompts
+        if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
+          // Still collecting dealer info
+          const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
 
-        // ✅ STEP 1 - Get dealer information (selected or new)
-        let dealerInfo = null;
-        let newDealerCreated = false;
-
-        if (selectedDealerId && !isNewDealer) {
-          // ✅ Get pre-selected dealer from database
-          try {
-            const selectedDealer = await db.query.dealers.findFirst({
-              where: eq(dealers.id, selectedDealerId)
+          if (responseCount === 0) {
+            return res.json({
+              success: true,
+              nextQuestion: 'What is the dealer details? Include name, type, region, area, phone, address, potential values, and brands they sell.',
+              questionNumber: 1
             });
-            dealerInfo = selectedDealer;
-            console.log(`✅ Using existing dealer: ${dealerInfo?.name}`);
-          } catch (error) {
-            console.log('⚠️ Failed to fetch selected dealer, using AI generation');
-          }
-        } else if (isNewDealer && newDealerInfo) {
-          // ✅ Create new dealer with provided info
-          try {
-            const newDealerData = {
-              name: newDealerInfo.name,
-              type: newDealerInfo.type || 'Dealer',
-              totalPotential: newDealerInfo.totalPotential || 100.00,
-              bestPotential: newDealerInfo.bestPotential || 70.00,
-              brandsSelling: newDealerInfo.brands || ['UltraTech', 'ACC'],
-              contactPerson: newDealerInfo.contactPerson || null,
-              phoneNumber: newDealerInfo.phoneNumber || null,
-              location: locationName || "Field Location",
-              latitude: latitude.toString(),
-              longitude: longitude.toString(),
-              createdBy: userIdInt,
-              createdAt: new Date(),
-              updatedAt: new Date()
-            };
-
-            const [createdDealer] = await db.insert(dealers).values(newDealerData).returning();
-            dealerInfo = createdDealer;
-            newDealerCreated = true;
-            console.log(`✅ Created new dealer: ${dealerInfo.name}`);
-          } catch (error) {
-            console.log('⚠️ Failed to create new dealer, using AI generation');
+          } else if (responseCount === 1) {
+            return res.json({
+              success: true,
+              nextQuestion: 'Any additional information about this dealer? Include feedback, remarks, or other relevant details.',
+              questionNumber: 2
+            });
           }
         }
 
-        // ✅ STEP 2 - 🔄 CORRECTED: Use new dealer-context AI method
-        const aiService = new AIService();
-        const aiGeneratedData = await aiService.generateDVRFromSinglePromptWithDealerContext({
-          userId: userIdInt,
-          prompt: dvrPrompt,
-          location: { lat: parseFloat(latitude), lng: parseFloat(longitude) },
-          checkInTime: checkInTime ? new Date(checkInTime) : new Date(),
-          checkOutTime: new Date(),
-          existingDealer: dealerInfo // ← 🔄 CORRECTED: Pass dealer context
-        });
+        // Parse dealer data and create dealer
+        try {
+          const dealerData = await aiService.parseNewDealerFromGuidedPrompts(
+            guidedResponses,
+            lat.toString(),
+            lng.toString(),
+            userId
+          );
 
-        // ✅ STEP 3 - Prepare DVR data with dealer source tracking
-        const today = new Date();
-        const todayDateString = today.toISOString().split('T')[0];
+          // ✅ SAFELY CALL EXISTING VALIDATED ENDPOINT - NO BYPASS!
+          const axios = require('axios');
+          const baseUrl = process.env.NGROK_URL || 'https://telesalesside.onrender.com';
 
-        // 🔧 FIXED: Convert numeric fields to strings for Zod validation
-        const dvrData = {
-          userId: userIdInt,
-          reportDate: todayDateString,
-          dealerType: aiGeneratedData.dealerType,
-          dealerName: aiGeneratedData.dealerName || "Auto-detected Dealer",
-          subDealerName: aiGeneratedData.dealerType === 'Sub Dealer' ? aiGeneratedData.dealerName : null,
-          location: locationName || aiGeneratedData.location || "Field Location",
-          latitude: latitude.toString(),
-          longitude: longitude.toString(),
-          visitType: aiGeneratedData.visitType,
-          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential?.toString()) || "0",
-          dealerBestPotential: (aiGeneratedData.dealerBestPotential?.toString()) || "0",
-          brandSelling: aiGeneratedData.brandSelling,
-          contactPerson: aiGeneratedData.contactPerson,
-          contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo,
-          todayOrderMt: (aiGeneratedData.todayOrderMt?.toString()) || "0",
-          todayCollectionRupees: (aiGeneratedData.todayCollectionRupees?.toString()) || "0",
-          feedbacks: aiGeneratedData.feedbacks,
-          solutionBySalesperson: aiGeneratedData.solutionBySalesperson,
-          anyRemarks: aiGeneratedData.anyRemarks,
-          checkInTime: checkInTime ? new Date(checkInTime) : new Date(),
-          checkOutTime: new Date(), // Auto punch-out timestamp
-          inTimeImageUrl: inTimeImageUrl || null,
-          outTimeImageUrl: outTimeImageUrl || null
-        };
+          const dealerResponse = await axios.post(`${baseUrl}/api/dealers`, dealerData, {
+            headers: {
+              'Content-Type': 'application/json'
+            }
+          });
 
-        // ✅ VALIDATE WITH YOUR SCHEMA - SAFE: Use your existing validation schema
-        const validatedData = insertDailyVisitReportSchema.parse(dvrData);
+          if (!dealerResponse.data.success) {
+            throw new Error(dealerResponse.data.error || 'Failed to create dealer');
+          }
 
-        // ✅ INSERT INTO DATABASE - SAFE: Keep existing database logic
-        const result = await db.insert(dailyVisitReports).values(validatedData).returning();
+          const newDealer = dealerResponse.data.data;
 
-        return res.status(201).json({
-          success: true,
-          action: 'dvr-completed',
-          data: result[0],
-          message: 'DVR created successfully with punch-out completion!',
-          aiGenerated: true,
-          punchOutTime: new Date().toISOString(),
-          dealerSource: dealerInfo ? 'existing_database' : 'ai_generated', // ← 🆕 Track data source
-          newDealerCreated: newDealerCreated // ← 🆕 Track if new dealer was created
-        });
+          return res.json({
+            success: true,
+            dealerCreated: true,
+            dealer: newDealer,
+            nextAction: 'dvr-questions',
+            agentMessage: `Dealer "${newDealer.name}" created successfully! Now let's create your DVR. What was the main purpose of your visit?`
+          });
+        } catch (error) {
+          // Handle validation errors from your existing endpoint
+          const validationError = error.response?.data;
+          return res.status(400).json({
+            error: 'Failed to create dealer',
+            details: validationError?.error || error.message,
+            agentMessage: 'I couldn\'t create the dealer. Please provide more details.',
+            validationErrors: validationError?.required || null,
+            schemaValidation: validationError?.schemaValidation || null
+          });
+        }
       }
 
-      // ✅ BACKWARD COMPATIBILITY: Keep existing flow for traditional DVR creation
-      if (!dealerName || !visitPurpose) {
-        return res.status(400).json({
-          error: 'Missing required fields for traditional DVR creation',
-          required: ['dealerName', 'visitPurpose']
-        });
+      if (action === 'dvr-questions') {
+        // Handle guided DVR creation prompts
+        if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
+          const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
+
+          if (responseCount === 0) {
+            return res.json({
+              success: true,
+              nextQuestion: 'What are the visit details? Include visit type (Best/Non Best), dealer potential values, brands selling, today\'s order MT, collection amount, and any feedback.',
+              questionNumber: 1
+            });
+          } else if (responseCount === 1) {
+            return res.json({
+              success: true,
+              nextQuestion: 'Any additional details? Include contact person info, solutions provided, remarks, and image URLs if available.',
+              questionNumber: 2
+            });
+          }
+        }
+
+        // Parse DVR data and create DVR
+        try {
+          // Get dealer info from request or find by coordinates
+          let dealerInfo;
+          if (req.body.dealer) {
+            dealerInfo = req.body.dealer;
+          } else {
+            dealerInfo = await db.query.dealers.findFirst({
+              where: and(
+                eq(dealers.latitude, lat.toString()),
+                eq(dealers.longitude, lng.toString())
+              )
+            });
+          }
+
+          if (!dealerInfo) {
+            throw new Error('Dealer not found for this location');
+          }
+
+          const dvrData = await aiService.generateDVRFromPromptWithContext(
+            Object.values(guidedResponses).join(' '),
+            dealerInfo,
+            { latitude: parseFloat(lat).toFixed(7), longitude: parseFloat(lng).toFixed(7), timestamp: new Date() }
+          );
+
+          // VALIDATE REQUIRED FIELDS BEFORE INSERT
+          const requiredFields = [
+            'reportDate', 'dealerType', 'location', 'visitType',
+            'dealerTotalPotential', 'dealerBestPotential', 'brandSelling',
+            'todayOrderMt', 'todayCollectionRupees', 'feedbacks'
+          ];
+
+          for (const field of requiredFields) {
+            if (!dvrData[field] && dvrData[field] !== 0) {
+              throw new Error(`Missing required field: ${field}`);
+            }
+          }
+
+          // VALIDATE ENUM VALUES
+          if (!['Dealer', 'Sub Dealer'].includes(dvrData.dealerType)) {
+            throw new Error('dealerType must be "Dealer" or "Sub Dealer"');
+          }
+          if (!['Best', 'Non Best'].includes(dvrData.visitType)) {
+            throw new Error('visitType must be "Best" or "Non Best"');
+          }
+
+          // VALIDATE ARRAY
+          if (!Array.isArray(dvrData.brandSelling)) {
+            throw new Error('brandSelling must be an array');
+          }
+
+          // Create DVR with EXACT SCHEMA FIELDS ONLY
+          const dvrRecord = await db.insert(dailyVisitReports).values({
+            userId: userId,
+            reportDate: dvrData.reportDate,
+            dealerType: dvrData.dealerType,
+            dealerName: dvrData.dealerName || null,
+            subDealerName: dvrData.subDealerName || null,
+            location: dvrData.location,
+            latitude: parseFloat(lat).toFixed(7),
+            longitude: parseFloat(lng).toFixed(7),
+            visitType: dvrData.visitType,
+            dealerTotalPotential: dvrData.dealerTotalPotential,
+            dealerBestPotential: dvrData.dealerBestPotential,
+            brandSelling: dvrData.brandSelling,
+            contactPerson: dvrData.contactPerson || null,
+            contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
+            todayOrderMt: dvrData.todayOrderMt,
+            todayCollectionRupees: dvrData.todayCollectionRupees,
+            feedbacks: dvrData.feedbacks,
+            solutionBySalesperson: dvrData.solutionBySalesperson || null,
+            anyRemarks: dvrData.anyRemarks || null,
+            checkInTime: dvrData.checkInTime || new Date(),
+            checkOutTime: dvrData.checkOutTime || null,
+            inTimeImageUrl: dvrData.inTimeImageUrl || null,
+            outTimeImageUrl: dvrData.outTimeImageUrl || null
+          }).returning();
+
+          return res.json({
+            success: true,
+            dvrCreated: true,
+            dvr: dvrRecord[0],
+            agentMessage: `DVR created successfully for ${dealerInfo.name}! Visit recorded.`,
+            workflowComplete: true
+          });
+        } catch (error) {
+          return res.status(400).json({
+            error: 'Failed to create DVR',
+            details: error.message,
+            agentMessage: 'I couldn\'t create the DVR. Please provide more details about your visit.'
+          });
+        }
       }
-
-      // ✅ GENERATE DVR DATA USING AI - SAFE: Keep existing AI service call
-      const aiService = new AIService();
-      const aiGeneratedData = await aiService.generateDVRFromMinimalInput({
-        dealerName: dealerName,
-        visitPurpose: visitPurpose,
-        visitOutcome: visitOutcome,
-        location: { lat: parseFloat(latitude) || 0, lng: parseFloat(longitude) || 0 }
-      });
-
-      // ✅ PREPARE COMPLETE DVR DATA FOR DATABASE - SAFE: Keep existing data preparation
-      const today = new Date();
-      const todayDateString = today.toISOString().split('T')[0];
-
-      // 🔧 FIXED: Convert numeric fields to strings for Zod validation
-      const dvrData = {
-        userId: userIdInt,
-        reportDate: todayDateString,
-        dealerType: aiGeneratedData.dealerType,
-        dealerName: dealerName,
-        subDealerName: aiGeneratedData.dealerType === 'Sub Dealer' ? dealerName : null,
-        location: locationName || "Field Location",
-        latitude: latitude ? latitude.toString() : "0",
-        longitude: longitude ? longitude.toString() : "0",
-        visitType: aiGeneratedData.visitType,
-        dealerTotalPotential: (aiGeneratedData.dealerTotalPotential?.toString()) || "0",
-        dealerBestPotential: (aiGeneratedData.dealerBestPotential?.toString()) || "0",
-        brandSelling: aiGeneratedData.brandSelling,
-        contactPerson: aiGeneratedData.contactPerson,
-        contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo,
-        todayOrderMt: (aiGeneratedData.todayOrderMt?.toString()) || "0",
-        todayCollectionRupees: (aiGeneratedData.todayCollectionRupees?.toString()) || "0",
-        feedbacks: aiGeneratedData.feedbacks,
-        solutionBySalesperson: aiGeneratedData.solutionBySalesperson,
-        anyRemarks: aiGeneratedData.anyRemarks,
-        checkInTime: checkInTime ? new Date(checkInTime) : new Date(),
-        checkOutTime: checkOutTime ? new Date(checkOutTime) : null,
-        inTimeImageUrl: inTimeImageUrl || null,
-        outTimeImageUrl: outTimeImageUrl || null
-      };
-
-      // ✅ VALIDATE WITH YOUR SCHEMA - SAFE: Use your existing validation schema
-      const validatedData = insertDailyVisitReportSchema.parse(dvrData);
-
-      // ✅ INSERT INTO DATABASE - SAFE: Keep existing database logic
-      const result = await db.insert(dailyVisitReports).values(validatedData).returning();
-
-      return res.status(201).json({
-        success: true,
-        data: result[0],
-        message: 'DVR created successfully!',
-        aiGenerated: true
-      });
 
     } catch (error) {
-      console.error('DVR Creation Error:', error);
-
-      // ✅ ENHANCED ERROR HANDLING - Handle Zod validation errors specifically
-      if (error?.name === 'ZodError') {
-        return res.status(400).json({
-          error: 'DVR validation error',
-          details: error.issues,
-          message: 'Please check the data format and try again'
-        });
-      }
-
-      return res.status(500).json({
-        error: 'Failed to create DVR',
-        message: 'Internal server error occurred'
-      });
+      console.error('DVR creation error:', error);
+      res.status(500).json({ error: 'Failed to process DVR workflow' });
     }
   });
 
@@ -1461,14 +1362,18 @@ export function setupWebRoutes(app: Express) {
       if (useAI && userInput) {
         // 🤖 AI MAGIC BUTTON - Generate DVR from chat
         console.log('🎯 Using AI to generate DVR from input:', userInput);
-
-        const aiGeneratedData = await aiService.generateDVRFromInput({
-          dealerName: dealerName || "Customer",
-          visitContext: userInput,
-          customerInteraction: userInput,
-          location: location || { lat: 0, lng: 0 },
-          dealerType: req.body.dealerType
-        });
+        const aiGeneratedData = await aiService.generateDVRFromPromptWithContext(
+          userInput, // First argument: prompt (string)
+          { // Second argument: dealerInfo (object)
+            name: dealerName || "Customer",
+            dealerType: req.body.dealerType
+          },
+          { // Third argument: context (object)
+            latitude: location?.lat?.toString() || "0",
+            longitude: location?.lng?.toString() || "0",
+            timestamp: new Date()
+          }
+        );
 
         // ✅ SCHEMA-COMPLIANT DATA MAPPING
         dvrData = {
