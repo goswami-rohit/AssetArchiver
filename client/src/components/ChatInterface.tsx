@@ -56,7 +56,7 @@ export default function ChatInterface({
   const [typingIndicator, setTypingIndicator] = useState(false);
   const [aiPersonality, setAiPersonality] = useState('professional');
   
-  // 🚀 NEW DVR WORKFLOW STATE
+  // 🚀 ENHANCED DVR WORKFLOW STATE
   const [punchState, setPunchState] = useState<'ready' | 'punched-in' | 'dealer-selection' | 'creating-dvr'>('ready');
   const [punchInData, setPunchInData] = useState<any>(null);
   const [selectedDealer, setSelectedDealer] = useState<any>(null);
@@ -204,13 +204,14 @@ export default function ChatInterface({
       case 'dvr':
         if (punchState === 'ready') {
           return [
-            { label: 'Punch In', action: 'punch in', variant: 'default', icon: <MapPin className="w-4 h-4" /> },
-            { label: 'Recent DVRs', action: 'show recent dvrs', variant: 'outline', icon: <Eye className="w-4 h-4" /> }
+            { label: '📍 Punch In Now', action: 'punch in', variant: 'default', icon: <MapPin className="w-4 h-4" /> },
+            { label: '📊 Recent DVRs', action: 'show recent dvrs', variant: 'outline', icon: <Eye className="w-4 h-4" /> }
           ];
         } else if (punchState === 'punched-in') {
           return [
-            { label: 'Collection Visit', action: 'Collection visit, received payment of ₹50000', variant: 'default', icon: <Target className="w-4 h-4" /> },
-            { label: 'Routine Check', action: 'Routine check, discussed new cement products and market situation', variant: 'outline', icon: <RefreshCw className="w-4 h-4" /> }
+            { label: '💰 Collection Visit', action: 'Collection visit, received payment of ₹50000', variant: 'default', icon: <Target className="w-4 h-4" /> },
+            { label: '🔄 Routine Check', action: 'Routine check, discussed new cement products and market situation', variant: 'outline', icon: <RefreshCw className="w-4 h-4" /> },
+            { label: '📋 Order Booking', action: 'Order booking, confirmed 25MT delivery next week', variant: 'outline', icon: <FileText className="w-4 h-4" /> }
           ];
         }
         return [];
@@ -221,7 +222,7 @@ export default function ChatInterface({
     }
   };
 
-  // 🔥 REVOLUTIONARY DVR HANDLER - HOOKS TO YOUR EXACT API
+  // 🔥 ENHANCED DVR HANDLER - HOOKS TO YOUR EXACT API
   const handleDVRWorkflow = async (input: string): Promise<string> => {
     setTypingIndicator(true);
     
@@ -229,7 +230,7 @@ export default function ChatInterface({
       const trimmedInput = input.toLowerCase().trim();
 
       // 🚀 STEP 1: PUNCH IN WITH DEALER DETECTION
-      if (trimmedInput === 'punch in' || trimmedInput === 'punch-in') {
+      if (trimmedInput === 'punch in' || trimmedInput === 'punch-in' || trimmedInput.includes('punch in')) {
         if (!currentLocation) {
           return `📍 **GPS Required**\n\n🛰️ Please enable location services to punch in.\n\n💡 **Why?** I need your exact coordinates to detect nearby dealers and create accurate DVRs.`;
         }
@@ -379,7 +380,7 @@ export default function ChatInterface({
     }
   };
 
-  // 🕐 ATTENDANCE HANDLERS (keeping your existing logic)
+  // 🕐 ATTENDANCE HANDLERS
   const handlePunchIn = async (): Promise<string> => {
     if (!currentLocation) {
       return `❌ **Location Required**\n\nPlease enable GPS location services to punch in.`;
@@ -429,7 +430,7 @@ export default function ChatInterface({
     }
   };
 
-  // 🗺️ JOURNEY HANDLERS (keeping your existing logic)
+  // 🗺️ JOURNEY HANDLERS
   const handleStartJourney = async (input: string): Promise<string> => {
     if (!currentLocation) {
       return `❌ **Location Required**\n\nPlease enable GPS to start journey tracking.`;
@@ -615,12 +616,12 @@ export default function ChatInterface({
       isExpanded ? 'h-[90vh]' : 'h-auto'
     } max-w-full`}>
       
-      {/* 🔥 REVOLUTIONARY HEADER */}
-      <div className="px-3 sm:px-4 py-3 bg-gradient-to-r from-slate-900 via-purple-900 to-slate-900 border-b border-purple-200/20">
+      {/* 🎨 ENHANCED MILD COLOR HEADER */}
+      <div className="px-3 sm:px-4 py-3 bg-gradient-to-r from-slate-50 via-blue-50 to-purple-50 border-b border-slate-200">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 sm:space-x-3">
             <div className="relative">
-              <Badge variant="default" className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-emerald-600 to-blue-600 text-xs sm:text-sm shadow-lg">
+              <Badge variant="default" className="flex items-center space-x-2 px-3 py-2 bg-gradient-to-r from-blue-500 to-purple-500 text-xs sm:text-sm shadow-sm">
                 {getContextIcon(context)}
                 <span className="capitalize font-bold text-white">{context.replace('_', ' ')} AI</span>
               </Badge>
@@ -628,27 +629,27 @@ export default function ChatInterface({
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full"></div>
             </div>
 
-            {/* Enhanced Status Badges */}
+            {/* 🎨 MILD STATUS BADGES */}
             <div className="hidden sm:flex items-center space-x-2">
-              <Badge variant="outline" className="text-emerald-400 border-emerald-400/50 bg-emerald-500/10 text-xs font-semibold">
+              <Badge variant="outline" className="text-emerald-600 border-emerald-300 bg-emerald-50 text-xs font-semibold">
                 <Zap className="w-3 h-3 mr-1" />
                 Live API
               </Badge>
 
               {currentLocation && (
-                <Badge variant="outline" className="text-blue-400 border-blue-400/50 bg-blue-500/10 text-xs font-semibold">
+                <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50 text-xs font-semibold">
                   <MapPin className="w-3 h-3 mr-1" />
                   GPS
                 </Badge>
               )}
 
               {isConnected ? (
-                <Badge variant="outline" className="text-green-400 border-green-400/50 bg-green-500/10 text-xs">
+                <Badge variant="outline" className="text-green-600 border-green-300 bg-green-50 text-xs">
                   <Wifi className="w-3 h-3 mr-1" />
                   Online
                 </Badge>
               ) : (
-                <Badge variant="outline" className="text-red-400 border-red-400/50 bg-red-500/10 text-xs">
+                <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50 text-xs">
                   <WifiOff className="w-3 h-3 mr-1" />
                   Offline
                 </Badge>
@@ -661,7 +662,7 @@ export default function ChatInterface({
               variant="outline"
               size="sm"
               onClick={toggleExpanded}
-              className="p-2 hover:bg-purple-500/10 border-purple-300/30 text-white min-h-[36px] min-w-[36px]"
+              className="p-2 hover:bg-slate-100 border-slate-300 text-slate-600 min-h-[36px] min-w-[36px]"
             >
               {isExpanded ? <ArrowDown className="w-4 h-4" /> : <ArrowUp className="w-4 h-4" />}
             </Button>
@@ -670,14 +671,14 @@ export default function ChatInterface({
               variant="outline"
               size="sm"
               onClick={toggleMinimized}
-              className="p-2 hover:bg-red-500/10 border-red-300/30 text-white min-h-[36px] min-w-[36px]"
+              className="p-2 hover:bg-slate-100 border-slate-300 text-slate-600 min-h-[36px] min-w-[36px]"
             >
               <ChevronDown className="w-4 h-4" />
             </Button>
           </div>
         </div>
 
-        {/* 🚀 ENHANCED QUICK ACTIONS */}
+        {/* 🎨 ENHANCED MILD QUICK ACTIONS */}
         {!isExpanded && (
           <div className="flex space-x-2 mt-3 overflow-x-auto pb-2 scrollbar-hide">
             {context === 'dvr' && punchState === 'ready' ? (
@@ -686,7 +687,7 @@ export default function ChatInterface({
                   variant="default"
                   size="sm"
                   onClick={() => handleSendMessage('punch in')}
-                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-emerald-600 to-green-600 text-white hover:from-emerald-700 hover:to-green-700 shadow-lg min-h-[40px] px-4"
+                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-emerald-500 to-green-500 text-white hover:from-emerald-600 hover:to-green-600 shadow-sm min-h-[40px] px-4"
                 >
                   📍 Punch In
                 </Button>
@@ -696,7 +697,7 @@ export default function ChatInterface({
                     variant="outline"
                     size="sm"
                     onClick={() => handleQuickAction(action)}
-                    className="whitespace-nowrap text-xs font-medium border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300 min-h-[40px] px-3"
+                    className="whitespace-nowrap text-xs font-medium border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400 min-h-[40px] px-3"
                   >
                     {action}
                   </Button>
@@ -708,7 +709,7 @@ export default function ChatInterface({
                   variant="default"
                   size="sm"
                   onClick={() => handleSendMessage('Collection visit, received payment of ₹50000')}
-                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-green-600 to-emerald-600 text-white shadow-lg min-h-[40px] px-3"
+                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-green-500 to-emerald-500 text-white shadow-sm min-h-[40px] px-3"
                 >
                   💰 Collection
                 </Button>
@@ -716,7 +717,7 @@ export default function ChatInterface({
                   variant="default"
                   size="sm"
                   onClick={() => handleSendMessage('Routine check, discussed new products')}
-                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-orange-600 to-red-600 text-white shadow-lg min-h-[40px] px-3"
+                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-orange-400 to-red-400 text-white shadow-sm min-h-[40px] px-3"
                 >
                   🔄 Routine
                 </Button>
@@ -724,7 +725,7 @@ export default function ChatInterface({
                   variant="default"
                   size="sm"
                   onClick={() => handleSendMessage('Order booking, confirmed delivery')}
-                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-lg min-h-[40px] px-3"
+                  className="whitespace-nowrap text-xs font-semibold bg-gradient-to-r from-purple-400 to-pink-400 text-white shadow-sm min-h-[40px] px-3"
                 >
                   📋 Order
                 </Button>
@@ -751,8 +752,8 @@ export default function ChatInterface({
                   onClick={() => handleQuickAction(action)}
                   className={`whitespace-nowrap text-xs font-medium min-h-[40px] px-3 ${
                     index === 0 
-                      ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg'
-                      : 'border-blue-200 text-blue-700 hover:bg-blue-50 hover:border-blue-300'
+                      ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-sm'
+                      : 'border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400'
                   }`}
                 >
                   {action}
@@ -762,20 +763,20 @@ export default function ChatInterface({
           </div>
         )}
 
-        {/* 🎯 WORKFLOW PROGRESS INDICATOR */}
+        {/* 🎯 MILD WORKFLOW PROGRESS INDICATOR */}
         {workflowProgress > 0 && (
-          <div className="mt-3 px-3 py-2 bg-blue-500/10 rounded-lg border border-blue-300/30">
+          <div className="mt-3 px-3 py-2 bg-blue-50 rounded-lg border border-blue-200">
             <div className="flex items-center justify-between text-sm mb-2">
-              <span className="text-blue-200 font-medium">
+              <span className="text-blue-700 font-medium">
                 🔄 DVR Workflow Progress
               </span>
-              <span className="text-blue-300 text-xs font-bold">
+              <span className="text-blue-600 text-xs font-bold">
                 {workflowProgress}%
               </span>
             </div>
-            <div className="w-full bg-blue-900/30 rounded-full h-2">
+            <div className="w-full bg-blue-100 rounded-full h-2">
               <div 
-                className="bg-gradient-to-r from-blue-500 to-emerald-500 h-2 rounded-full transition-all duration-500 ease-in-out"
+                className="bg-gradient-to-r from-blue-400 to-emerald-400 h-2 rounded-full transition-all duration-500 ease-in-out"
                 style={{ width: `${workflowProgress}%` }}
               ></div>
             </div>
@@ -783,33 +784,33 @@ export default function ChatInterface({
         )}
       </div>
 
-      {/* 💬 REVOLUTIONARY MESSAGES AREA */}
+      {/* 💬 ENHANCED MILD MESSAGES AREA */}
       {isExpanded && messages.length > 0 && (
-        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4 bg-gradient-to-b from-gray-50 to-white max-h-[70vh] scroll-smooth">
+        <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-4 bg-gradient-to-b from-slate-50 to-white max-h-[70vh] scroll-smooth">
           {messages.map((message) => (
             <div
               key={message.id}
               className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[85%] sm:max-w-sm lg:max-w-md px-4 py-3 rounded-2xl shadow-md transition-all duration-300 hover:shadow-lg ${
+                className={`max-w-[85%] sm:max-w-sm lg:max-w-md px-4 py-3 rounded-2xl shadow-sm transition-all duration-300 hover:shadow-md ${
                   message.type === 'user'
-                    ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white transform hover:scale-[1.02]'
+                    ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white transform hover:scale-[1.02]'
                     : message.isError
-                    ? 'bg-red-50 text-red-900 border border-red-200 hover:bg-red-100'
+                    ? 'bg-red-50 text-red-800 border border-red-200 hover:bg-red-100'
                     : message.isSuccess
-                    ? 'bg-green-50 text-green-900 border border-green-200 hover:bg-green-100'
-                    : 'bg-white text-gray-900 border border-gray-200 hover:bg-gray-50'
+                    ? 'bg-green-50 text-green-800 border border-green-200 hover:bg-green-100'
+                    : 'bg-white text-gray-800 border border-gray-200 hover:bg-gray-50'
                 }`}
               >
                 <div className="flex items-start space-x-3">
                   {message.type === 'ai' && (
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg ${
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 shadow-sm ${
                       message.isError 
-                        ? 'bg-red-500' 
+                        ? 'bg-red-400' 
                         : message.isSuccess 
-                        ? 'bg-green-500' 
-                        : 'bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600'
+                        ? 'bg-green-400' 
+                        : 'bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500'
                     }`}>
                       <Bot className="w-4 h-4 text-white" />
                     </div>
@@ -820,7 +821,7 @@ export default function ChatInterface({
                       {message.content}
                     </p>
 
-                    {/* 🎯 ENHANCED ACTION BUTTONS */}
+                    {/* 🎯 ENHANCED MILD ACTION BUTTONS */}
                     {message.type === 'ai' && message.actionButtons && message.actionButtons.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-3">
                         {message.actionButtons.map((button, index) => (
@@ -829,7 +830,11 @@ export default function ChatInterface({
                             variant={button.variant}
                             size="sm"
                             onClick={() => handleActionButton(button.action)}
-                            className="text-xs min-h-[36px] px-3 shadow-sm hover:shadow-md transition-all duration-200"
+                            className={`text-xs min-h-[36px] px-3 shadow-sm hover:shadow-md transition-all duration-200 ${
+                              button.variant === 'default'
+                                ? 'bg-gradient-to-r from-emerald-400 to-blue-400 text-white hover:from-emerald-500 hover:to-blue-500'
+                                : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                            }`}
                           >
                             {button.icon && <span className="mr-1">{button.icon}</span>}
                             {button.label}
@@ -847,18 +852,18 @@ export default function ChatInterface({
             </div>
           ))}
 
-          {/* 🔥 ENHANCED TYPING INDICATOR */}
+          {/* 🔥 MILD TYPING INDICATOR */}
           {typingIndicator && (
             <div className="flex justify-start">
-              <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-md">
+              <div className="max-w-xs px-4 py-3 bg-white border border-gray-200 rounded-2xl shadow-sm">
                 <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full flex items-center justify-center shadow-lg">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-400 via-purple-500 to-pink-500 rounded-full flex items-center justify-center shadow-sm">
                     <Bot className="w-4 h-4 text-white" />
                   </div>
                   <div className="flex space-x-1">
-                    <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
-                    <div className="w-3 h-3 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-3 h-3 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce"></div>
+                    <div className="w-3 h-3 bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-3 h-3 bg-pink-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                   </div>
                 </div>
               </div>
@@ -869,8 +874,8 @@ export default function ChatInterface({
         </div>
       )}
 
-      {/* 🚀 REVOLUTIONARY INPUT AREA */}
-      <div className="p-3 sm:p-4 bg-gradient-to-r from-white via-blue-50 to-white border-t border-gray-100">
+      {/* 🚀 ENHANCED MILD INPUT AREA */}
+      <div className="p-3 sm:p-4 bg-gradient-to-r from-white via-slate-50 to-white border-t border-gray-200">
         <div className="flex items-center space-x-2 sm:space-x-3">
           <div className="flex-1 relative">
             <Input
@@ -887,14 +892,14 @@ export default function ChatInterface({
                   : `Ask about ${context.replace('_', ' ')}...`
               }`}
               disabled={isLoading}
-              className="w-full pr-16 py-3 sm:py-4 text-base border-2 border-blue-200 focus:border-purple-500 rounded-xl bg-white focus:bg-blue-50/50 transition-all duration-300 min-h-[48px] shadow-sm focus:shadow-md"
+              className="w-full pr-16 py-3 sm:py-4 text-base border-2 border-slate-300 focus:border-purple-400 rounded-xl bg-white focus:bg-slate-50 transition-all duration-300 min-h-[48px] shadow-sm focus:shadow-md"
               style={{ fontSize: '16px' }} // Prevents iOS zoom
             />
             
             <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
               <div className="flex items-center space-x-1">
-                {isLoading && <Loader2 className="w-4 h-4 text-purple-500 animate-spin" />}
-                <Sparkles className="w-4 h-4 text-purple-500 animate-pulse" />
+                {isLoading && <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />}
+                <Sparkles className="w-4 h-4 text-purple-400 animate-pulse" />
               </div>
             </div>
           </div>
@@ -903,10 +908,10 @@ export default function ChatInterface({
             onClick={() => handleSendMessage()}
             disabled={isLoading || !inputValue.trim()}
             size="lg"
-            className={`px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-lg min-h-[48px] min-w-[48px] transition-all duration-300 ${
+            className={`px-4 sm:px-6 py-3 sm:py-4 rounded-xl shadow-sm min-h-[48px] min-w-[48px] transition-all duration-300 ${
               isLoading || !inputValue.trim()
                 ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-gradient-to-r from-emerald-600 via-blue-600 to-purple-600 hover:from-emerald-700 hover:via-blue-700 hover:to-purple-700 hover:shadow-xl transform hover:scale-105'
+                : 'bg-gradient-to-r from-emerald-400 via-blue-400 to-purple-400 hover:from-emerald-500 hover:via-blue-500 hover:to-purple-500 hover:shadow-md transform hover:scale-105'
             }`}
           >
             {isLoading ? (
@@ -917,10 +922,10 @@ export default function ChatInterface({
           </Button>
         </div>
 
-        {/* 🎯 ENHANCED STATUS BAR */}
+        {/* 🎯 ENHANCED MILD STATUS BAR */}
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center space-x-3">
-            <p className="text-xs text-gray-500 font-medium">
+            <p className="text-xs text-gray-600 font-medium">
               📱 Mobile optimized • 🎯 Context aware • 🚀 Real-time API
             </p>
           </div>
@@ -932,13 +937,13 @@ export default function ChatInterface({
             </Badge>
             
             {punchState !== 'ready' && (
-              <Badge variant="default" className="text-xs bg-emerald-600 text-white">
+              <Badge variant="default" className="text-xs bg-emerald-500 text-white">
                 DVR: {punchState.replace('-', ' ')}
               </Badge>
             )}
 
             {!isConnected && (
-              <Badge variant="outline" className="text-xs text-red-600 border-red-300 animate-pulse">
+              <Badge variant="outline" className="text-xs text-orange-600 border-orange-300 animate-pulse">
                 <AlertCircle className="w-3 h-3 mr-1" />
                 Offline
               </Badge>

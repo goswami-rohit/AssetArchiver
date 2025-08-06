@@ -1175,28 +1175,29 @@ export function setupWebRoutes(app: Express) {
           }
 
           // Create DVR with EXACT SCHEMA FIELDS ONLY
+          // ✅ CORRECTED INSERT - matches your exact schema
           const dvrRecord = await db.insert(dailyVisitReports).values({
             userId: userId,
-            reportDate: dvrData.reportDate,
+            reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
             dealerType: dvrData.dealerType,
-            dealerName: dvrData.dealerName || null,
+            dealerName: dvrData.dealerName || dealerInfo.name,
             subDealerName: dvrData.subDealerName || null,
             location: dvrData.location,
-            latitude: parseFloat(lat).toFixed(7),
-            longitude: parseFloat(lng).toFixed(7),
+            latitude: lat.toString(), // ← String for decimal type
+            longitude: lng.toString(), // ← String for decimal type  
             visitType: dvrData.visitType,
-            dealerTotalPotential: dvrData.dealerTotalPotential,
-            dealerBestPotential: dvrData.dealerBestPotential,
-            brandSelling: dvrData.brandSelling,
+            dealerTotalPotential: dvrData.dealerTotalPotential.toString(), // ← String for decimal
+            dealerBestPotential: dvrData.dealerBestPotential.toString(), // ← String for decimal
+            brandSelling: Array.isArray(dvrData.brandSelling) ? dvrData.brandSelling : [dvrData.brandSelling], // ← Fix array
             contactPerson: dvrData.contactPerson || null,
             contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
-            todayOrderMt: dvrData.todayOrderMt,
-            todayCollectionRupees: dvrData.todayCollectionRupees,
+            todayOrderMt: dvrData.todayOrderMt.toString(), // ← String for decimal
+            todayCollectionRupees: dvrData.todayCollectionRupees.toString(), // ← String for decimal
             feedbacks: dvrData.feedbacks,
             solutionBySalesperson: dvrData.solutionBySalesperson || null,
             anyRemarks: dvrData.anyRemarks || null,
-            checkInTime: dvrData.checkInTime || new Date(),
-            checkOutTime: dvrData.checkOutTime || null,
+            checkInTime: new Date(), // ← Current timestamp
+            checkOutTime: null,
             inTimeImageUrl: dvrData.inTimeImageUrl || null,
             outTimeImageUrl: dvrData.outTimeImageUrl || null
           }).returning();
