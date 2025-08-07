@@ -1004,6 +1004,38 @@ export function setupWebRoutes(app: Express) {
 
   // Get recent DVR records
   // POST /api/dvr/create - Create DVR using AI generation
+  // Helper functions for geofence validation
+  const findDealerByLocation = async (userLat: number, userLng: number) => {
+    const dealers = await db.query.dealers.findMany();
+
+    for (const dealer of dealers) {
+      if (dealer.area && dealer.area.startsWith('{')) {
+        try {
+          const coords = JSON.parse(dealer.area);
+          const distance = calculateDistance(userLat, userLng, coords.lat, coords.lng);
+
+          if (distance <= (coords.radius || 100)) {
+            return dealer;
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+    return null;
+  };
+
+  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c * 1000; // Distance in meters
+  };
+
   app.post('/api/dvr/create', async (req: Request, res: Response) => {
     try {
       const { action, lat, lng, userId, conversationState, guidedResponses, prompt } = req.body;
@@ -1021,177 +1053,99 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
+      // ✅ GEOFENCE VALIDATION - Check if user is within dealer location
+      console.log(`🎯 Checking geofence for location: ${latNum}, ${lngNum}`);
+      const nearbyDealer = await findDealerByLocation(latNum, lngNum);
+
+      if (!nearbyDealer) {
+        console.log('❌ GEOFENCE FAILED: No dealer found within 100m radius');
+        return res.status(400).json({
+          success: false,
+          error: 'Not within dealer location',
+          agentMessage: 'You must be within 100 meters of a dealer location to create a DVR. Please move closer to your dealer location and try again.',
+          geofenceValidation: 'Failed',
+          location: { lat: latNum, lng: lngNum }
+        });
+      }
+
+      console.log(`✅ GEOFENCE PASSED: Found nearby dealer: ${nearbyDealer.name}`);
+
       // ✅ FIXED: Dynamic axios import
       const { default: axios } = await import('axios');
       const baseUrl = 'https://telesalesside.onrender.com';
 
       if (action === 'punch-in') {
-        console.log('🔍 PUNCH-IN: Searching for dealers via API');
+        console.log('🔍 PUNCH-IN: Geofence passed, dealer auto-detected');
 
-        try {
-          const dealersResponse = await axios.get(`${baseUrl}/api/dealers/recent?userId=${userId}&limit=100`);
-
-          if (!dealersResponse.data.success) {
-            throw new Error('Failed to fetch dealers');
-          }
-
-          const dealers = dealersResponse.data.data;
-          console.log('🔍 Found dealers:', dealers.length);
-
-          // ✅ FIXED: Increased proximity threshold for real GPS accuracy
-          const proximityThreshold = 0.0005; // ~50 meters for better GPS matching
-          const existingDealer = dealers.find(dealer => {
-            if (!dealer.latitude || !dealer.longitude) return false;
-
-            const dealerLat = parseFloat(dealer.latitude);
-            const dealerLng = parseFloat(dealer.longitude);
-
-            if (isNaN(dealerLat) || isNaN(dealerLng)) return false;
-
-            const latDiff = Math.abs(dealerLat - latNum);
-            const lngDiff = Math.abs(dealerLng - lngNum);
-
-            return latDiff <= proximityThreshold && lngDiff <= proximityThreshold;
-          });
-
-          console.log('🔍 DEALER SEARCH RESULT:', existingDealer ? 'FOUND' : 'NOT FOUND');
-
-          if (existingDealer) {
-            return res.json({
-              success: true,
-              dealerFound: true,
-              dealer: existingDealer,
-              nextAction: 'dvr-questions',
-              agentMessage: `Dealer found: ${existingDealer.name}. Let's create your DVR. What was the main purpose of your visit today?`
-            });
-          } else {
-            return res.json({
-              success: true,
-              dealerFound: false,
-              nextAction: 'dealer-questions',
-              agentMessage: 'No dealer found at this location. Let me help you create a new dealer record.',
-              showCreateButton: true,
-              firstQuestion: 'What is the name and type of this dealer? (e.g., "Bhaiti Moina Retailer - Dealer")'
-            });
-          }
-        } catch (error) {
-          console.error('🚨 Error fetching dealers:', error);
-          return res.status(500).json({
-            success: false,
-            error: 'Failed to fetch dealers',
-            agentMessage: 'Unable to check for existing dealers. Please try again.'
-          });
-        }
+        // Since geofence validation passed, we already know the dealer
+        return res.json({
+          success: true,
+          dealerFound: true,
+          dealer: {
+            id: nearbyDealer.id,
+            name: nearbyDealer.name,
+            type: nearbyDealer.type,
+            region: nearbyDealer.region,
+            area: nearbyDealer.area,
+            latitude: latNum.toString(),
+            longitude: lngNum.toString()
+          },
+          nextAction: 'dvr-questions',
+          agentMessage: `Great! You're at ${nearbyDealer.name}. Let's create your DVR. What was the main purpose of your visit today?`,
+          geofenceValidation: 'Passed'
+        });
       }
 
       if (action === 'dealer-questions') {
         console.log('🔍 DEALER-QUESTIONS: Processing guided responses');
 
-        // ✅ FIXED: Only require 1 response minimum
-        if (!guidedResponses || Object.keys(guidedResponses).length < 1) {
-          return res.json({
-            success: true,
-            nextQuestion: 'Please provide dealer details: name, type (Dealer/Sub Dealer), region, area, phone, address, potential values, brands they sell, and any feedback.',
-            questionNumber: 1
-          });
-        }
-
-        try {
-          console.log('🔍 DEALER-QUESTIONS: Parsing dealer data from AI service');
-
-          // ✅ FIXED: Pass coordinates as strings (matching AI service expectation)
-          const dealerData = await aiService.parseNewDealerFromGuidedPrompts(
-            guidedResponses,
-            latNum.toFixed(7), // Convert to string with precision
-            lngNum.toFixed(7), // Convert to string with precision
-            userId
-          );
-
-          console.log('🔍 DEALER-QUESTIONS: AI parsed dealer data:', dealerData);
-
-          const dealerResponse = await axios.post(`${baseUrl}/api/dealers`, dealerData, {
-            headers: { 'Content-Type': 'application/json' }
-          });
-
-          if (!dealerResponse.data.success) {
-            throw new Error(dealerResponse.data.error || 'Failed to create dealer');
-          }
-
-          const newDealer = dealerResponse.data.data;
-          console.log('🔍 DEALER-QUESTIONS: New dealer created:', newDealer.id);
-
-          return res.json({
-            success: true,
-            dealerCreated: true,
-            dealer: newDealer,
-            nextAction: 'dvr-questions',
-            agentMessage: `Great! Dealer "${newDealer.name}" has been created. Now let's create your Daily Visit Report. What was the main purpose of your visit today?`
-          });
-        } catch (error) {
-          console.error('🚨 DEALER-QUESTIONS ERROR:', error);
-          const validationError = error.response?.data;
-          return res.status(400).json({
-            error: 'Failed to create dealer',
-            details: validationError?.error || error.message,
-            agentMessage: 'I need more information to create the dealer. Please provide dealer name, type, and location details.',
-            validationErrors: validationError?.required || null,
-            schemaValidation: validationError?.schemaValidation || null
-          });
-        }
+        // ✅ Since geofence passed, we already have a dealer at this location
+        return res.json({
+          success: true,
+          dealerFound: true,
+          dealer: {
+            id: nearbyDealer.id,
+            name: nearbyDealer.name,
+            type: nearbyDealer.type,
+            region: nearbyDealer.region
+          },
+          nextAction: 'dvr-questions',
+          agentMessage: `You're already at an existing dealer: ${nearbyDealer.name}. Let's create your DVR instead. What was the main purpose of your visit today?`,
+          geofenceValidation: 'Passed - Existing dealer found'
+        });
       }
 
       if (action === 'dvr-questions') {
-        console.log('🔍 DVR-QUESTIONS: Starting DVR creation process');
+        console.log('🔍 DVR-QUESTIONS: Starting DVR creation process with geofence validation');
 
         // ✅ FIXED: Only require 1 response minimum
         if (!guidedResponses || Object.keys(guidedResponses).length < 1) {
           return res.json({
             success: true,
             nextQuestion: 'Please describe your visit: visit type (Best/Non Best), today\'s order amount (MT), collection amount (Rupees), brands discussed, contact person details, and any feedback.',
-            questionNumber: 1
+            questionNumber: 1,
+            dealerInfo: {
+              name: nearbyDealer.name,
+              type: nearbyDealer.type
+            }
           });
         }
 
         try {
-          console.log('🔍 DVR-QUESTIONS: Finding dealer info');
+          console.log('🔍 DVR-QUESTIONS: Using geofence-validated dealer:', nearbyDealer.name);
 
-          let dealerInfo;
-          if (req.body.dealer) {
-            dealerInfo = req.body.dealer;
-            console.log('🔍 DVR-QUESTIONS: Using dealer from request body');
-          } else {
-            console.log('🔍 DVR-QUESTIONS: Fetching dealer via API');
-
-            const dealersResponse = await axios.get(`${baseUrl}/api/dealers/recent?userId=${userId}&limit=100`);
-
-            if (!dealersResponse.data.success) {
-              throw new Error('Failed to fetch dealers');
-            }
-
-            const dealers = dealersResponse.data.data;
-            const proximityThreshold = 0.0005; // Increased threshold
-
-            dealerInfo = dealers.find(dealer => {
-              if (!dealer.latitude || !dealer.longitude) return false;
-
-              const dealerLat = parseFloat(dealer.latitude);
-              const dealerLng = parseFloat(dealer.longitude);
-
-              if (isNaN(dealerLat) || isNaN(dealerLng)) return false;
-
-              const latDiff = Math.abs(dealerLat - latNum);
-              const lngDiff = Math.abs(dealerLng - lngNum);
-
-              return latDiff <= proximityThreshold && lngDiff <= proximityThreshold;
-            });
-          }
-
-          if (!dealerInfo) {
-            console.error('🚨 DVR-QUESTIONS: No dealer found for location');
-            throw new Error('No dealer found for this location. Please create a dealer first.');
-          }
-
-          console.log('🔍 DVR-QUESTIONS: Found dealer:', dealerInfo.name || dealerInfo.id);
+          // Use the geofence-validated dealer info
+          const dealerInfo = {
+            id: nearbyDealer.id,
+            name: nearbyDealer.name,
+            type: nearbyDealer.type,
+            region: nearbyDealer.region,
+            phoneNo: nearbyDealer.phoneNo,
+            address: nearbyDealer.address,
+            totalPotential: nearbyDealer.totalPotential,
+            bestPotential: nearbyDealer.bestPotential,
+            brandSelling: nearbyDealer.brandSelling || []
+          };
 
           const dvrData = await aiService.generateDVRFromPromptWithContext(
             Object.values(guidedResponses).join(' '),
@@ -1204,25 +1158,25 @@ export function setupWebRoutes(app: Express) {
           const safeInsertData = {
             userId: userId || 0,
             reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
-            dealerType: dvrData.dealerType || 'Dealer',
-            dealerName: dvrData.dealerName || dealerInfo?.name || null,
+            dealerType: dvrData.dealerType || nearbyDealer.type || 'Dealer',
+            dealerName: nearbyDealer.name,
             subDealerName: dvrData.subDealerName || null,
-            location: dvrData.location || (dealerInfo?.name ? `${dealerInfo.name} Location` : 'Unknown Location'),
+            location: nearbyDealer.address || `${nearbyDealer.name} Location`,
             latitude: latNum.toFixed(7),
             longitude: lngNum.toFixed(7),
             visitType: dvrData.visitType || 'Non Best',
-            dealerTotalPotential: (Number(dvrData.dealerTotalPotential) || 0).toFixed(2),
-            dealerBestPotential: (Number(dvrData.dealerBestPotential) || 0).toFixed(2),
+            dealerTotalPotential: (Number(dvrData.dealerTotalPotential) || Number(nearbyDealer.totalPotential) || 0).toFixed(2),
+            dealerBestPotential: (Number(dvrData.dealerBestPotential) || Number(nearbyDealer.bestPotential) || 0).toFixed(2),
             todayOrderMt: (Number(dvrData.todayOrderMt) || 0).toFixed(2),
             todayCollectionRupees: (Number(dvrData.todayCollectionRupees) || 0).toFixed(2),
             brandSelling: Array.isArray(dvrData.brandSelling) && dvrData.brandSelling.length > 0
               ? dvrData.brandSelling.map(String).filter(Boolean)
-              : ['Unknown'],
+              : (Array.isArray(nearbyDealer.brandSelling) ? nearbyDealer.brandSelling : ['Unknown']),
             contactPerson: dvrData.contactPerson || null,
-            contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
-            feedbacks: dvrData.feedbacks || 'Visit completed successfully',
+            contactPersonPhoneNo: dvrData.contactPersonPhoneNo || nearbyDealer.phoneNo || null,
+            feedbacks: dvrData.feedbacks || 'Visit completed successfully with geofence validation',
             solutionBySalesperson: dvrData.solutionBySalesperson || null,
-            anyRemarks: dvrData.anyRemarks || null,
+            anyRemarks: dvrData.anyRemarks || 'Created with geofence validation',
             checkInTime: new Date(),
             checkOutTime: null,
             inTimeImageUrl: dvrData.inTimeImageUrl || null,
@@ -1239,8 +1193,14 @@ export function setupWebRoutes(app: Express) {
             success: true,
             dvrCreated: true,
             dvr: dvrRecord[0],
-            agentMessage: `Perfect! Your Daily Visit Report for ${dealerInfo.name} has been created successfully. Visit recorded and workflow complete!`,
-            workflowComplete: true
+            dealerInfo: {
+              name: nearbyDealer.name,
+              type: nearbyDealer.type,
+              region: nearbyDealer.region
+            },
+            agentMessage: `Perfect! Your Daily Visit Report for ${nearbyDealer.name} has been created successfully. Visit recorded with geofence validation and workflow complete!`,
+            workflowComplete: true,
+            geofenceValidation: 'Passed'
           });
 
         } catch (error) {
@@ -1392,42 +1352,9 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ===== UNIFIED DVR ENDPOINT (AI + Manual + Hybrid) WITH SCHEMA VALIDATION =====
-  // Helper functions for geofence validation
-  const findDealerByLocation = async (userLat: number, userLng: number) => {
-    const dealers = await db.query.dealers.findMany();
-
-    for (const dealer of dealers) {
-      if (dealer.area && dealer.area.startsWith('{')) {
-        try {
-          const coords = JSON.parse(dealer.area);
-          const distance = calculateDistance(userLat, userLng, coords.lat, coords.lng);
-
-          if (distance <= (coords.radius || 100)) {
-            return dealer;
-          }
-        } catch (e) {
-          continue;
-        }
-      }
-    }
-    return null;
-  };
-
-  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-      Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c * 1000; // Distance in meters
-  };
-
-  // DVR Creation Endpoint with Geofence Validation
   app.post('/api/dvr', async (req: Request, res: Response) => {
     try {
-      let {
+      const {
         useAI,
         userInput,
         location,
@@ -1436,31 +1363,22 @@ export function setupWebRoutes(app: Express) {
         ...manualData
       } = req.body;
 
-      let foundDealer = null;
-
       // ✅ GEOFENCE VALIDATION
       if (location?.lat && location?.lng) {
-        console.log(`🎯 Checking location: ${location.lat}, ${location.lng}`);
-        foundDealer = await findDealerByLocation(location.lat, location.lng);
+        const nearbyDealer = await findDealerByLocation(location.lat, location.lng);
 
-        if (!foundDealer) {
-          console.log('❌ No dealer found within 100m radius');
+        if (!nearbyDealer) {
           return res.status(400).json({
             success: false,
             error: 'Not within dealer location',
-            message: 'You must be within 100m of a dealer location to create DVR',
-            location: { lat: location.lat, lng: location.lng }
+            message: 'You must be within 100m of a dealer location to create DVR'
           });
         }
 
-        console.log(`✅ Found nearby dealer: ${foundDealer.name}`);
-
         // Use the found dealer's name if not provided
         if (!dealerName) {
-          dealerName = foundDealer.name;
+          dealerName = nearbyDealer.name;
         }
-      } else {
-        console.log('⚠️ No location provided, skipping geofence validation');
       }
 
       let dvrData;
@@ -1471,8 +1389,8 @@ export function setupWebRoutes(app: Express) {
         const aiGeneratedData = await aiService.generateDVRFromPromptWithContext(
           userInput, // First argument: prompt (string)
           { // Second argument: dealerInfo (object)
-            name: dealerName || foundDealer?.name || "Customer",
-            dealerType: foundDealer?.type || req.body.dealerType || "Dealer"
+            name: dealerName || "Customer",
+            dealerType: req.body.dealerType
           },
           { // Third argument: context (object)
             latitude: location?.lat?.toString() || "0",
@@ -1481,58 +1399,56 @@ export function setupWebRoutes(app: Express) {
           }
         );
 
-        // ✅ SCHEMA-COMPLIANT DATA MAPPING WITH DEALER INFO
+        // ✅ SCHEMA-COMPLIANT DATA MAPPING
         dvrData = {
           userId: parseInt(req.body.userId || 1),
           reportDate: new Date().toISOString().split('T')[0], // ✅ Date string for schema
-          dealerType: aiGeneratedData.dealerType || foundDealer?.type || "Dealer",
-          dealerName: dealerName || aiGeneratedData.dealerName || foundDealer?.name || null,
+          dealerType: aiGeneratedData.dealerType || "Dealer",
+          dealerName: dealerName || aiGeneratedData.dealerName || null,
           subDealerName: aiGeneratedData.subDealerName || null,
-          location: aiGeneratedData.location || foundDealer?.address || `${location?.lat || 0}, ${location?.lng || 0}`,
+          location: aiGeneratedData.location || `${location?.lat || 0}, ${location?.lng || 0}`,
           latitude: (location?.lat || 0).toString(), // ✅ Decimal as string
           longitude: (location?.lng || 0).toString(), // ✅ Decimal as string
           visitType: aiGeneratedData.visitType || "Best",
-          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential || foundDealer?.totalPotential || 0).toString(), // ✅ Use dealer data
-          dealerBestPotential: (aiGeneratedData.dealerBestPotential || foundDealer?.bestPotential || 0).toString(), // ✅ Use dealer data
-          brandSelling: Array.isArray(aiGeneratedData.brandSelling) ? aiGeneratedData.brandSelling :
-            (foundDealer?.brandSelling || []), // ✅ Use dealer brands
+          dealerTotalPotential: (aiGeneratedData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+          dealerBestPotential: (aiGeneratedData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+          brandSelling: Array.isArray(aiGeneratedData.brandSelling) ? aiGeneratedData.brandSelling : [], // ✅ Array
           contactPerson: aiGeneratedData.contactPerson || null,
-          contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo || foundDealer?.phoneNo || null,
+          contactPersonPhoneNo: aiGeneratedData.contactPersonPhoneNo || null,
           todayOrderMt: (aiGeneratedData.todayOrderMt || 0).toString(), // ✅ Decimal as string
           todayCollectionRupees: (aiGeneratedData.todayCollectionRupees || 0).toString(), // ✅ Decimal as string
           feedbacks: aiGeneratedData.feedbacks || userInput,
           solutionBySalesperson: aiGeneratedData.solutionBySalesperson || null,
-          anyRemarks: aiGeneratedData.anyRemarks || "Generated via AI with geofence validation",
+          anyRemarks: aiGeneratedData.anyRemarks || "Generated via AI",
           checkInTime: new Date(), // ✅ Timestamp
           checkOutTime: null,
           inTimeImageUrl: req.body.inTimeImageUrl || null,
           outTimeImageUrl: req.body.outTimeImageUrl || null
         };
       } else {
-        // ✅ MANUAL DVR CREATION WITH DEALER DATA
+        // ✅ MANUAL DVR CREATION WITH PROPER TYPES
         dvrData = {
           userId: parseInt(manualData.userId || req.body.userId || 1),
           reportDate: manualData.reportDate
             ? new Date(manualData.reportDate).toISOString().split('T')[0]
             : new Date().toISOString().split('T')[0], // ✅ Date string
-          dealerType: manualData.dealerType || foundDealer?.type || "Dealer",
-          dealerName: manualData.dealerName || dealerName || foundDealer?.name || null,
+          dealerType: manualData.dealerType || "Dealer",
+          dealerName: manualData.dealerName || null,
           subDealerName: manualData.subDealerName || null,
-          location: manualData.location || foundDealer?.address || "",
-          latitude: (manualData.latitude || location?.lat || 0).toString(), // ✅ Decimal as string
-          longitude: (manualData.longitude || location?.lng || 0).toString(), // ✅ Decimal as string
+          location: manualData.location || "",
+          latitude: (manualData.latitude || 0).toString(), // ✅ Decimal as string
+          longitude: (manualData.longitude || 0).toString(), // ✅ Decimal as string
           visitType: manualData.visitType || "Best",
-          dealerTotalPotential: (manualData.dealerTotalPotential || foundDealer?.totalPotential || 0).toString(), // ✅ Use dealer data
-          dealerBestPotential: (manualData.dealerBestPotential || foundDealer?.bestPotential || 0).toString(), // ✅ Use dealer data
-          brandSelling: Array.isArray(manualData.brandSelling) ? manualData.brandSelling :
-            (foundDealer?.brandSelling || []), // ✅ Use dealer brands
+          dealerTotalPotential: (manualData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+          dealerBestPotential: (manualData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+          brandSelling: Array.isArray(manualData.brandSelling) ? manualData.brandSelling : [], // ✅ Array
           contactPerson: manualData.contactPerson || null,
-          contactPersonPhoneNo: manualData.contactPersonPhoneNo || foundDealer?.phoneNo || null,
+          contactPersonPhoneNo: manualData.contactPersonPhoneNo || null,
           todayOrderMt: (manualData.todayOrderMt || 0).toString(), // ✅ Decimal as string
           todayCollectionRupees: (manualData.todayCollectionRupees || 0).toString(), // ✅ Decimal as string
           feedbacks: manualData.feedbacks || "",
           solutionBySalesperson: manualData.solutionBySalesperson || null,
-          anyRemarks: manualData.anyRemarks || (foundDealer ? "Created with geofence validation" : null),
+          anyRemarks: manualData.anyRemarks || null,
           checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(), // ✅ Timestamp
           checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null, // ✅ Timestamp or null
           inTimeImageUrl: manualData.inTimeImageUrl || null,
@@ -1569,6 +1485,7 @@ export function setupWebRoutes(app: Express) {
             userId: validatedData.userId
           };
 
+          // Note: You would need insertClientReportSchema for this too
           clientReportResult = await db.insert(clientReports).values(clientReportData).returning();
         } catch (clientError) {
           console.warn('Failed to create client report:', clientError);
@@ -1580,18 +1497,9 @@ export function setupWebRoutes(app: Express) {
         success: true,
         primaryDVR: dvrResult[0],
         clientReport: clientReportResult?.[0] || null,
-        dealerFound: !!foundDealer,
-        dealerInfo: foundDealer ? {
-          name: foundDealer.name,
-          type: foundDealer.type,
-          region: foundDealer.region
-        } : null,
         aiGenerated: useAI && userInput ? true : false,
-        message: useAI ?
-          `🤖 DVR created with AI assistance${foundDealer ? ' at ' + foundDealer.name : ''}!` :
-          `DVR created successfully${foundDealer ? ' at ' + foundDealer.name : ''}!`,
-        hybrid: alsoCreateClientReport ? 'Client report also created' : 'DVR only',
-        geofenceValidation: foundDealer ? 'Passed' : 'Skipped (no location)'
+        message: useAI ? '🤖 DVR created with AI assistance!' : 'DVR created successfully!',
+        hybrid: alsoCreateClientReport ? 'Client report also created' : 'DVR only'
       });
 
     } catch (error: any) {
@@ -1635,6 +1543,7 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
+
   // ✅ CHECKOUT ENDPOINT WITH VALIDATION
   app.patch('/api/dvr/:id/checkout', async (req: Request, res: Response) => {
     try {
