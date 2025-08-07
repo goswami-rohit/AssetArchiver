@@ -1008,6 +1008,9 @@ export function setupWebRoutes(app: Express) {
     try {
       const { action, lat, lng, userId, conversationState, guidedResponses, prompt } = req.body;
 
+      // 🔍 DEBUG: Log incoming request
+      console.log('🔥 DVR REQUEST:', { action, lat, lng, userId, guidedResponsesKeys: Object.keys(guidedResponses || {}) });
+
       // 🛡️ VALIDATE COORDINATES FIRST
       const latNum = parseFloat(lat);
       const lngNum = parseFloat(lng);
@@ -1021,13 +1024,16 @@ export function setupWebRoutes(app: Express) {
       }
 
       if (action === 'punch-in') {
-        // Check for existing dealer at exact coordinates
+        console.log('🔍 PUNCH-IN: Searching for dealer at coordinates', { lat: latNum.toFixed(7), lng: lngNum.toFixed(7) });
+
         const existingDealer = await db.query.dealers.findFirst({
           where: and(
-            eq(dealers.latitude, latNum.toFixed(7)),  // ✅ Fixed: Convert to string with precision
-            eq(dealers.longitude, lngNum.toFixed(7))  // ✅ Fixed: Convert to string with precision
+            eq(dealers.latitude, latNum.toFixed(7)),
+            eq(dealers.longitude, lngNum.toFixed(7))
           )
         });
+
+        console.log('🔍 DEALER SEARCH RESULT:', existingDealer ? 'FOUND' : 'NOT FOUND');
 
         if (existingDealer) {
           return res.json({
@@ -1050,9 +1056,11 @@ export function setupWebRoutes(app: Express) {
       }
 
       if (action === 'dealer-questions') {
-        // Handle guided dealer creation prompts
+        console.log('🔍 DEALER-QUESTIONS: Processing guided responses');
+
         if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
           const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
+          console.log('🔍 DEALER-QUESTIONS: Need more responses, current count:', responseCount);
 
           if (responseCount === 0) {
             return res.json({
@@ -1069,16 +1077,18 @@ export function setupWebRoutes(app: Express) {
           }
         }
 
-        // Parse dealer data and create dealer
         try {
+          console.log('🔍 DEALER-QUESTIONS: Parsing dealer data from AI service');
+
           const dealerData = await aiService.parseNewDealerFromGuidedPrompts(
             guidedResponses,
-            latNum.toFixed(7),  // ✅ Fixed: Convert to string with precision
-            lngNum.toFixed(7),  // ✅ Fixed: Convert to string with precision
+            latNum.toFixed(7),
+            lngNum.toFixed(7),
             userId
           );
 
-          // ✅ SAFELY CALL EXISTING VALIDATED ENDPOINT
+          console.log('🔍 DEALER-QUESTIONS: AI parsed dealer data:', dealerData);
+
           const axios = require('axios');
           const baseUrl = process.env.NGROK_URL || 'https://telesalesside.onrender.com';
 
@@ -1093,6 +1103,7 @@ export function setupWebRoutes(app: Express) {
           }
 
           const newDealer = dealerResponse.data.data;
+          console.log('🔍 DEALER-QUESTIONS: New dealer created:', newDealer.id);
 
           return res.json({
             success: true,
@@ -1102,6 +1113,7 @@ export function setupWebRoutes(app: Express) {
             agentMessage: `Dealer "${newDealer.name}" created successfully! Now let's create your DVR. What was the main purpose of your visit?`
           });
         } catch (error) {
+          console.error('🚨 DEALER-QUESTIONS ERROR:', error);
           const validationError = error.response?.data;
           return res.status(400).json({
             error: 'Failed to create dealer',
@@ -1114,9 +1126,11 @@ export function setupWebRoutes(app: Express) {
       }
 
       if (action === 'dvr-questions') {
-        // Handle guided DVR creation prompts
+        console.log('🔍 DVR-QUESTIONS: Starting DVR creation process');
+
         if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
           const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
+          console.log('🔍 DVR-QUESTIONS: Need more responses, current count:', responseCount);
 
           if (responseCount === 0) {
             return res.json({
@@ -1133,79 +1147,110 @@ export function setupWebRoutes(app: Express) {
           }
         }
 
-        // Parse DVR data and create DVR
         try {
-          // Get dealer info from request or find by coordinates
+          console.log('🔍 DVR-QUESTIONS: Finding dealer info');
+
           let dealerInfo;
           if (req.body.dealer) {
             dealerInfo = req.body.dealer;
+            console.log('🔍 DVR-QUESTIONS: Using dealer from request body');
           } else {
+            console.log('🔍 DVR-QUESTIONS: Searching for dealer by coordinates');
             dealerInfo = await db.query.dealers.findFirst({
               where: and(
-                eq(dealers.latitude, latNum.toFixed(7)),  // ✅ Fixed: Convert to string with precision
-                eq(dealers.longitude, lngNum.toFixed(7))  // ✅ Fixed: Convert to string with precision
+                eq(dealers.latitude, latNum.toFixed(7)),
+                eq(dealers.longitude, lngNum.toFixed(7))
               )
             });
           }
 
           if (!dealerInfo) {
+            console.error('🚨 DVR-QUESTIONS: No dealer found for location');
             throw new Error('Dealer not found for this location');
           }
 
+          console.log('🔍 DVR-QUESTIONS: Found dealer:', dealerInfo.name || dealerInfo.id);
+
+          console.log('🔍 DVR-QUESTIONS: Calling AI service to generate DVR data');
           const dvrData = await aiService.generateDVRFromPromptWithContext(
             Object.values(guidedResponses).join(' '),
             dealerInfo,
             { latitude: latNum.toFixed(7), longitude: lngNum.toFixed(7), timestamp: new Date() }
           );
 
-          // 🔧 BULLETPROOF INSERT WITH SAFE VALIDATION & PROPER DATA TYPES
+          console.log('🔥 AI GENERATED DVR DATA:', JSON.stringify(dvrData, null, 2));
+
+          // 🔧 VALIDATE EACH FIELD INDIVIDUALLY
+          console.log('🔍 DVR-QUESTIONS: Validating and preparing insert data');
+
+          // 🔥 VALIDATE userId
+          const validUserId = userId || 0;
+          console.log('🔍 userId:', validUserId, typeof validUserId);
+
+          // 🔥 VALIDATE reportDate
+          const validReportDate = dvrData.reportDate || new Date().toISOString().split('T')[0];
+          console.log('🔍 reportDate:', validReportDate, typeof validReportDate);
+
+          // 🔥 VALIDATE coordinates
+          const validLatitude = latNum.toFixed(7);
+          const validLongitude = lngNum.toFixed(7);
+          console.log('🔍 coordinates:', { latitude: validLatitude, longitude: validLongitude });
+
+          // 🔥 VALIDATE decimal fields
+          const validDealerTotalPotential = (Number(dvrData.dealerTotalPotential) || 0).toFixed(2);
+          const validDealerBestPotential = (Number(dvrData.dealerBestPotential) || 0).toFixed(2);
+          const validTodayOrderMt = (Number(dvrData.todayOrderMt) || 0).toFixed(2);
+          const validTodayCollectionRupees = (Number(dvrData.todayCollectionRupees) || 0).toFixed(2);
+
+          console.log('🔍 decimal fields:', {
+            dealerTotalPotential: validDealerTotalPotential,
+            dealerBestPotential: validDealerBestPotential,
+            todayOrderMt: validTodayOrderMt,
+            todayCollectionRupees: validTodayCollectionRupees
+          });
+
+          // 🔥 VALIDATE array field
+          const validBrandSelling = Array.isArray(dvrData.brandSelling) && dvrData.brandSelling.length > 0
+            ? dvrData.brandSelling.map(String).filter(Boolean)
+            : ['Unknown'];
+
+          console.log('🔍 brandSelling:', validBrandSelling);
+
+          // 🔧 BULLETPROOF INSERT DATA
           const safeInsertData = {
-            userId: userId || 0,
-            reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
+            userId: validUserId,
+            reportDate: validReportDate,
             dealerType: dvrData.dealerType || 'Dealer',
             dealerName: dvrData.dealerName || dealerInfo?.name || null,
             subDealerName: dvrData.subDealerName || null,
             location: dvrData.location || (dealerInfo?.name ? `${dealerInfo.name} Location` : 'Unknown Location'),
-
-            // ✅ FIXED: COORDINATES AS DECIMAL STRINGS
-            latitude: latNum.toFixed(7),
-            longitude: lngNum.toFixed(7),
-
+            latitude: validLatitude,
+            longitude: validLongitude,
             visitType: dvrData.visitType || 'Non Best',
-
-            // ✅ FIXED: DECIMAL FIELDS AS STRINGS WITH PROPER PRECISION
-            dealerTotalPotential: (Number(dvrData.dealerTotalPotential) || 0).toFixed(2),
-            dealerBestPotential: (Number(dvrData.dealerBestPotential) || 0).toFixed(2),
-            todayOrderMt: (Number(dvrData.todayOrderMt) || 0).toFixed(2),
-            todayCollectionRupees: (Number(dvrData.todayCollectionRupees) || 0).toFixed(2),
-
-            // ✅ SAFE ARRAY HANDLING
-            // ✅ SIMPLER BUT STILL BULLETPROOF
-            brandSelling: Array.isArray(dvrData.brandSelling) && dvrData.brandSelling.length > 0
-              ? dvrData.brandSelling.map(String).filter(Boolean)
-              : ['Unknown'],
-
-            // ✅ NULLABLE FIELDS
+            dealerTotalPotential: validDealerTotalPotential,
+            dealerBestPotential: validDealerBestPotential,
+            todayOrderMt: validTodayOrderMt,
+            todayCollectionRupees: validTodayCollectionRupees,
+            brandSelling: validBrandSelling,
             contactPerson: dvrData.contactPerson || null,
             contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
             feedbacks: dvrData.feedbacks || 'No feedback provided',
             solutionBySalesperson: dvrData.solutionBySalesperson || null,
             anyRemarks: dvrData.anyRemarks || null,
-
-            // ✅ TIMESTAMP FIELDS
             checkInTime: new Date(),
             checkOutTime: null,
-
-            // ✅ IMAGE URLS
             inTimeImageUrl: dvrData.inTimeImageUrl || null,
             outTimeImageUrl: dvrData.outTimeImageUrl || null
           };
 
-          // 🔍 DEBUG LOGGING (REMOVE AFTER TESTING)
-          console.log('🔥 SAFE INSERT DATA:', JSON.stringify(safeInsertData, null, 2));
+          console.log('🔥 FINAL SAFE INSERT DATA:', JSON.stringify(safeInsertData, null, 2));
 
-          // 🚀 EXECUTE BULLETPROOF INSERT
+          // 🚀 EXECUTE INSERT WITH DETAILED ERROR HANDLING
+          console.log('🔍 DVR-QUESTIONS: Executing database insert...');
+
           const dvrRecord = await db.insert(dailyVisitReports).values(safeInsertData).returning();
+
+          console.log('✅ DVR-QUESTIONS: Database insert successful!', dvrRecord[0]?.id);
 
           return res.json({
             success: true,
@@ -1216,7 +1261,15 @@ export function setupWebRoutes(app: Express) {
           });
 
         } catch (error) {
-          console.error('DVR creation error:', error);
+          console.error('🚨 DVR CREATION ERROR DETAILS:', {
+            message: error.message,
+            stack: error.stack,
+            name: error.name,
+            code: error.code,
+            position: error.position,
+            query: error.query
+          });
+
           return res.status(400).json({
             error: 'Failed to create DVR',
             details: error.message,
@@ -1226,7 +1279,13 @@ export function setupWebRoutes(app: Express) {
       }
 
     } catch (error) {
-      console.error('DVR workflow error:', error);
+      console.error('🚨 DVR WORKFLOW ERROR:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code
+      });
+
       res.status(500).json({
         success: false,
         error: 'Failed to process DVR workflow',
