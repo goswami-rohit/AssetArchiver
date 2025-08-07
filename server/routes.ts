@@ -1,7 +1,6 @@
 // routes.ts
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
-import axios from 'axios';
 import {
   dailyVisitReports,
   technicalVisitReports,
@@ -1011,7 +1010,6 @@ export function setupWebRoutes(app: Express) {
 
       console.log('🔥 DVR REQUEST:', { action, lat, lng, userId, guidedResponsesKeys: Object.keys(guidedResponses || {}) });
 
-      // 🛡️ VALIDATE COORDINATES FIRST
       const latNum = parseFloat(lat);
       const lngNum = parseFloat(lng);
 
@@ -1023,14 +1021,14 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // ✅ SHARED: Axios setup for API calls
+      // ✅ FIXED: Dynamic axios import
+      const { default: axios } = await import('axios');
       const baseUrl = 'https://telesalesside.onrender.com';
 
       if (action === 'punch-in') {
         console.log('🔍 PUNCH-IN: Searching for dealers via API');
 
         try {
-          // ✅ FIXED: Use dealers API instead of direct DB query
           const dealersResponse = await axios.get(`${baseUrl}/api/dealers/recent?userId=${userId}&limit=100`);
 
           if (!dealersResponse.data.success) {
@@ -1040,13 +1038,15 @@ export function setupWebRoutes(app: Express) {
           const dealers = dealersResponse.data.data;
           console.log('🔍 Found dealers:', dealers.length);
 
-          // 🔍 EFFICIENT: Find dealer by proximity (within ~10 meters)
-          const proximityThreshold = 0.0001; // ~10 meters
+          // ✅ FIXED: Increased proximity threshold for real GPS accuracy
+          const proximityThreshold = 0.0005; // ~50 meters for better GPS matching
           const existingDealer = dealers.find(dealer => {
             if (!dealer.latitude || !dealer.longitude) return false;
 
             const dealerLat = parseFloat(dealer.latitude);
             const dealerLng = parseFloat(dealer.longitude);
+
+            if (isNaN(dealerLat) || isNaN(dealerLng)) return false;
 
             const latDiff = Math.abs(dealerLat - latNum);
             const lngDiff = Math.abs(dealerLng - lngNum);
@@ -1069,9 +1069,9 @@ export function setupWebRoutes(app: Express) {
               success: true,
               dealerFound: false,
               nextAction: 'dealer-questions',
-              agentMessage: 'No dealer found at this location. CREATE ONE',
+              agentMessage: 'No dealer found at this location. Let me help you create a new dealer record.',
               showCreateButton: true,
-              firstQuestion: 'What is the name and type of this dealer? (e.g., "ABC Electronics - Retailer")'
+              firstQuestion: 'What is the name and type of this dealer? (e.g., "Bhaiti Moina Retailer - Dealer")'
             });
           }
         } catch (error) {
@@ -1087,39 +1087,28 @@ export function setupWebRoutes(app: Express) {
       if (action === 'dealer-questions') {
         console.log('🔍 DEALER-QUESTIONS: Processing guided responses');
 
-        if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
-          const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
-          console.log('🔍 DEALER-QUESTIONS: Need more responses, current count:', responseCount);
-
-          if (responseCount === 0) {
-            return res.json({
-              success: true,
-              nextQuestion: 'What is the dealer details? Include name, type, region, area, phone, address, potential values, and brands they sell.',
-              questionNumber: 1
-            });
-          } else if (responseCount === 1) {
-            return res.json({
-              success: true,
-              nextQuestion: 'Any additional information about this dealer? Include feedback, remarks, or other relevant details.',
-              questionNumber: 2
-            });
-          }
+        // ✅ FIXED: Only require 1 response minimum
+        if (!guidedResponses || Object.keys(guidedResponses).length < 1) {
+          return res.json({
+            success: true,
+            nextQuestion: 'Please provide dealer details: name, type (Dealer/Sub Dealer), region, area, phone, address, potential values, brands they sell, and any feedback.',
+            questionNumber: 1
+          });
         }
 
         try {
           console.log('🔍 DEALER-QUESTIONS: Parsing dealer data from AI service');
 
-          // ✅ FIXED: Pass coordinates properly to AI service
+          // ✅ FIXED: Pass coordinates as strings (matching AI service expectation)
           const dealerData = await aiService.parseNewDealerFromGuidedPrompts(
             guidedResponses,
-            latNum, // Pass as number - let AI service handle format
-            lngNum, // Pass as number - let AI service handle format
+            latNum.toFixed(7), // Convert to string with precision
+            lngNum.toFixed(7), // Convert to string with precision
             userId
           );
 
           console.log('🔍 DEALER-QUESTIONS: AI parsed dealer data:', dealerData);
 
-          // ✅ EFFICIENT: Use existing API endpoint
           const dealerResponse = await axios.post(`${baseUrl}/api/dealers`, dealerData, {
             headers: { 'Content-Type': 'application/json' }
           });
@@ -1136,7 +1125,7 @@ export function setupWebRoutes(app: Express) {
             dealerCreated: true,
             dealer: newDealer,
             nextAction: 'dvr-questions',
-            agentMessage: `Dealer "${newDealer.name}" created successfully! Now let's create your DVR. What was the main purpose of your visit?`
+            agentMessage: `Great! Dealer "${newDealer.name}" has been created. Now let's create your Daily Visit Report. What was the main purpose of your visit today?`
           });
         } catch (error) {
           console.error('🚨 DEALER-QUESTIONS ERROR:', error);
@@ -1144,7 +1133,7 @@ export function setupWebRoutes(app: Express) {
           return res.status(400).json({
             error: 'Failed to create dealer',
             details: validationError?.error || error.message,
-            agentMessage: 'I couldn\'t create the dealer. Please provide more details.',
+            agentMessage: 'I need more information to create the dealer. Please provide dealer name, type, and location details.',
             validationErrors: validationError?.required || null,
             schemaValidation: validationError?.schemaValidation || null
           });
@@ -1154,23 +1143,13 @@ export function setupWebRoutes(app: Express) {
       if (action === 'dvr-questions') {
         console.log('🔍 DVR-QUESTIONS: Starting DVR creation process');
 
-        if (!guidedResponses || Object.keys(guidedResponses).length < 2) {
-          const responseCount = guidedResponses ? Object.keys(guidedResponses).length : 0;
-          console.log('🔍 DVR-QUESTIONS: Need more responses, current count:', responseCount);
-
-          if (responseCount === 0) {
-            return res.json({
-              success: true,
-              nextQuestion: 'What are the visit details? Include visit type (Best/Non Best), dealer potential values, brands selling, today\'s order MT, collection amount, and any feedback.',
-              questionNumber: 1
-            });
-          } else if (responseCount === 1) {
-            return res.json({
-              success: true,
-              nextQuestion: 'Any additional details? Include contact person info, solutions provided, remarks, and image URLs if available.',
-              questionNumber: 2
-            });
-          }
+        // ✅ FIXED: Only require 1 response minimum
+        if (!guidedResponses || Object.keys(guidedResponses).length < 1) {
+          return res.json({
+            success: true,
+            nextQuestion: 'Please describe your visit: visit type (Best/Non Best), today\'s order amount (MT), collection amount (Rupees), brands discussed, contact person details, and any feedback.',
+            questionNumber: 1
+          });
         }
 
         try {
@@ -1183,7 +1162,6 @@ export function setupWebRoutes(app: Express) {
           } else {
             console.log('🔍 DVR-QUESTIONS: Fetching dealer via API');
 
-            // ✅ FIXED: Use API call instead of direct DB query
             const dealersResponse = await axios.get(`${baseUrl}/api/dealers/recent?userId=${userId}&limit=100`);
 
             if (!dealersResponse.data.success) {
@@ -1191,13 +1169,15 @@ export function setupWebRoutes(app: Express) {
             }
 
             const dealers = dealersResponse.data.data;
-            const proximityThreshold = 0.0001;
+            const proximityThreshold = 0.0005; // Increased threshold
 
             dealerInfo = dealers.find(dealer => {
               if (!dealer.latitude || !dealer.longitude) return false;
 
               const dealerLat = parseFloat(dealer.latitude);
               const dealerLng = parseFloat(dealer.longitude);
+
+              if (isNaN(dealerLat) || isNaN(dealerLng)) return false;
 
               const latDiff = Math.abs(dealerLat - latNum);
               const lngDiff = Math.abs(dealerLng - lngNum);
@@ -1208,7 +1188,7 @@ export function setupWebRoutes(app: Express) {
 
           if (!dealerInfo) {
             console.error('🚨 DVR-QUESTIONS: No dealer found for location');
-            throw new Error('Dealer not found for this location');
+            throw new Error('No dealer found for this location. Please create a dealer first.');
           }
 
           console.log('🔍 DVR-QUESTIONS: Found dealer:', dealerInfo.name || dealerInfo.id);
@@ -1221,7 +1201,6 @@ export function setupWebRoutes(app: Express) {
 
           console.log('🔥 AI GENERATED DVR DATA:', JSON.stringify(dvrData, null, 2));
 
-          // ✅ EFFICIENT: Streamlined data preparation
           const safeInsertData = {
             userId: userId || 0,
             reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
@@ -1241,7 +1220,7 @@ export function setupWebRoutes(app: Express) {
               : ['Unknown'],
             contactPerson: dvrData.contactPerson || null,
             contactPersonPhoneNo: dvrData.contactPersonPhoneNo || null,
-            feedbacks: dvrData.feedbacks || 'No feedback provided',
+            feedbacks: dvrData.feedbacks || 'Visit completed successfully',
             solutionBySalesperson: dvrData.solutionBySalesperson || null,
             anyRemarks: dvrData.anyRemarks || null,
             checkInTime: new Date(),
@@ -1260,7 +1239,7 @@ export function setupWebRoutes(app: Express) {
             success: true,
             dvrCreated: true,
             dvr: dvrRecord[0],
-            agentMessage: `DVR created successfully for ${dealerInfo.name}! Visit recorded.`,
+            agentMessage: `Perfect! Your Daily Visit Report for ${dealerInfo.name} has been created successfully. Visit recorded and workflow complete!`,
             workflowComplete: true
           });
 
@@ -1269,10 +1248,17 @@ export function setupWebRoutes(app: Express) {
           return res.status(400).json({
             error: 'Failed to create DVR',
             details: error.message,
-            agentMessage: 'I couldn\'t create the DVR. Please provide more details about your visit.'
+            agentMessage: 'I couldn\'t create the DVR. Please provide more details about your visit including order amounts and visit purpose.'
           });
         }
       }
+
+      // ✅ ADDED: Handle unknown actions
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid action',
+        agentMessage: 'Please specify a valid action: punch-in, dealer-questions, or dvr-questions.'
+      });
 
     } catch (error) {
       console.error('🚨 DVR WORKFLOW ERROR:', error);
