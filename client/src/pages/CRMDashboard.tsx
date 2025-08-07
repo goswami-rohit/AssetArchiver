@@ -641,6 +641,42 @@ export default function CRMDashboard() {
     }
   };
 
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+      addError('Geolocation is not supported by this browser');
+      return;
+    }
+
+    setIsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coordinates = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          radius: 100
+        };
+
+        setDealerForm({
+          ...dealerForm,
+          area: JSON.stringify(coordinates)
+        });
+
+        showSuccess('📍 Location captured successfully!');
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        addError('Failed to get location. Please enter area manually.');
+        setIsLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000
+      }
+    );
+  };
+
   // 🏖️ SMART LEAVE APPLICATION
   const handleLeaveApplication = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1588,15 +1624,41 @@ export default function CRMDashboard() {
                 />
               </div>
               <div>
-                <Label htmlFor="area">Area *</Label>
-                <Input
-                  id="area"
-                  value={dealerForm.area}
-                  onChange={(e) => setDealerForm({ ...dealerForm, area: e.target.value })}
-                  required
-                  maxLength={255}
-                  placeholder="Enter area"
-                />
+                <Label htmlFor="area">Area * (with Location)</Label>
+                <div className="space-y-2">
+                  <div className="flex space-x-2">
+                    <Input
+                      id="area"
+                      value={dealerForm.area}
+                      onChange={(e) => setDealerForm({ ...dealerForm, area: e.target.value })}
+                      required
+                      maxLength={255}
+                      placeholder="Enter area or use location"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleGetLocation}
+                      disabled={isLoading}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <MapPin className="w-4 h-4 mr-1" />
+                          Get Location
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  {dealerForm.area.startsWith('{') && (
+                    <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                      📍 Location coordinates stored
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <Label htmlFor="phoneNo">Phone Number *</Label>
