@@ -1180,7 +1180,10 @@ export function setupWebRoutes(app: Express) {
             todayCollectionRupees: (Number(dvrData.todayCollectionRupees) || 0).toFixed(2),
 
             // ✅ SAFE ARRAY HANDLING
-            brandSelling: Array.isArray(dvrData.brandSelling) ? dvrData.brandSelling : ['Unknown'],
+            // ✅ SIMPLER BUT STILL BULLETPROOF
+            brandSelling: Array.isArray(dvrData.brandSelling) && dvrData.brandSelling.length > 0
+              ? dvrData.brandSelling.map(String).filter(Boolean)
+              : ['Unknown'],
 
             // ✅ NULLABLE FIELDS
             contactPerson: dvrData.contactPerson || null,
