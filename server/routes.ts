@@ -1,6 +1,7 @@
 // routes.ts
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
+import axios from 'axios';
 import {
   dailyVisitReports,
   technicalVisitReports,
@@ -1023,8 +1024,7 @@ export function setupWebRoutes(app: Express) {
       }
 
       // ✅ SHARED: Axios setup for API calls
-      const axios = require('axios');
-      const baseUrl = process.env.NGROK_URL || 'https://telesalesside.onrender.com';
+      const baseUrl = 'https://telesalesside.onrender.com';
 
       if (action === 'punch-in') {
         console.log('🔍 PUNCH-IN: Searching for dealers via API');
