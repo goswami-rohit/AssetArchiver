@@ -348,6 +348,40 @@ class AIService {
     }
   }
 
+  // Helper function to find dealer by GPS coordinates
+async function findDealerByLocation(userLat, userLng) {
+  const dealers = await db.query.dealers.findMany();
+  
+  for (const dealer of dealers) {
+    // Check if area contains GPS coordinates
+    if (dealer.area.startsWith('{')) {
+      try {
+        const coords = JSON.parse(dealer.area);
+        const distance = calculateDistance(userLat, userLng, coords.lat, coords.lng);
+        
+        if (distance <= (coords.radius || 100)) {
+          return dealer;
+        }
+      } catch (e) {
+        continue; // Skip invalid JSON
+      }
+    }
+  }
+  return null;
+}
+
+// Haversine distance formula
+function calculateDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371; // Earth's radius in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) + 
+           Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+           Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c * 1000; // Distance in meters
+}
+
   /**
    * Analyze competition report data
    */

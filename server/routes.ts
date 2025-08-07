@@ -1403,6 +1403,24 @@ export function setupWebRoutes(app: Express) {
         ...manualData
       } = req.body;
 
+      // ✅ GEOFENCE VALIDATION
+      if (location?.lat && location?.lng) {
+        const nearbyDealer = await findDealerByLocation(location.lat, location.lng);
+
+        if (!nearbyDealer) {
+          return res.status(400).json({
+            success: false,
+            error: 'Not within dealer location',
+            message: 'You must be within 100m of a dealer location to create DVR'
+          });
+        }
+
+        // Use the found dealer's name if not provided
+        if (!dealerName) {
+          dealerName = nearbyDealer.name;
+        }
+      }
+
       let dvrData;
 
       if (useAI && userInput) {
