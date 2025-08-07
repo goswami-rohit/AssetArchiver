@@ -1024,8 +1024,8 @@ export function setupWebRoutes(app: Express) {
         // Check for existing dealer at exact coordinates
         const existingDealer = await db.query.dealers.findFirst({
           where: and(
-            eq(dealers.latitude, latNum.toString()),
-            eq(dealers.longitude, lngNum.toString())
+            eq(dealers.latitude, latNum.toFixed(7)),  // ✅ Fixed: Convert to string with precision
+            eq(dealers.longitude, lngNum.toFixed(7))  // ✅ Fixed: Convert to string with precision
           )
         });
 
@@ -1073,8 +1073,8 @@ export function setupWebRoutes(app: Express) {
         try {
           const dealerData = await aiService.parseNewDealerFromGuidedPrompts(
             guidedResponses,
-            latNum.toString(),
-            lngNum.toString(),
+            latNum.toFixed(7),  // ✅ Fixed: Convert to string with precision
+            lngNum.toFixed(7),  // ✅ Fixed: Convert to string with precision
             userId
           );
 
@@ -1142,8 +1142,8 @@ export function setupWebRoutes(app: Express) {
           } else {
             dealerInfo = await db.query.dealers.findFirst({
               where: and(
-                eq(dealers.latitude, latNum.toString()),
-                eq(dealers.longitude, lngNum.toString())
+                eq(dealers.latitude, latNum.toFixed(7)),  // ✅ Fixed: Convert to string with precision
+                eq(dealers.longitude, lngNum.toFixed(7))  // ✅ Fixed: Convert to string with precision
               )
             });
           }
@@ -1158,7 +1158,7 @@ export function setupWebRoutes(app: Express) {
             { latitude: latNum.toFixed(7), longitude: lngNum.toFixed(7), timestamp: new Date() }
           );
 
-          // 🔧 BULLETPROOF INSERT WITH SAFE VALIDATION
+          // 🔧 BULLETPROOF INSERT WITH SAFE VALIDATION & PROPER DATA TYPES
           const safeInsertData = {
             userId: userId || 0,
             reportDate: dvrData.reportDate || new Date().toISOString().split('T')[0],
@@ -1167,17 +1167,17 @@ export function setupWebRoutes(app: Express) {
             subDealerName: dvrData.subDealerName || null,
             location: dvrData.location || (dealerInfo?.name ? `${dealerInfo.name} Location` : 'Unknown Location'),
 
-            // ✅ VALIDATED COORDINATES
-            latitude: latNum,
-            longitude: lngNum,
+            // ✅ FIXED: COORDINATES AS DECIMAL STRINGS
+            latitude: latNum.toFixed(7),
+            longitude: lngNum.toFixed(7),
 
             visitType: dvrData.visitType || 'Non Best',
 
-            // 🔥 SAFE NUMBER CONVERSION WITH VALIDATION
-            dealerTotalPotential: Number(dvrData.dealerTotalPotential) || 0,
-            dealerBestPotential: Number(dvrData.dealerBestPotential) || 0,
-            todayOrderMt: Number(dvrData.todayOrderMt) || 0,
-            todayCollectionRupees: Number(dvrData.todayCollectionRupees) || 0,
+            // ✅ FIXED: DECIMAL FIELDS AS STRINGS WITH PROPER PRECISION
+            dealerTotalPotential: (Number(dvrData.dealerTotalPotential) || 0).toFixed(2),
+            dealerBestPotential: (Number(dvrData.dealerBestPotential) || 0).toFixed(2),
+            todayOrderMt: (Number(dvrData.todayOrderMt) || 0).toFixed(2),
+            todayCollectionRupees: (Number(dvrData.todayCollectionRupees) || 0).toFixed(2),
 
             // ✅ SAFE ARRAY HANDLING
             brandSelling: Array.isArray(dvrData.brandSelling) ? dvrData.brandSelling : ['Unknown'],
@@ -1231,7 +1231,6 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-
   app.get('/api/dvr/recent', async (req: Request, res: Response) => {
     try {
       const { limit = 10, userId, dealerType } = req.query;
