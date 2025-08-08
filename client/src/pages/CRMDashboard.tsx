@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -81,6 +81,26 @@ interface DashboardStats {
   };
 }
 
+const initialDvrFormData = {
+  reportDate: '',
+  dealerType: '',
+  dealerName: '',
+  subDealerName: null as string | null,
+  location: '',
+  visitType: '',
+  dealerTotalPotential: '',
+  dealerBestPotential: '',
+  brandSelling: '',
+  contactPerson: '',
+  contactPersonPhoneNo: '',
+  todayOrderMt: '',
+  todayCollectionRupees: '',
+  feedbacks: '',
+  solutionBySalesperson: '',
+  anyRemarks: '',
+  inTimeImageUrl: '',
+};
+
 export default function CRMDashboard() {
   // Core State
   const [user, setUser] = useState<User | null>(null);
@@ -106,6 +126,176 @@ export default function CRMDashboard() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [refreshing, setRefreshing] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [isCreatingTvr, setIsCreatingTvr] = useState(false);
+  const [tvrFormData, setTvrFormData] = useState({
+    visitType: '',
+    siteNameConcernedPerson: '',
+    phoneNo: '',
+    emailId: '',
+    clientsRemarks: '',
+    salespersonRemarks: '',
+    inTimeImageUrl: '',
+  });
+
+  const [isCreatingDvr, setIsCreatingDvr] = useState(false);
+  const [dvrFormData, setDvrFormData] = useState(initialDvrFormData);
+
+  //viewing fetched reports on reports tab
+  const [showReportDetails, setShowReportDetails] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+
+  //TVR handlres
+  const handleTvrInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setTvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleTvrSelectChange = (value: string) => {
+    setTvrFormData(prevData => ({
+      ...prevData,
+      visitType: value,
+    }));
+  };
+
+  const handleTvrFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Assume a loading state exists in CRMdashboard.tsx
+    // setIsLoading(true);
+    try {
+      const response = await fetch('/api/tvr', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...tvrFormData,
+          userId: user?.id, // Assuming userId is available in CRMdashboard.tsx
+          reportDate: new Date().toISOString().split('T')[0],
+          checkInTime: new Date().toISOString(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to create TVR');
+      }
+      const result = await response.json();
+      console.log('TVR created:', result);
+      // You might want to update some state here to show a success message
+      // and close the form
+      setTvrFormData({
+        visitType: '',
+        siteNameConcernedPerson: '',
+        phoneNo: '',
+        emailId: '',
+        clientsRemarks: '',
+        salespersonRemarks: '',
+        inTimeImageUrl: '',
+      });
+      setIsCreatingTvr(false);
+    } catch (error) {
+      console.error('Error creating TVR:', error);
+    } finally {
+      // setIsLoading(false);
+    }
+  };
+
+  //DVR handlres
+  const handleDvrInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setDvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleDvrSelectChange = (name: string, value: string) => {
+    setDvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleDvrFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    // Create a copy of the form data to process
+    const dataToSubmit: any = { ...dvrFormData };
+
+    try {
+      // FIX 1: Correctly process the brandSelling string into an array.
+      // This logic was correct, but it wasn't being used in the final fetch call.
+      if (dataToSubmit.brandSelling && typeof dataToSubmit.brandSelling === 'string') {
+        dataToSubmit.brandSelling = dataToSubmit.brandSelling.split(',').map((brand: string) => brand.trim()).filter(brand => brand !== '');
+      } else {
+        dataToSubmit.brandSelling = [];
+      }
+
+      // Explicitly ensure subDealerName is null if dealerType is 'Dealer'
+      if (dataToSubmit.dealerType === 'Dealer') {
+        dataToSubmit.subDealerName = null;
+      }
+
+      // This is the payload that will be sent to the API
+      const payload = {
+        ...dataToSubmit,
+        userId: user?.id, // Assumes userId is available
+      };
+      
+      // Log the final payload to verify all fields are present before sending
+      //console.log('Payload being sent to API:', payload);
+
+
+
+      // The original code was passing 'dvrFormData' directly,
+      // which did not contain the changes made above.
+      // FIX 3: Pass the `dataToSubmit` object in the fetch body.
+       const response = await fetch('/api/dvr-manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...dataToSubmit,
+          userId: user?.id, // Assumes userId is available
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create DVR');
+      }
+
+      const result = await response.json();
+      console.log('DVR created:', result);
+
+      // Reset the form data to its initial state
+      setDvrFormData(initialDvrFormData);
+      setIsCreatingDvr(false);
+    } catch (error) {
+      console.error('Error creating DVR:', error);
+      // You could add a user-facing error message here
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  //Eye button handler 
+  const handleViewReport = async (reportId: string, reportType: string) => {
+    try {
+      const response = await fetch(`/api/${reportType.toLowerCase()}/${reportId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch report details');
+      }
+      const responseData = await response.json();
+      // Correctly set the state with the `data` property from the response
+      setSelectedReport(responseData.data);
+      setShowReportDetails(true);
+    } catch (error) {
+      console.error('Error fetching report:', error);
+    }
+  };
 
   // Form State
   const [dealerForm, setDealerForm] = useState({
@@ -1019,9 +1209,9 @@ export default function CRMDashboard() {
             <TabsTrigger value="manage">Manage</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="dashboard" className="space-y-6">
+         <TabsContent value="dashboard" className="space-y-6">
             {/* 🚀 MAIN ACTION GRID - BIGGER AND MORE ATTRACTIVE */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 bg-gray-50 rounded-xl shadow-inner p-4">
               <Button
                 onClick={handleAttendancePunch}
                 disabled={isLoading || attendanceStatus === null}
@@ -1033,7 +1223,7 @@ export default function CRMDashboard() {
                 {isLoading ? (
                   <Loader2 className="w-8 h-8 animate-spin" />
                 ) : attendanceStatus === null ? (
-                  <Loader2 className="w-8 h-8 animate-spin" /> // ✅ Show loading when null
+                  <Loader2 className="w-8 h-8 animate-spin" />
                 ) : attendanceStatus === 'in' ? (
                   <LogOut className="w-8 h-8" />
                 ) : (
@@ -1063,26 +1253,352 @@ export default function CRMDashboard() {
               </Button>
 
               <Button
-                onClick={() => setChatContext('dvr')}
+                onClick={() => setIsCreatingDvr(true)}
                 className="h-24 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white font-semibold"
               >
                 <FileText className="w-8 h-8" />
                 <span className="text-sm">Create DVR</span>
               </Button>
+              {/* //Form for creating DVR with Pop-Up Dialog */}
+              <Dialog open={isCreatingDvr} onOpenChange={setIsCreatingDvr}>
+                <DialogContent className="sm:max-w-[425px] flex flex-col h-full max-h-[90vh]">
+                  <DialogHeader>
+                    <DialogTitle>Create Daily Visit Report</DialogTitle>
+                    <DialogDescription>
+                      Fill in the details below to create a new Daily Visit Report.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="flex-1 overflow-y-auto p-4 -mx-4 -mt-2">
+                    <form id="dvr-form" onSubmit={handleDvrFormSubmit} className="space-y-4">
+                      <div className="space-y-2">
+                        <label htmlFor="dealerType" className="text-sm font-medium">Dealer Type</label>
+                        <Select value={dvrFormData.dealerType} onValueChange={(value) => handleDvrSelectChange('dealerType', value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Dealer Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Dealer">Dealer</SelectItem>
+                            <SelectItem value="Sub Dealer">Sub Dealer</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                       {/* 🎨 FIX: Conditionally render the Dealer Name field */}
+                        {dvrFormData.dealerType !== 'Sub-Dealer' && (
+                          <div>
+                            <Label htmlFor="dealerName">Dealer Name</Label>
+                            <Input
+                              id="dealerName"
+                              value={dvrFormData.dealerName}
+                              onChange={handleDvrInputChange}
+                              placeholder="Enter dealer name"
+                            />
+                          </div>
+                        )}
+
+                      {/* Sub Dealer Name Input (optional) */}
+                      {dvrFormData.dealerType === 'Sub Dealer' && (
+                        <div className="space-y-2">
+                          <label htmlFor="subDealerName" className="text-sm font-medium">Sub Dealer Name</label>
+                          <Input
+                            id="subDealerName"
+                            name="subDealerName"
+                            value={dvrFormData.subDealerName || ''}
+                            onChange={handleDvrInputChange}
+                            placeholder="e.g., XYZ Distributors"
+                            required
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <label htmlFor="location" className="text-sm font-medium">Location</label>
+                        <Input
+                          id="location"
+                          name="location"
+                          value={dvrFormData.location}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., City, State"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="visitType" className="text-sm font-medium">Visit Type</label>
+                        <Select value={dvrFormData.visitType} onValueChange={(value) => handleDvrSelectChange('visitType', value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Visit Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Best">Best</SelectItem>
+                            <SelectItem value="Non-Best">Non-Best</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="dealerTotalPotential" className="text-sm font-medium">Dealer Total Potential (MT)</label>
+                        <Input
+                          id="dealerTotalPotential"
+                          name="dealerTotalPotential"
+                          value={dvrFormData.dealerTotalPotential}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 50.00"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="dealerBestPotential" className="text-sm font-medium">Dealer Best Potential (MT)</label>
+                        <Input
+                          id="dealerBestPotential"
+                          name="dealerBestPotential"
+                          value={dvrFormData.dealerBestPotential}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 25.50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="brandSelling" className="text-sm font-medium">Brand Selling (Comma Separated)</label>
+                        <Input
+                          id="brandSelling"
+                          name="brandSelling"
+                          value={dvrFormData.brandSelling}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., Brand A, Brand B"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="contactPerson" className="text-sm font-medium">Contact Person</label>
+                        <Input
+                          id="contactPerson"
+                          name="contactPerson"
+                          value={dvrFormData.contactPerson}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., Jane Doe"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="contactPersonPhoneNo" className="text-sm font-medium">Contact Person Phone No.</label>
+                        <Input
+                          id="contactPersonPhoneNo"
+                          name="contactPersonPhoneNo"
+                          value={dvrFormData.contactPersonPhoneNo}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., 9876543210"
+                          type="tel"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="todayOrderMt" className="text-sm font-medium">Today's Order (MT)</label>
+                        <Input
+                          id="todayOrderMt"
+                          name="todayOrderMt"
+                          value={dvrFormData.todayOrderMt}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 10.00"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="todayCollectionRupees" className="text-sm font-medium">Today's Collection (₹)</label>
+                        <Input
+                          id="todayCollectionRupees"
+                          name="todayCollectionRupees"
+                          value={dvrFormData.todayCollectionRupees}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 50000.00"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="feedbacks" className="text-sm font-medium">Feedback from Dealer</label>
+                        <textarea
+                          id="feedbacks"
+                          name="feedbacks"
+                          value={dvrFormData.feedbacks}
+                          onChange={handleDvrInputChange}
+                          placeholder="Enter dealer's feedback here."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="solutionBySalesperson" className="text-sm font-medium">Solution/Action Taken</label>
+                        <textarea
+                          id="solutionBySalesperson"
+                          name="solutionBySalesperson"
+                          value={dvrFormData.solutionBySalesperson}
+                          onChange={handleDvrInputChange}
+                          placeholder="Your notes on solutions provided."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="anyRemarks" className="text-sm font-medium">Any Remarks</label>
+                        <textarea
+                          id="anyRemarks"
+                          name="anyRemarks"
+                          value={dvrFormData.anyRemarks}
+                          onChange={handleDvrInputChange}
+                          placeholder="Any other relevant remarks."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="inTimeImageUrl" className="text-sm font-medium">In Time Image URL</label>
+                        <Input
+                          id="inTimeImageUrl"
+                          name="inTimeImageUrl"
+                          value={dvrFormData.inTimeImageUrl}
+                          onChange={handleDvrInputChange}
+                          placeholder="URL to image"
+                        />
+                      </div>
+
+                    </form>
+                  </div>
+                  <div className="flex justify-end space-x-2 p-4 -mx-4 -mb-4 border-t">
+                    <Button type="button" variant="outline" onClick={() => setIsCreatingDvr(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={isLoading} form="dvr-form">
+                      {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Submit DVR
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              {/* //Form end */}
 
               <Button
-                onClick={() => setChatContext('tvr')}
+                onClick={() => setIsCreatingTvr(true)}
                 className="h-24 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-indigo-500 to-indigo-700 hover:from-indigo-600 hover:to-indigo-800 text-white font-semibold"
               >
                 <Zap className="w-8 h-8" />
                 <span className="text-sm">Create TVR</span>
               </Button>
+              {/* //Form for Creating TVR with Pop-Up Dialog */}
+              <Dialog open={isCreatingTvr} onOpenChange={setIsCreatingTvr}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Create Technical Visit Report</DialogTitle>
+                    <DialogDescription>
+                      Fill in the details below to create a new TVR.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleTvrFormSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <label htmlFor="visitType" className="text-sm font-medium">Visit Type</label>
+                      <Select value={tvrFormData.visitType} onValueChange={handleTvrSelectChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Visit Type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Dealer-Best">Dealer-Best</SelectItem>
+                          <SelectItem value="Sub Dealer-Best">Sub Dealer-Best</SelectItem>
+                          <SelectItem value="Dealer-Non Best">Dealer-Non Best</SelectItem>
+                          <SelectItem value="Sub Dealer-Non Best">Sub Dealer-Non Best</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="siteNameConcernedPerson" className="text-sm font-medium">Site/Client Name</label>
+                      <Input
+                        id="siteNameConcernedPerson"
+                        name="siteNameConcernedPerson"
+                        value={tvrFormData.siteNameConcernedPerson}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., ABC Constructions, John Doe"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="phoneNo" className="text-sm font-medium">Phone No.</label>
+                      <Input
+                        id="phoneNo"
+                        name="phoneNo"
+                        value={tvrFormData.phoneNo}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., 9876543210"
+                        type="tel"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="emailId" className="text-sm font-medium">Email (Optional)</label>
+                      <Input
+                        id="emailId"
+                        name="emailId"
+                        value={tvrFormData.emailId}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., john.doe@email.com"
+                        type="email"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="clientsRemarks" className="text-sm font-medium">Client's Remarks</label>
+                      <textarea
+                        id="clientsRemarks"
+                        name="clientsRemarks"
+                        value={tvrFormData.clientsRemarks}
+                        onChange={handleTvrInputChange}
+                        placeholder="Enter client's feedback or comments here."
+                        className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="salespersonRemarks" className="text-sm font-medium">Your Remarks</label>
+                      <textarea
+                        id="salespersonRemarks"
+                        name="salespersonRemarks"
+                        value={tvrFormData.salespersonRemarks}
+                        onChange={handleTvrInputChange}
+                        placeholder="Your notes and observations about the visit."
+                        className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex justify-end space-x-2">
+                      <Button type="button" variant="outline" onClick={() => setIsCreatingTvr(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                        Submit TVR
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+              {/* //Form end */}
             </div>
 
             {/* 📊 COMPREHENSIVE STATS DASHBOARD */}
             {dashboardStats && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                {/* Attendance Stats */}
                 <Card className="border-green-200 bg-gradient-to-br from-green-50 to-green-100">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium text-green-800 flex items-center">
@@ -1114,7 +1630,6 @@ export default function CRMDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Journey Stats */}
                 <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium text-purple-800 flex items-center">
@@ -1126,7 +1641,7 @@ export default function CRMDashboard() {
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className={`text-3xl font-bold ${dashboardStats.journey.isActive ? 'text-purple-600' : 'text-gray-400'}`}>
-                          {dashboardStats.journey.isActive ? '🚗' : '🏠'}
+                          {dashboardStats.journey.isActive ? '🚗' : '�'}
                         </span>
                         <div className="text-right">
                           <div className="text-sm font-medium">
@@ -1144,7 +1659,6 @@ export default function CRMDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Reports Stats */}
                 <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium text-blue-800 flex items-center">
@@ -1172,7 +1686,6 @@ export default function CRMDashboard() {
                   </CardContent>
                 </Card>
 
-                {/* Tasks Stats */}
                 <Card className="border-orange-200 bg-gradient-to-br from-orange-50 to-orange-100">
                   <CardHeader className="pb-3">
                     <CardTitle className="text-sm font-medium text-orange-800 flex items-center">
@@ -1206,8 +1719,7 @@ export default function CRMDashboard() {
 
             {/* 🎯 QUICK ACTION PANELS */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* Dealers Panel */}
-              <Card className="border-orange-200">
+              <Card className="border-orange-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg font-semibold text-orange-800 flex items-center justify-between">
                     <div className="flex items-center">
@@ -1217,7 +1729,7 @@ export default function CRMDashboard() {
                     <Button
                       onClick={() => setShowDealerForm(true)}
                       size="sm"
-                      className="bg-orange-600 hover:bg-orange-700"
+                      className="bg-orange-600 hover:bg-orange-700 rounded-lg"
                     >
                       <Plus className="w-4 h-4" />
                     </Button>
@@ -1226,12 +1738,12 @@ export default function CRMDashboard() {
                 <CardContent>
                   <div className="space-y-3">
                     {dealers.slice(0, 3).map((dealer) => (
-                      <div key={dealer.id} className="flex items-center justify-between p-2 bg-orange-50 rounded-lg">
+                      <div key={dealer.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg transition-all duration-200 hover:bg-orange-100">
                         <div>
                           <div className="font-medium text-sm">{dealer.name}</div>
                           <div className="text-xs text-gray-600">{dealer.region} - {dealer.area}</div>
                         </div>
-                        <Badge variant={dealer.type === 'Dealer' ? 'default' : 'outline'}>
+                        <Badge variant={dealer.type === 'Dealer' ? 'default' : 'outline'} className="rounded-full">
                           {dealer.type}
                         </Badge>
                       </div>
@@ -1241,7 +1753,7 @@ export default function CRMDashboard() {
                         onClick={() => setShowDealersList(true)}
                         variant="outline"
                         size="sm"
-                        className="w-full"
+                        className="w-full rounded-lg"
                       >
                         View All {dealers.length} Dealers
                       </Button>
@@ -1250,8 +1762,7 @@ export default function CRMDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Recent Reports Panel */}
-              <Card className="border-blue-200">
+              <Card className="border-blue-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg font-semibold text-blue-800 flex items-center">
                     <FileText className="w-5 h-5 mr-2" />
@@ -1261,14 +1772,14 @@ export default function CRMDashboard() {
                 <CardContent>
                   <div className="space-y-3">
                     {recentReports.slice(0, 3).map((report, index) => (
-                      <div key={index} className="flex items-center justify-between p-2 bg-blue-50 rounded-lg">
+                      <div key={index} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg transition-all duration-200 hover:bg-blue-100">
                         <div>
                           <div className="font-medium text-sm">{report.type}</div>
                           <div className="text-xs text-gray-600">
                             {new Date(report.createdAt).toLocaleDateString()}
                           </div>
                         </div>
-                        <Badge variant="outline">
+                        <Badge variant="outline" className="rounded-full">
                           {report.checkOutTime ? 'Complete' : 'In Progress'}
                         </Badge>
                       </div>
@@ -1277,7 +1788,7 @@ export default function CRMDashboard() {
                       onClick={() => setActiveTab('reports')}
                       variant="outline"
                       size="sm"
-                      className="w-full"
+                      className="w-full rounded-lg"
                     >
                       View All Reports
                     </Button>
@@ -1285,8 +1796,7 @@ export default function CRMDashboard() {
                 </CardContent>
               </Card>
 
-              {/* Leave Panel */}
-              <Card className="border-purple-200">
+              <Card className="border-purple-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-lg font-semibold text-purple-800 flex items-center justify-between">
                     <div className="flex items-center">
@@ -1296,7 +1806,7 @@ export default function CRMDashboard() {
                     <Button
                       onClick={() => setShowLeaveForm(true)}
                       size="sm"
-                      className="bg-purple-600 hover:bg-purple-700"
+                      className="bg-purple-600 hover:bg-purple-700 rounded-lg"
                     >
                       <Plus className="w-4 h-4" />
                     </Button>
@@ -1306,16 +1816,16 @@ export default function CRMDashboard() {
                   <div className="space-y-3">
                     {dashboardStats && (
                       <>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Remaining</span>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Remaining</span>
                           <span className="font-bold text-purple-600">{dashboardStats.leave.remaining} days</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Pending</span>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Pending</span>
                           <span className="font-medium text-orange-600">{dashboardStats.leave.pending}</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm">Approved</span>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Approved</span>
                           <span className="font-medium text-green-600">{dashboardStats.leave.approved}</span>
                         </div>
                       </>
@@ -1324,7 +1834,7 @@ export default function CRMDashboard() {
                       onClick={() => setShowLeaveForm(true)}
                       variant="outline"
                       size="sm"
-                      className="w-full"
+                      className="w-full rounded-lg"
                     >
                       Apply for Leave
                     </Button>
@@ -1333,6 +1843,7 @@ export default function CRMDashboard() {
               </Card>
             </div>
           </TabsContent>
+            
 
           <TabsContent value="reports" className="space-y-6">
             {/* Reports Section */}
@@ -1391,7 +1902,8 @@ export default function CRMDashboard() {
                           <Badge variant={report.checkOutTime ? 'default' : 'outline'}>
                             {report.checkOutTime ? 'Complete' : 'In Progress'}
                           </Badge>
-                          <Button size="sm" variant="outline">
+                          <Button size="sm" variant="outline"
+                            onClick={() => handleViewReport(report.id, report.type)}>
                             <Eye className="w-4 h-4" />
                           </Button>
                         </div>
@@ -1405,6 +1917,38 @@ export default function CRMDashboard() {
                     </div>
                   )}
                 </div>
+
+                <Dialog open={showReportDetails} onOpenChange={setShowReportDetails}>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>{selectedReport?.type} Report</DialogTitle>
+                    </DialogHeader>
+                    {selectedReport && (
+                      <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Visit Type</Label>
+                          <p className="col-span-3">{selectedReport.visitType}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Client Name</Label>
+                          <p className="col-span-3">{selectedReport.siteNameConcernedPerson || selectedReport.dealerName}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Client's Remarks</Label>
+                          <p className="col-span-3">{selectedReport.clientsRemarks || 'N/A'}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Your Remarks</Label>
+                          <p className="col-span-3">{selectedReport.salespersonRemarks || selectedReport.remarks || 'N/A'}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Check-in</Label>
+                          <p className="col-span-3">{new Date(selectedReport.checkInTime).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    )}
+                  </DialogContent>
+                </Dialog>
               </CardContent>
             </Card>
           </TabsContent>

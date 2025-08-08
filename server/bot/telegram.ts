@@ -125,7 +125,6 @@ export class TelegramBotService {
         });
         
         console.log(`✅ Successfully linked Telegram user ${telegramChatId} to user ${user.id}`);
-        
         // Notify web app clients about successful linking
         this.notifyWebApp('user_linked', {
           telegramChatId,
