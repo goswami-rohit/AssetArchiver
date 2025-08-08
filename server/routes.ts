@@ -85,7 +85,7 @@ export function setupWebRoutes(app: Express) {
         // 🤖 AI MAGIC BUTTON - Generate TVR from chat
         console.log('🔧 Using AI to generate TVR from input:', userInput);
 
-        const aiGeneratedData = await aiService.generateTVRFromInput({
+        const aiGeneratedData = await aiService.generateTVRFromInput({ //does not exist yet-make in aiServices
           siteName: req.body.siteName || "Customer Site",
           technicalIssue: userInput,
           serviceProvided: req.body.serviceProvided || "Technical support provided",
@@ -184,6 +184,29 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+    // GET /api/tvr/:id
+  app.get("/api/tvr/:id", async (req: Request, res: Response) => {
+    try {
+      const tvrId = req.params.id;
+      if (!tvrId) {
+        return res.status(400).json({ error: "TVR ID is required" });
+      }
+
+      const tvr = await db.query.technicalVisitReports.findFirst({
+        where: eq(technicalVisitReports.id, tvrId),
+      });
+
+      if (!tvr) {
+        return res.status(404).json({ error: "Technical Visit Report not found" });
+      }
+
+      return res.status(200).json({ data: tvr });
+    } catch (error) {
+      console.error("Error fetching TVR by ID:", error);
+      return res.status(500).json({ error: "Internal Server Error" });
+    }
+  });
+
   // ✅ CHECKOUT ENDPOINT WITH SCHEMA VALIDATION
   app.patch('/api/tvr/:id/checkout', async (req: Request, res: Response) => {
     try {
@@ -231,8 +254,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== SALESMAN ATTENDANCE ENDPOINTS (FIXED WITH SCHEMA VALIDATION) =====
 
+  // ===== SALESMAN ATTENDANCE ENDPOINTS (FIXED WITH SCHEMA VALIDATION) =====
   // Get recent attendance records
   app.get('/api/attendance/recent', async (req: Request, res: Response) => {
     try {
@@ -524,8 +547,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== SALESMAN LEAVE APPLICATIONS ENDPOINTS (COMPLETE SET) =====
 
+  // ===== SALESMAN LEAVE APPLICATIONS ENDPOINTS (COMPLETE SET) =====
   // Get recent leave applications (Admin view)
   app.get('/api/leave/recent', async (req: Request, res: Response) => {
     try {
@@ -1000,8 +1023,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== DAILY VISIT REPORTS (FIXED WITH SCHEMA VALIDATION) =====
 
+  // ===== DAILY VISIT REPORTS (FIXED WITH SCHEMA VALIDATION) =====
   // Get recent DVR records
   // POST /api/dvr/create - Create DVR using AI generation
   app.post('/api/dvr/create', async (req: Request, res: Response) => {
@@ -1444,6 +1467,144 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  app.get('/api/dvr/:reportId', async (req: Request, res: Response) => {
+    try {
+      // 🎨 DIAGNOSTIC: Log the incoming parameters to see if the ID is present.
+      //console.log('Fetching DVR report. Request parameters:', req.params);
+
+      const { reportId } = req.params;
+
+      // 🎨 FIX: The database ID is a string (UUID), so we should not use parseInt().
+      // We will use the string ID directly from the URL.
+      if (!reportId) {
+        return res.status(400).json({
+          error: 'Invalid report ID',
+          // Return the parameters to help debug the issue.
+          receivedParams: req.params
+        });
+      }
+
+      // ✅ Fetch the report from the database using the string ID
+      const report = await db.query.dailyVisitReports.findFirst({
+        where: eq(dailyVisitReports.id, reportId)
+      });
+
+      if (!report) {
+        return res.status(404).json({ error: 'Report not found' });
+      }
+
+      // ✅ Return the full report data, including remarks
+      res.json({ success: true, data: report });
+    } catch (error) {
+      console.error('Error fetching DVR report:', error);
+      res.status(500).json({ error: 'Failed to get DVR report' });
+    }
+  });
+
+  //manul DVR form submission route 
+  app.post('/api/dvr-manual', async (req: Request, res: Response) => {
+    try {
+      console.log('1. Raw request body:', req.body);
+      const manualData = req.body;
+      const alsoCreateClientReport = true; // Hardcoding this for the test
+
+      // ✅ MANUAL DVR CREATION WITH PROPER TYPES
+      const dvrData = {
+        userId: parseInt(manualData.userId || 1),
+        reportDate: manualData.reportDate
+          ? new Date(manualData.reportDate).toISOString().split('T')[0]
+          : new Date().toISOString().split('T')[0], // ✅ Date string
+        dealerType: manualData.dealerType || "Dealer",
+        dealerName: manualData.dealerName || null,
+        subDealerName: manualData.subDealerName || null,
+        location: manualData.location || "",
+        latitude: (manualData.latitude || 0).toString(), // ✅ Decimal as string
+        longitude: (manualData.longitude || 0).toString(), // ✅ Decimal as string
+        visitType: manualData.visitType || "Best",
+        dealerTotalPotential: (manualData.dealerTotalPotential || 0).toString(), // ✅ Decimal as string
+        dealerBestPotential: (manualData.dealerBestPotential || 0).toString(), // ✅ Decimal as string
+        brandSelling: Array.isArray(manualData.brandSelling) ? manualData.brandSelling : [], // ✅ Array
+        contactPerson: manualData.contactPerson || null,
+        contactPersonPhoneNo: manualData.contactPersonPhoneNo || null,
+        todayOrderMt: (manualData.todayOrderMt || 0).toString(), // ✅ Decimal as string
+        todayCollectionRupees: (manualData.todayCollectionRupees || 0).toString(), // ✅ Decimal as string
+        feedbacks: manualData.feedbacks || "",
+        solutionBySalesperson: manualData.solutionBySalesperson || null,
+        anyRemarks: manualData.anyRemarks || null,
+        checkInTime: manualData.checkInTime ? new Date(manualData.checkInTime) : new Date(), // ✅ Timestamp
+        checkOutTime: manualData.checkOutTime ? new Date(manualData.checkOutTime) : null, // ✅ Timestamp or null
+        inTimeImageUrl: manualData.inTimeImageUrl || null,
+        outTimeImageUrl: manualData.outTimeImageUrl || null
+      };
+
+      console.log('2. dvrData object before validation:', dvrData);
+      
+      // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
+      const validatedData = insertDailyVisitReportSchema.parse(dvrData);
+      console.log('3. Validated data for DVR insertion:', validatedData);
+
+      // ✅ CREATE PRIMARY DVR WITH VALIDATED DATA
+      const dvrResult = await db.insert(dailyVisitReports).values(validatedData).returning();
+
+      // 🔄 HYBRID: Auto-create client report if requested
+      let clientReportResult = null;
+      if (alsoCreateClientReport) {
+        try {
+          const clientReportData = {
+            dealerType: validatedData.dealerType,
+            dealerSubDealerName: validatedData.dealerName + (validatedData.subDealerName ? ` / ${validatedData.subDealerName}` : ''),
+            location: validatedData.location,
+            typeBestNonBest: validatedData.visitType,
+            dealerTotalPotential: validatedData.dealerTotalPotential,
+            dealerBestPotential: validatedData.dealerBestPotential,
+            brandSelling: validatedData.brandSelling,
+            contactPerson: validatedData.contactPerson,
+            contactPersonPhoneNo: validatedData.contactPersonPhoneNo,
+            todayOrderMT: validatedData.todayOrderMt, // Note: MT vs Mt conversion
+            todayCollection: validatedData.todayCollectionRupees,
+            feedbacks: validatedData.feedbacks,
+            solutionsAsPerSalesperson: validatedData.solutionBySalesperson,
+            anyRemarks: validatedData.anyRemarks,
+            checkOutTime: validatedData.checkOutTime || new Date(),
+            userId: validatedData.userId
+          };
+
+          // Note: You would need insertClientReportSchema for this too
+          clientReportResult = await db.insert(clientReports).values(clientReportData).returning();
+        } catch (clientError) {
+          console.warn('Failed to create client report:', clientError);
+          // Don't fail the whole operation if client report fails
+        }
+      }
+
+      res.status(201).json({
+        success: true,
+        primaryDVR: dvrResult[0],
+        clientReport: clientReportResult?.[0] || null,
+        message: 'DVR created successfully!',
+        hybrid: alsoCreateClientReport ? 'Client report also created' : 'DVR only'
+      });
+
+    } catch (error: any) {
+      console.error('Error in DVR manual-v2 submission route:', error);
+
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({
+          error: 'DVR validation error',
+          details: error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message
+          }))
+        });
+      }
+
+      res.status(500).json({
+        error: 'Failed to create DVR',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // ===== UNIFIED DVR ENDPOINT (AI + Manual + Hybrid) WITH SCHEMA VALIDATION =====
   app.post('/api/dvr', async (req: Request, res: Response) => {
     try {
@@ -1662,8 +1823,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== CLIENT REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
 
+  // ===== CLIENT REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
   // Get recent client reports
   app.get('/api/client-reports/recent', async (req: Request, res: Response) => {
     try {
@@ -2136,8 +2297,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== COMPETITION REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
 
+  // ===== COMPETITION REPORTS ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
   // Get recent competition reports
   app.get('/api/competition/recent', async (req: Request, res: Response) => {
     try {
@@ -2658,8 +2819,8 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // ===== GEO TRACKING ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
 
+  // ===== GEO TRACKING ENDPOINTS (COMPLETE SET WITH SCHEMA VALIDATION) =====
   // Helper function for precise distance calculation
   function calculatePreciseDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
     const R = 6371000; // Earth's radius in meters
@@ -3663,6 +3824,7 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
+
   // ===== DAILY TASKS ENDPOINTS =====
 
   app.get('/api/tasks/recent', async (req: Request, res: Response) => {
@@ -4132,6 +4294,7 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ error: 'Failed to fetch user tasks' });
     }
   });
+  
   // ===== DEALER MANAGEMENT ENDPOINTS (EXACT SCHEMA MATCH) =====
   app.get('/api/dealers', async (req: Request, res: Response) => {
     try {

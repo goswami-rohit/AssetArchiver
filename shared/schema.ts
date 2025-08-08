@@ -64,12 +64,12 @@ export const dailyVisitReports = pgTable("daily_visit_reports", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-// Technical Visit Reports table
+// Technical Visit Reports table //RG work on this
 export const technicalVisitReports = pgTable("technical_visit_reports", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   reportDate: date("report_date").notNull(),
-  visitType: varchar("visit_type", { length: 50 }).notNull(), // "Installation", "Repair", "Maintenance"
+  visitType: varchar("visit_type", { length: 50 }).notNull(), // "Dealer-Best", "Sub Dealer-Best", "Dealer-Non Best", "Sub Dealer-Non Best"
   siteNameConcernedPerson: varchar("site_name_concerned_person", { length: 255 }).notNull(),
   phoneNo: varchar("phone_no", { length: 20 }).notNull(),
   emailId: varchar("email_id", { length: 255 }), // NULLABLE

@@ -1,3 +1,4 @@
+//client/src/components/ChatInterface.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -724,7 +725,7 @@ export default function ChatInterface({
           visitOutcome: visitOutcome || undefined,
           latitude: currentLocation?.lat || 0,
           longitude: currentLocation?.lng || 0,
-          locationName: currentLocation?.address || 'Field Location',
+          locationName: currentLocation?.address || 'Field  Location',
           checkInTime: new Date().toISOString(),
           checkOutTime: null,
           inTimeImageUrl: null,
