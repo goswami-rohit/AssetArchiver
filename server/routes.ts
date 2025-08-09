@@ -171,7 +171,7 @@ export function setupWebRoutes(app: Express) {
       }
       if (error?.code === '23503') { // Foreign key violation
         return res.status(400).json({
-          error: 'Invalid user reference',
+          error: 'Invalid user references',
           details: 'User does not exist'
         });
       }
