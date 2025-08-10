@@ -243,7 +243,7 @@ export default function CRMDashboard() {
         ...dataToSubmit,
         userId: user?.id, // Assumes userId is available
       };
-      
+
       // Log the final payload to verify all fields are present before sending
       //console.log('Payload being sent to API:', payload);
 
@@ -252,7 +252,7 @@ export default function CRMDashboard() {
       // The original code was passing 'dvrFormData' directly,
       // which did not contain the changes made above.
       // FIX 3: Pass the `dataToSubmit` object in the fetch body.
-       const response = await fetch('/api/dvr-manual', {
+      const response = await fetch('/api/dvr-manual', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1152,26 +1152,37 @@ export default function CRMDashboard() {
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Real-time Status Badges */}
             {currentLocation && (
-              <Badge className="bg-green-100 text-green-800 border-green-300">
+              <Badge className="bg-green-100 text-green-800 border-green-300 flex items-center">
                 <MapPin className="w-3 h-3 mr-1" />
-                GPS Active
+                <span className="truncate">GPS Active</span>
               </Badge>
             )}
 
             {isJourneyActive && (
-              <Badge className="bg-blue-100 text-blue-800 border-blue-300">
+              <Badge className="bg-blue-100 text-blue-800 border-blue-300 flex items-center">
                 <Navigation className="w-3 h-3 mr-1" />
-                Journey Active
+                <span className="truncate">Journey Active</span>
               </Badge>
             )}
 
-            <Badge variant={attendanceStatus === 'in' ? 'default' : 'outline'}
-              className={attendanceStatus === 'in' ? 'bg-green-600' : 'border-red-300 text-red-600'}>
-              {attendanceStatus === 'in' ? <LogIn className="w-3 h-3 mr-1" /> : <LogOut className="w-3 h-3 mr-1" />}
-              {attendanceStatus === 'in' ? 'Checked In' : 'Checked Out'}
+            <Badge
+              variant={attendanceStatus === 'in' ? 'default' : 'outline'}
+              className={`flex items-center ${attendanceStatus === 'in'
+                  ? 'bg-green-600 text-white'
+                  : 'border-red-300 text-red-600'
+                }`}
+            >
+              {attendanceStatus === 'in' ? (
+                <LogIn className="w-3 h-3 mr-1" />
+              ) : (
+                <LogOut className="w-3 h-3 mr-1" />
+              )}
+              <span className="truncate">
+                {attendanceStatus === 'in' ? 'Checked In' : 'Checked Out'}
+              </span>
             </Badge>
 
             <Button
@@ -1209,7 +1220,7 @@ export default function CRMDashboard() {
             <TabsTrigger value="manage">Manage</TabsTrigger>
           </TabsList>
 
-         <TabsContent value="dashboard" className="space-y-6">
+          <TabsContent value="dashboard" className="space-y-6">
             {/* 🚀 MAIN ACTION GRID - BIGGER AND MORE ATTRACTIVE */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-6 bg-gray-50 rounded-xl shadow-inner p-4">
               <Button
@@ -1283,18 +1294,18 @@ export default function CRMDashboard() {
                         </Select>
                       </div>
 
-                       {/* 🎨 FIX: Conditionally render the Dealer Name field */}
-                        {dvrFormData.dealerType !== 'Sub-Dealer' && (
-                          <div>
-                            <Label htmlFor="dealerName">Dealer Name</Label>
-                            <Input
-                              id="dealerName"
-                              value={dvrFormData.dealerName}
-                              onChange={handleDvrInputChange}
-                              placeholder="Enter dealer name"
-                            />
-                          </div>
-                        )}
+                      {/* 🎨 FIX: Conditionally render the Dealer Name field */}
+                      {dvrFormData.dealerType !== 'Sub-Dealer' && (
+                        <div>
+                          <Label htmlFor="dealerName">Dealer Name</Label>
+                          <Input
+                            id="dealerName"
+                            value={dvrFormData.dealerName}
+                            onChange={handleDvrInputChange}
+                            placeholder="Enter dealer name"
+                          />
+                        </div>
+                      )}
 
                       {/* Sub Dealer Name Input (optional) */}
                       {dvrFormData.dealerType === 'Sub Dealer' && (
@@ -1843,7 +1854,7 @@ export default function CRMDashboard() {
               </Card>
             </div>
           </TabsContent>
-            
+
 
           <TabsContent value="reports" className="space-y-6">
             {/* Reports Section */}
