@@ -340,8 +340,13 @@ What else happened during your field work today? 🚀`,
   }
 
   return (
-    <div className={`fixed bottom-6 right-6 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${isExpanded ? 'w-[420px] h-[700px]' : 'w-[420px] h-[500px]'
-      }`}>
+    <div
+      className={`fixed bottom-4 right-4 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${isExpanded
+          ? 'w-[95vw] max-w-[420px] h-[85vh]'
+          : 'w-[95vw] max-w-[420px] h-[65vh]'
+        }`}
+    >
+
 
       {/* 🎨 PREMIUM HEADER DESIGN */}
       <div className="relative p-6 border-b border-gray-100/50 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 text-white rounded-t-3xl overflow-hidden">
@@ -466,8 +471,8 @@ What else happened during your field work today? 🚀`,
             >
               <div
                 className={`max-w-[85%] px-5 py-4 rounded-3xl shadow-lg transition-all duration-300 hover:shadow-xl ${message.role === 'user'
-                    ? 'bg-gradient-to-br from-blue-600 to-purple-600 text-white ml-8'
-                    : 'bg-white text-gray-900 border border-gray-200/50 mr-8'
+                  ? 'bg-gradient-to-br from-blue-600 to-purple-600 text-white ml-8'
+                  : 'bg-white text-gray-900 border border-gray-200/50 mr-8'
                   }`}
               >
                 <div className="flex items-start space-x-3">
