@@ -147,7 +147,7 @@ BE A SMART BUTLER, NOT A FORM.`,
 
   private async fetchRecentDealers(userId: number): Promise<any[]> {
     try {
-      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dealers/recent?userId=${userId}&limit=5`);
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dealers/recent?limit=5`);
       const result = await response.json();
       return response.ok ? (result.data || []) : [];
     } catch (error) {
