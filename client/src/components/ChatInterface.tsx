@@ -10,7 +10,7 @@ import {
   TrendingUp, Zap, Upload, Download, ChevronUp, ChevronDown, Minimize2, Maximize2, Star,
   Heart, Sparkles, Target, Route, Store, BarChart3, Settings, AlertCircle, Loader2,
   MessageSquare, PlusCircle, Search, Filter, RefreshCw, Eye, Edit, Trash2, MapPin,
-  Mic, Camera, Headphones, Volume2, Wifi, Signal, Battery, Shield
+  Mic, Camera, Headphones, Volume2, Wifi, Signal, Battery,  Database,Shield
 } from 'lucide-react';
 
 interface ChatMessage {
