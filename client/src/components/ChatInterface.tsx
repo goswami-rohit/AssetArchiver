@@ -341,9 +341,9 @@ What else happened during your field work today? 🚀`,
 
   return (
     <div
-      className={`fixed bottom-4 right-4 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${isExpanded
-          ? 'w-[95vw] max-w-[420px] h-[85vh]'
-          : 'w-[95vw] max-w-[420px] h-[65vh]'
+      className={`fixed inset-x-0 bottom-0 bg-white/95 backdrop-blur-xl rounded-t-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${isExpanded
+          ? 'w-full h-[85vh]'
+          : 'w-full h-[65vh]'
         }`}
     >
 
