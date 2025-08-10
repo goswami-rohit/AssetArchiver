@@ -26,7 +26,8 @@ import {
 } from 'shared/schema';
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or } from 'drizzle-orm';
 import { z } from 'zod';
-import { PureRAGService, ChatMessage } from 'server/bot/aiService';
+import { ChatMessage } from 'server/bot/aiService';
+import PureRAGService from 'server/bot/aiService';
 import { telegramBot } from './bot/telegram';
 
 
