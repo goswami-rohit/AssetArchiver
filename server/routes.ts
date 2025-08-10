@@ -37,10 +37,10 @@ export function setupWebRoutes(app: Express) {
     res.redirect('/login');
   });
 
-  // 1. CHAT ROUTE - Natural conversation with proper typing
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {
-      const { messages }: { messages: ChatMessage[] } = req.body;
+      const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
+
       // Validate message structure
       if (!Array.isArray(messages)) {
         return res.status(400).json({
@@ -48,6 +48,7 @@ export function setupWebRoutes(app: Express) {
           error: 'Messages must be an array'
         });
       }
+
       // Validate each message has required fields
       for (const msg of messages) {
         if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
@@ -57,7 +58,9 @@ export function setupWebRoutes(app: Express) {
           });
         }
       }
-      const aiResponse = await PureRAGService.chat(messages);
+      // ✅ PASS userId FOR PROACTIVENESS
+      const aiResponse = await PureRAGService.chat(messages, userId);
+
       res.json({
         success: true,
         message: aiResponse
@@ -97,8 +100,8 @@ export function setupWebRoutes(app: Express) {
           });
         }
       }
-      // Extract data from conversation
-      const extracted = await PureRAGService.extractStructuredData(messages);
+      // Extract data from conversation with user context
+      const extracted = await PureRAGService.extractStructuredData(messages, userId);
       if (!extracted || extracted.error) {
         return res.status(400).json({
           success: false,
@@ -106,11 +109,11 @@ export function setupWebRoutes(app: Express) {
         });
       }
       // Call YOUR ORIGINAL ENDPOINT based on AI decision
-      let submitResult: Response;
+      let submitResult;
       if (extracted.endpoint === '/api/dvr-manual') {
         console.log('🎯 Submitting to DVR endpoint with data:', extracted.data);
 
-        submitResult = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr-manual`, {
+        const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr-manual`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -118,10 +121,22 @@ export function setupWebRoutes(app: Express) {
             ...extracted.data
           })
         });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          return res.status(response.status).json({
+            success: false,
+            error: `Submission failed: ${errorData.error || 'Unknown error'}`,
+            details: errorData.details
+          });
+        }
+
+        submitResult = await response.json();
+
       } else if (extracted.endpoint === '/api/tvr') {
         console.log('🔧 Submitting to TVR endpoint with data:', extracted.data);
 
-        submitResult = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr`, {
+        const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -129,26 +144,30 @@ export function setupWebRoutes(app: Express) {
             ...extracted.data
           })
         });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          return res.status(response.status).json({
+            success: false,
+            error: `Submission failed: ${errorData.error || 'Unknown error'}`,
+            details: errorData.details
+          });
+        }
+
+        submitResult = await response.json();
+
       } else {
         return res.status(400).json({
           success: false,
           error: `Unknown endpoint: ${extracted.endpoint}`
         });
       }
-      if (!submitResult.ok) {
-        const errorData = await submitResult.json();
-        return res.status(submitResult.status).json({
-          success: false,
-          error: `Submission failed: ${errorData.error || 'Unknown error'}`,
-          details: errorData.details
-        });
-      }
-      const result = await submitResult.json();
+
       res.json({
         success: true,
         endpoint: extracted.endpoint,
-        recordId: result.data?.id || result.primaryDVR?.id,
-        data: result,
+        recordId: submitResult.data?.id || submitResult.primaryDVR?.id,
+        data: submitResult,
         message: `✅ Successfully submitted ${extracted.endpoint === '/api/dvr-manual' ? 'Daily Visit Report' : 'Technical Visit Report'}!`
       });
     } catch (error) {
@@ -160,7 +179,6 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-
   // ===== TECHNICAL VISIT REPORTS WITH AI (FIXED WITH SCHEMA VALIDATION) =====
   app.get('/api/tvr/recent', async (req: Request, res: Response) => {
     try {
@@ -309,24 +327,24 @@ export function setupWebRoutes(app: Express) {
   });
 
   // GET /api/tvr/:id
-  app.get("/api/tvr/:id", async (req: Request, res: Response) => {
+  app.get("/api/tvr/recent", async (req: Request, res: Response) => {
     try {
-      const tvrId = req.params.id;
-      if (!tvrId) {
-        return res.status(400).json({ error: "TVR ID is required" });
+      const userId = req.query.userId;
+      const limit = parseInt(req.query.limit as string) || 10;
+
+      if (!userId) {
+        return res.status(400).json({ error: "userId is required" });
       }
 
-      const tvr = await db.query.technicalVisitReports.findFirst({
-        where: eq(technicalVisitReports.id, tvrId),
+      const recentTvrs = await db.query.technicalVisitReports.findMany({
+        where: eq(technicalVisitReports.userId, parseInt(userId as string)), // ✅ This maps to user_id column
+        orderBy: desc(technicalVisitReports.createdAt),
+        limit: limit
       });
 
-      if (!tvr) {
-        return res.status(404).json({ error: "Technical Visit Report not found" });
-      }
-
-      return res.status(200).json({ data: tvr });
+      return res.status(200).json({ data: recentTvrs });
     } catch (error) {
-      console.error("Error fetching TVR by ID:", error);
+      console.error("Error fetching recent TVRs:", error);
       return res.status(500).json({ error: "Internal Server Error" });
     }
   });

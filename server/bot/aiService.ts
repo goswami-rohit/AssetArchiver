@@ -81,32 +81,56 @@ SEARCH TERMS: ${endpoint.searchTerms}
     }
   }
 
-  async chat(messages: ChatMessage[]): Promise<string> {
-    await this.ready; // ✅ Ensure RAG context is loaded
-
+  // Enhanced chat method with REAL proactiveness:
+  async chat(messages: ChatMessage[], userId?: number): Promise<string> {
+    await this.ready;
     console.log("💬 Chat request received");
-    console.log("RAG Context length:", this.endpointContext.length);
 
+    // 🤖 PROACTIVE: Check if user mentioned a visit
+    const lastMessage = messages[messages.length - 1]?.content.toLowerCase();
+    const isVisitMention = lastMessage.includes('visit') || lastMessage.includes('dealer') || lastMessage.includes('client') || lastMessage.includes('technical');
+
+    let contextualInfo = '';
+
+    if (isVisitMention && userId) {
+      console.log("🔍 Visit detected - fetching user's recent activity...");
+
+      // Fetch user's recent activity in parallel
+      const [recentDealers, recentDVRs, recentTVRs] = await Promise.all([
+        this.fetchRecentDealers(userId),
+        this.fetchRecentDVRs(userId),
+        this.fetchRecentTVRs(userId)
+      ]);
+
+      if (recentDealers.length > 0) {
+        contextualInfo += `\n🏢 RECENT DEALERS: ${recentDealers.map(d => `${d.name} (${d.location})`).slice(0, 3).join(', ')}\n`;
+      }
+
+      if (recentDVRs.length > 0) {
+        contextualInfo += `\n📊 RECENT DVR VISITS: ${recentDVRs.map(d => `${d.dealerName} - ${d.visitType}`).slice(0, 3).join(', ')}\n`;
+      }
+
+      if (recentTVRs.length > 0) {
+        contextualInfo += `\n🔧 RECENT TVR VISITS: ${recentTVRs.map(t => `${t.siteNameConcernedPerson} - ${t.visitType}`).slice(0, 3).join(', ')}\n`;
+      }
+    }
     const ragMessages = [
       {
         role: "system" as const,
-        content: `You are a helpful field service assistant with access to API endpoint information. 
-
+        content: `You are a proactive field service assistant with access to user's recent activity.
 ${this.endpointContext}
-
-INSTRUCTIONS:
-- Help users with field service tasks naturally like ChatGPT
-- When users describe work activities, understand which endpoint they need
-- Guide them to provide the required information conversationally
-- Extract data from their natural language and structure it properly
-- Be conversational, helpful, and smart about business context
-- When you have enough information, offer to submit the data to the appropriate endpoint
-
-NO ARTIFICIAL CONVERSATION FLOWS. Just be natural and helpful like ChatGPT.`,
+${contextualInfo}
+BUTLER BEHAVIOR:
+- Use the recent activity data above to be specific
+- When users mention visits, reference their recent patterns
+- Don't ask for information you can infer from recent activity
+- Be conversational: "I see you recently visited ABC Corp - is this another visit there?"
+- Auto-suggest based on patterns: "Like your usual technical visits to XYZ?"
+- Only ask for truly missing critical information
+BE A SMART BUTLER, NOT A FORM.`,
       },
       ...messages,
     ];
-
     try {
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
@@ -114,15 +138,104 @@ NO ARTIFICIAL CONVERSATION FLOWS. Just be natural and helpful like ChatGPT.`,
         max_tokens: 1000,
         temperature: 0.7,
       });
-
-      console.log("✅ OpenRouter response received");
-      return (
-        completion.choices[0]?.message?.content ||
-        "I'm having trouble processing that. Could you try again?"
-      );
+      return completion.choices[0]?.message?.content || "I'm having trouble processing that. Could you try again?";
     } catch (error) {
       console.error("❌ OpenRouter request failed:", error);
       throw new Error("Failed to process chat message");
+    }
+  }
+
+  private async fetchRecentDealers(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dealers/recent?userId=${userId}&limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent dealers:', error);
+      return [];
+    }
+  }
+  private async fetchRecentDVRs(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr/recent?userId=${userId}&limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent DVRs:', error);
+      return [];
+    }
+  }
+  private async fetchRecentTVRs(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr/recent?userId=${userId}&limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent TVRs:', error);
+      return [];
+    }
+  }
+
+
+  async extractStructuredData(messages: ChatMessage[], userId?: number): Promise<any> {
+    await this.ready;
+
+    let contextualInfo = '';
+
+    // ✅ FETCH RECENT ACTIVITY FOR BETTER EXTRACTION
+    if (userId) {
+      const [recentDealers, recentDVRs, recentTVRs] = await Promise.all([
+        this.fetchRecentDealers(userId),
+        this.fetchRecentDVRs(userId),
+        this.fetchRecentTVRs(userId)
+      ]);
+
+      if (recentDealers.length > 0) {
+        contextualInfo += `\nUSER'S RECENT DEALERS: ${recentDealers.map(d => `${d.name} (${d.location})`).join(', ')}\n`;
+      }
+
+      if (recentDVRs.length > 0) {
+        contextualInfo += `\nUSER'S RECENT DVR PATTERNS: ${recentDVRs.map(d => `${d.dealerName} - ${d.visitType}`).join(', ')}\n`;
+      }
+    }
+
+    const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [
+          {
+            role: "system",
+            content: `Extract structured data from this field service conversation.
+
+${contextualInfo}
+
+Use the recent activity above to match dealer names and validate data.
+
+DVR: /api/dvr-manual (dealerName, subDealerName, location, dealerType, visitType, etc.)
+TVR: /api/tvr (visitType, siteNameConcernedPerson, phoneNo, emailId, etc.)
+
+Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"error": "reason"}`
+          },
+          {
+            role: "user",
+            content: conversation
+          }
+        ],
+        max_tokens: 500,
+        temperature: 0.1,
+      });
+
+      const response = completion.choices[0]?.message?.content;
+      if (!response) {
+        return { error: "Failed to extract data" };
+      }
+
+      return JSON.parse(response);
+    } catch (error) {
+      console.error("❌ Data extraction failed:", error);
+      return { error: "Failed to extract structured data" };
     }
   }
 }

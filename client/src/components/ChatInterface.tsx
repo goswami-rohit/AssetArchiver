@@ -10,7 +10,7 @@ import {
   TrendingUp, Zap, Upload, Download, ChevronUp, ChevronDown, Minimize2, Maximize2, Star,
   Heart, Sparkles, Target, Route, Store, BarChart3, Settings, AlertCircle, Loader2,
   MessageSquare, PlusCircle, Search, Filter, RefreshCw, Eye, Edit, Trash2, MapPin,
-  Mic, Camera, Headphones, Volume2, Wifi, Signal, Battery,  Database,Shield
+  Mic, Camera, Headphones, Volume2, Wifi, Signal, Battery, Database, Shield
 } from 'lucide-react';
 
 interface ChatMessage {
@@ -115,7 +115,8 @@ Ready to revolutionize your field work! What happened today? 🚀`,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...messages, userMessage]
+          messages: [...messages, userMessage],
+          userId: userId // ✅ ADD THIS
         })
       });
 
@@ -123,7 +124,7 @@ Ready to revolutionize your field work! What happened today? 🚀`,
 
       if (data.success) {
         setConnectionStatus('connected');
-        
+
         const aiMessage: ChatMessage = {
           role: 'assistant',
           content: data.message,
@@ -142,14 +143,14 @@ Ready to revolutionize your field work! What happened today? 🚀`,
     } catch (error) {
       console.error('RAG Chat error:', error);
       setConnectionStatus('error');
-      
+
       const errorMessage: ChatMessage = {
         role: 'assistant',
         content: '❌ **Connection Issue**\n\nI\'m having trouble reaching the AI systems. Your data is safe - please try again in a moment.\n\n🔄 **Auto-retry** in 5 seconds...',
         timestamp: new Date()
       };
       setMessages(prev => [...prev, errorMessage]);
-      
+
       // Auto-retry after 5 seconds
       setTimeout(() => {
         setConnectionStatus('connected');
@@ -161,36 +162,41 @@ Ready to revolutionize your field work! What happened today? 🚀`,
   };
 
   // 🎯 ENHANCED DATA EXTRACTION WITH BETTER FEEDBACK
+  // 🎯 FIXED DATA EXTRACTION 
   const checkForDataExtraction = async () => {
     try {
-      const response = await fetch('/api/rag/extract', {
+      const response = await fetch('/api/rag/submit', { // ✅ CHANGED FROM /extract
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: messages
+          messages: messages,
+          userId: userId // ✅ ADDED REQUIRED userId
         })
       });
 
       const data = await response.json();
 
-      if (data.success && data.extractedData) {
-        setExtractedData(data.extractedData);
+      if (data.success && data.data) { // ✅ CHANGED FROM extractedData to data
+        setExtractedData({
+          endpoint: data.endpoint,
+          data: data.data
+        });
         setIsReadyToSubmit(true);
 
-        const endpointType = data.extractedData.endpoint === '/api/dvr-manual' ? 'Daily Visit Report' : 'Technical Visit Report';
-        const previewFields = Object.keys(data.extractedData.data).slice(0, 3);
+        const endpointType = data.endpoint === '/api/dvr-manual' ? 'Daily Visit Report' : 'Technical Visit Report';
+        const previewFields = Object.keys(data.data).slice(0, 3);
 
         const confirmMessage: ChatMessage = {
           role: 'assistant',
           content: `✅ **Data Extraction Complete!**
 
 📊 **Report Type:** ${endpointType}
-🎯 **Endpoint:** ${data.extractedData.endpoint}
+🎯 **Endpoint:** ${data.endpoint}
 
 📋 **Key Fields Captured:**
-${previewFields.map(field => `• ${field}: ${data.extractedData.data[field]}`).join('\n')}
+${previewFields.map(field => `• ${field}: ${data.data[field]}`).join('\n')}
 
-🚀 **Ready for submission!** Your data looks perfect. Should I submit this to your Neon database?`,
+🚀 **Already submitted to database!** Record ID: ${data.recordId}`,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, confirmMessage]);
@@ -199,14 +205,13 @@ ${previewFields.map(field => `• ${field}: ${data.extractedData.data[field]}`).
       console.error('Data extraction error:', error);
     }
   };
-
   // 🚀 ENHANCED SUBMISSION WITH BETTER FEEDBACK
   const handleSubmitData = async () => {
     if (!extractedData) return;
 
     setIsLoading(true);
     setConnectionStatus('connecting');
-    
+
     try {
       // Show submission progress
       const progressMessage: ChatMessage = {
@@ -230,7 +235,7 @@ ${previewFields.map(field => `• ${field}: ${data.extractedData.data[field]}`).
       if (result.success) {
         setConnectionStatus('connected');
         const endpointType = extractedData.endpoint === '/api/dvr-manual' ? 'DVR' : 'TVR';
-        
+
         const successMessage: ChatMessage = {
           role: 'assistant',
           content: `🎉 **Submission Successful!**
@@ -249,7 +254,7 @@ What else happened during your field work today? 🚀`,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, successMessage]);
-        
+
         // Reset submission state with celebration
         setIsReadyToSubmit(false);
         setExtractedData(null);
@@ -289,7 +294,7 @@ What else happened during your field work today? 🚀`,
   // Enhanced quick suggestions with emojis
   const quickSuggestions = [
     "🏪 Visited dealer today",
-    "🔧 Technical work completed", 
+    "🔧 Technical work completed",
     "📊 Need to create report",
     "📈 Show my analytics"
   ];
@@ -313,7 +318,7 @@ What else happened during your field work today? 🚀`,
         <div className="relative">
           {/* Pulsing background effect */}
           <div className="absolute inset-0 bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 rounded-full blur-xl opacity-75 animate-pulse"></div>
-          
+
           <Button
             onClick={toggleMinimized}
             className="relative h-20 w-20 rounded-full bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 shadow-2xl border-4 border-white backdrop-blur-lg"
@@ -335,16 +340,15 @@ What else happened during your field work today? 🚀`,
   }
 
   return (
-    <div className={`fixed bottom-6 right-6 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${
-      isExpanded ? 'w-[420px] h-[700px]' : 'w-[420px] h-[500px]'
-    }`}>
-      
+    <div className={`fixed bottom-6 right-6 bg-white/95 backdrop-blur-xl rounded-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 ${isExpanded ? 'w-[420px] h-[700px]' : 'w-[420px] h-[500px]'
+      }`}>
+
       {/* 🎨 PREMIUM HEADER DESIGN */}
       <div className="relative p-6 border-b border-gray-100/50 bg-gradient-to-br from-blue-600 via-purple-600 to-pink-600 text-white rounded-t-3xl overflow-hidden">
         {/* Background pattern */}
         <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent"></div>
         <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full blur-3xl"></div>
-        
+
         <div className="relative flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="relative">
@@ -365,7 +369,7 @@ What else happened during your field work today? 🚀`,
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             <Button
               variant="ghost"
@@ -422,7 +426,7 @@ What else happened during your field work today? 🚀`,
               </Button>
             ))}
           </div>
-          
+
           {/* Quick stats */}
           <div className="mt-4 p-3 bg-gradient-to-r from-blue-50 to-purple-50 rounded-2xl">
             <div className="flex items-center justify-between text-sm">
@@ -448,8 +452,8 @@ What else happened during your field work today? 🚀`,
                 <p className="text-gray-600 font-medium">Initializing RAG Assistant...</p>
                 <div className="flex justify-center space-x-1 mt-2">
                   <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                  <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '0.1s'}}></div>
-                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                 </div>
               </div>
             </div>
@@ -461,11 +465,10 @@ What else happened during your field work today? 🚀`,
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[85%] px-5 py-4 rounded-3xl shadow-lg transition-all duration-300 hover:shadow-xl ${
-                  message.role === 'user'
+                className={`max-w-[85%] px-5 py-4 rounded-3xl shadow-lg transition-all duration-300 hover:shadow-xl ${message.role === 'user'
                     ? 'bg-gradient-to-br from-blue-600 to-purple-600 text-white ml-8'
                     : 'bg-white text-gray-900 border border-gray-200/50 mr-8'
-                }`}
+                  }`}
               >
                 <div className="flex items-start space-x-3">
                   {message.role === 'assistant' && (
@@ -504,8 +507,8 @@ What else happened during your field work today? 🚀`,
                     <span className="text-sm text-gray-600">AI is thinking</span>
                     <div className="flex space-x-1">
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                      <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-2 h-2 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
                     </div>
                   </div>
                 </div>
