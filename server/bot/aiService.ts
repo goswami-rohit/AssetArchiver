@@ -1,452 +1,214 @@
-import axios from 'axios';
+import OpenAI from 'openai';
+import { QdrantClient } from '@qdrant/js-client-rest';
 
-interface OpenRouterResponse {
-  choices: {
-    message: {
-      content: string;
-    };
-  }[];
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }
 
-interface DealerData {
-  userId: number;
-  type: string;
-  parentDealerId?: string;
-  name: string;
-  region: string;
-  area: string;
-  phoneNo: string;
-  address: string;
-  totalPotential: string;
-  bestPotential: string;
-  brandSelling: string[];
-  feedbacks: string;
-  remarks?: string;
-  latitude: string;
-  longitude: string;
+interface ChatResponse {
+  message: string;
+  isComplete?: boolean;
+  endpointData?: any;
 }
 
-interface DVRData {
-  reportDate: string;
-  dealerType: string;
-  dealerName?: string;
-  subDealerName?: string;
-  location: string;
-  visitType: string;
-  dealerTotalPotential: number;
-  dealerBestPotential: number;
-  brandSelling: string[];
-  contactPerson?: string;
-  contactPersonPhoneNo?: string;
-  todayOrderMt: number;
-  todayCollectionRupees: number;
-  feedbacks: string;
-  solutionBySalesperson?: string;
-  anyRemarks?: string;
-  checkInTime?: string;
-  checkOutTime?: string;
-  inTimeImageUrl?: string;
-  outTimeImageUrl?: string;
-}
-
-class AIService {
-  private openRouterApiKey: string;
-  private baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
+class PureRAGService {
+  private openai: OpenAI;
+  private qdrant: QdrantClient;
+  private endpointContext: string = '';
 
   constructor() {
-    this.openRouterApiKey = process.env.OPENROUTER_API_KEY!;
-    if (!this.openRouterApiKey) {
-      throw new Error('OPENROUTER_API_KEY is required');
+    // Your OpenRouter setup
+    this.openai = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      defaultHeaders: {
+        "HTTP-Referer": process.env.NGROK_URL || "http://localhost:8000",
+        "X-Title": "Field Service RAG Assistant",
+      },
+    });
+
+    // Your Qdrant setup from the images
+    this.qdrant = new QdrantClient({
+      url: "https://159aa838-50db-435a-b6d7-46b432c554ba.eu-west-1-0.aws.cloud.qdrant.io:6333",
+      apiKey: process.env.QDRANT_API_KEY!, // From your .env
+    });
+
+    // Load RAG context on startup
+    this.loadRAGContext();
+  }
+
+  /**
+   * Load ALL endpoint data from Qdrant for RAG context
+   */
+  private async loadRAGContext() {
+    try {
+      // Get ALL points from your "api_endpoints" collection
+      const response = await this.qdrant.scroll("api_endpoints", {
+        limit: 100,
+        with_payload: true,
+        with_vector: false // We don't need vectors, just the metadata
+      });
+
+      const endpoints = response.points.map(point => point.payload);
+      
+      // Create rich RAG context string
+      this.endpointContext = `
+AVAILABLE API ENDPOINTS:
+
+${endpoints.map(endpoint => `
+ENDPOINT: ${endpoint.name}
+URL: ${endpoint.endpoint} (${endpoint.method})
+DESCRIPTION: ${endpoint.description}
+FIELDS: ${JSON.stringify(endpoint.fields)}
+REQUIRED FIELDS: ${JSON.stringify(endpoint.requiredFields)}
+SEARCH TERMS: ${endpoint.searchTerms}
+---`).join('\n')}
+`;
+
+      console.log('✅ RAG Context Loaded from Qdrant');
+      
+    } catch (error) {
+      console.error('❌ Failed to load RAG context from Qdrant:', error);
+      throw new Error('Could not connect to Qdrant vector database');
     }
   }
 
-  private async makeOpenRouterRequest(prompt: string, systemMessage: string = ''): Promise<string> {
+  /**
+   * PURE ChatGPT-like conversation with RAG
+   */
+  async chat(messages: ChatMessage[]): Promise<string> {
     try {
-      const response = await axios.post<OpenRouterResponse>(
-        this.baseUrl,
+      // Create the RAG-enhanced messages
+      const ragMessages = [
         {
-          model: 'z-ai/glm-4.5-air:free', // ✅ Updated to free model
-          messages: [
-            {
-              role: 'system',
-              content: systemMessage || 'You are a helpful AI assistant specialized in field service management and data parsing.'
-            },
-            {
-              role: 'user',
-              content: prompt
-            }
-          ],
-          max_tokens: 1000,
-          temperature: 0.3
+          role: 'system' as const,
+          content: `You are a helpful field service assistant with access to API endpoint information. 
+
+${this.endpointContext}
+
+INSTRUCTIONS:
+- Help users with field service tasks naturally like ChatGPT
+- When users describe work activities, understand which endpoint they need
+- Guide them to provide the required information conversationally
+- Extract data from their natural language and structure it properly
+- Be conversational, helpful, and smart about business context
+- When you have enough information, offer to submit the data to the appropriate endpoint
+
+NO ARTIFICIAL CONVERSATION FLOWS. Just be natural and helpful like ChatGPT.`
         },
+        ...messages
+      ];
+
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: ragMessages,
+        max_tokens: 1000,
+        temperature: 0.7 // Slightly higher for more natural responses
+      });
+
+      return completion.choices[0]?.message?.content || "I'm having trouble processing that. Could you try again?";
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      throw new Error('Failed to process chat message');
+    }
+  }
+
+  /**
+   * Extract structured data when user is ready to submit
+   */
+  async extractStructuredData(conversationMessages: ChatMessage[]): Promise<{endpoint: string, data: any} | null> {
+    try {
+      const extractionPrompt = {
+        role: 'user' as const,
+        content: `Based on our conversation, extract the structured data for API submission. 
+
+Analyze the conversation and determine:
+1. Which endpoint should be used
+2. What data has been collected
+3. Structure it properly for the API
+
+Return ONLY a JSON object in this format:
+{
+  "endpoint": "/api/endpoint-name",
+  "data": {
+    // structured data object
+  }
+}
+
+If there's not enough information, return: {"error": "insufficient_data"}`
+      };
+
+      const ragMessages = [
         {
-          headers: {
-            'Authorization': `Bearer ${this.openRouterApiKey}`,
-            'Content-Type': 'application/json',
-            'HTTP-Referer': process.env.NGROK_URL || 'http://localhost:8000',
-            'X-Title': 'Field Service Management System'
-          }
+          role: 'system' as const,
+          content: `Extract structured data from field service conversations.
+
+${this.endpointContext}
+
+You are a data extraction expert. Analyze the conversation and create properly structured API data.`
+        },
+        ...conversationMessages,
+        extractionPrompt
+      ];
+
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: ragMessages,
+        max_tokens: 800,
+        temperature: 0.1 // Low temperature for precise data extraction
+      });
+
+      const response = completion.choices[0]?.message?.content || '';
+      
+      // Extract JSON from response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const extracted = JSON.parse(jsonMatch[0]);
+        if (extracted.error) {
+          return null;
         }
-      );
-
-      return this.sanitizeResponse(response.data.choices[0]?.message?.content || '');
-    } catch (error) {
-      console.error('OpenRouter API Error:', error);
-      throw new Error('Failed to process AI request');
-    }
-  }
-
-  /**
-   * Generate DVR content from prompt with dealer and location context
-   * ✅ FIXED: Now uses OpenRouter consistently
-   */
-  async parseNewDealerFromGuidedPrompts(
-    guidedPromptResponses: Record<string, string>,
-    latitude: string,
-    longitude: string,
-    userId: number
-  ): Promise<DealerData> {
-    const systemMessage = `You are a data parsing expert for field service management. 
-  Parse the provided natural language guided prompt responses into structured dealer data.
-  Extract what you can from the natural language and provide sensible defaults for missing required fields.
-  Return ONLY a valid JSON object with the exact structure requested.`;
-
-    const prompt = `
-  Parse the following natural language guided prompt responses into a structured dealer object:
-
-  Guided Responses:
-  ${Object.entries(guidedPromptResponses).map(([key, value]) => `${key}: ${value}`).join('\n')}
-
-  GPS Coordinates:
-  Latitude: ${latitude}
-  Longitude: ${longitude}
-  User ID: ${userId}
-
-  Extract and return a JSON object with this EXACT structure:
-  {
-    "userId": ${userId},
-    "type": "string", // MUST be exactly "Dealer" or "Sub Dealer"
-    "parentDealerId": null,
-    "name": "string", // extract from responses
-    "region": "string", // extract if mentioned, otherwise use "Unknown Region"
-    "area": "string", // extract if mentioned, otherwise use "Unknown Area"  
-    "phoneNo": "string", // extract if mentioned, otherwise use "0000000000"
-    "address": "string", // extract if mentioned, otherwise use GPS coordinates
-    "totalPotential": "10000.00", // extract if mentioned, otherwise use default
-    "bestPotential": "5000.00", // extract if mentioned, otherwise use default
-    "brandSelling": ["Unknown"], // extract brands if mentioned, otherwise use ["Unknown"]
-    "feedbacks": "string", // extract feedback if mentioned, otherwise use response text
-    "remarks": null, // optional field
-    "latitude": "${latitude}",
-    "longitude": "${longitude}"
-  }
-
-  PARSING RULES:
-  - Extract dealer name from responses (REQUIRED)
-  - Determine if "Dealer" or "Sub Dealer" from context (default to "Dealer")
-  - For missing fields, use the defaults shown above
-  - Extract what you can, but ensure ALL required fields have values
-  - Use the actual response text as feedbacks if no specific feedback mentioned
-  `;
-
-    try {
-      const response = await this.makeOpenRouterRequest(prompt, systemMessage);
-
-      const cleanedResponse = response.replace(/```json\n?|\n?```/g, '').trim();
-      const parsedData = JSON.parse(cleanedResponse);
-
-      // ✅ FIXED: Provide defaults for missing fields instead of throwing errors
-      const dealerData = {
-        userId: userId,
-        type: parsedData.type || 'Dealer',
-        parentDealerId: parsedData.parentDealerId || undefined,
-        name: parsedData.name || 'Unknown Dealer',
-        region: parsedData.region || 'Unknown Region',
-        area: parsedData.area || 'Unknown Area',
-        phoneNo: parsedData.phoneNo || '0000000000',
-        address: parsedData.address || `GPS: ${latitude}, ${longitude}`,
-        totalPotential: parsedData.totalPotential || '10000.00',
-        bestPotential: parsedData.bestPotential || '5000.00',
-        brandSelling: Array.isArray(parsedData.brandSelling) && parsedData.brandSelling.length > 0
-          ? parsedData.brandSelling
-          : ['Unknown'],
-        feedbacks: parsedData.feedbacks || Object.values(guidedPromptResponses).join(' ') || 'Dealer created via DVR workflow',
-        remarks: parsedData.remarks || undefined,
-        latitude: latitude,
-        longitude: longitude
-      };
-
-      // ✅ FINAL VALIDATION: Ensure type is correct
-      if (!['Dealer', 'Sub Dealer'].includes(dealerData.type)) {
-        dealerData.type = 'Dealer';
+        return extracted;
       }
 
-      console.log('✅ PARSED DEALER DATA:', dealerData);
-      return dealerData;
+      return null;
 
     } catch (error) {
-      console.error('Error parsing dealer data:', error);
-
-      // ✅ ULTIMATE FALLBACK: Return valid dealer data structure
-      const fallbackData = {
-        userId: userId,
-        type: 'Dealer',
-        name: Object.values(guidedPromptResponses).join(' ') || 'Unknown Dealer',
-        region: 'Unknown Region',
-        area: 'Unknown Area',
-        phoneNo: '0000000000',
-        address: `GPS: ${latitude}, ${longitude}`,
-        totalPotential: '10000.00',
-        bestPotential: '5000.00',
-        brandSelling: ['Unknown'],
-        feedbacks: 'Dealer created via DVR workflow',
-        latitude: latitude,
-        longitude: longitude
-      };
-
-      console.log('✅ USING FALLBACK DEALER DATA:', fallbackData);
-      return fallbackData;
-    }
-  }
-
-  async generateDVRFromPromptWithContext(
-    prompt: string,
-    dealerInfo: any,
-    context: any
-  ): Promise<DVRData> {
-    const systemMessage = `You are a field visit data parsing expert. 
-  Parse the natural language visit description into structured DVR data.
-  Extract specific values mentioned and use dealer info for missing fields.
-  Return ONLY a valid JSON object.`;
-
-    const fullPrompt = `
-  Parse this visit description into structured DVR data:
-
-  VISIT DESCRIPTION: "${prompt}"
-
-  DEALER INFO:
-  - Name: ${dealerInfo.name}
-  - Type: ${dealerInfo.type || 'Dealer'}
-  - Total Potential: ${dealerInfo.totalPotential || '10000.00'}
-  - Best Potential: ${dealerInfo.bestPotential || '5000.00'}
-  - Brands: ${Array.isArray(dealerInfo.brandSelling) ? dealerInfo.brandSelling.join(', ') : 'Unknown'}
-
-  Extract and return JSON with EXACT structure:
-  {
-    "reportDate": "YYYY-MM-DD",
-    "dealerType": "${dealerInfo.type || 'Dealer'}",
-    "dealerName": "${dealerInfo.name}",
-    "subDealerName": null,
-    "location": "${dealerInfo.name} - ${dealerInfo.area || 'Unknown'}",
-    "visitType": "Best or Non Best - extract from description",
-    "dealerTotalPotential": ${dealerInfo.totalPotential || 10000.00},
-    "dealerBestPotential": ${dealerInfo.bestPotential || 5000.00},
-    "todayOrderMt": "extract order amount in MT, default 0.00",
-    "todayCollectionRupees": "extract collection amount in rupees, default 0.00",
-    "brandSelling": ${JSON.stringify(dealerInfo.brandSelling || ['Unknown'])},
-    "contactPerson": "extract contact person name if mentioned, otherwise null",
-    "contactPersonPhoneNo": "extract phone if mentioned, otherwise null",
-    "feedbacks": "extract visit feedback/purpose from description",
-    "solutionBySalesperson": "extract solutions provided if mentioned, otherwise null",
-    "anyRemarks": "extract additional remarks if mentioned, otherwise null",
-    "inTimeImageUrl": null,
-    "outTimeImageUrl": null
-  }
-
-  PARSING RULES:
-  - Extract numbers for order/collection amounts
-  - Identify "Best" or "Non Best" visit type
-  - Extract contact person details if mentioned
-  - Use visit description as feedbacks
-  - Default to null for optional fields
-  `;
-
-    try {
-      const response = await this.makeOpenRouterRequest(fullPrompt, systemMessage);
-      const cleanedResponse = response.replace(/```json\n?|\n?```/g, '').trim();
-      const parsedData = JSON.parse(cleanedResponse);
-
-      // Ensure all required fields with defaults
-      const dvrData = {
-        reportDate: parsedData.reportDate || new Date().toISOString().split('T')[0],
-        dealerType: parsedData.dealerType || dealerInfo.type || 'Dealer',
-        dealerName: parsedData.dealerName || dealerInfo.name,
-        subDealerName: parsedData.subDealerName || null,
-        location: parsedData.location || `${dealerInfo.name} - ${dealerInfo.area || 'Unknown'}`,
-        visitType: parsedData.visitType || 'Best',
-        dealerTotalPotential: Number(parsedData.dealerTotalPotential) || Number(dealerInfo.totalPotential) || 10000.00,
-        dealerBestPotential: Number(parsedData.dealerBestPotential) || Number(dealerInfo.bestPotential) || 5000.00,
-        todayOrderMt: Number(parsedData.todayOrderMt) || 0.00,
-        todayCollectionRupees: Number(parsedData.todayCollectionRupees) || 0.00,
-        brandSelling: Array.isArray(parsedData.brandSelling) ? parsedData.brandSelling : (dealerInfo.brandSelling || ['Unknown']),
-        contactPerson: parsedData.contactPerson || null,
-        contactPersonPhoneNo: parsedData.contactPersonPhoneNo || null,
-        feedbacks: parsedData.feedbacks || prompt || 'Visit completed',
-        solutionBySalesperson: parsedData.solutionBySalesperson || null,
-        anyRemarks: parsedData.anyRemarks || null,
-        inTimeImageUrl: parsedData.inTimeImageUrl || null,
-        outTimeImageUrl: parsedData.outTimeImageUrl || null
-      };
-
-      console.log('✅ PARSED DVR DATA:', dvrData);
-      return dvrData;
-
-    } catch (error) {
-      console.error('DVR parsing error:', error);
-
-      // Fallback with basic structure
-      return {
-        reportDate: new Date().toISOString().split('T')[0],
-        dealerType: dealerInfo.type || 'Dealer',
-        dealerName: dealerInfo.name,
-        subDealerName: null,
-        location: `${dealerInfo.name} - ${dealerInfo.area || 'Unknown'}`,
-        visitType: 'Best',
-        dealerTotalPotential: Number(dealerInfo.totalPotential) || 10000.00,
-        dealerBestPotential: Number(dealerInfo.bestPotential) || 5000.00,
-        todayOrderMt: 0.00,
-        todayCollectionRupees: 0.00,
-        brandSelling: dealerInfo.brandSelling || ['Unknown'],
-        contactPerson: null,
-        contactPersonPhoneNo: null,
-        feedbacks: prompt || 'Visit completed',
-        solutionBySalesperson: null,
-        anyRemarks: null,
-        inTimeImageUrl: null,
-        outTimeImageUrl: null
-      };
-    }
-  }
-  /**
-   * Generate TVR (Territory Visit Report) analysis
-   */
-  async generateTVRFromPrompt(prompt: string, territoryData: any): Promise<string> {
-    const systemMessage = `You are a territory analysis expert. Generate professional TVR content based on the provided prompt and territory data.`;
-
-    const fullPrompt = `
-    Generate a Territory Visit Report based on:
-    
-    User Input: "${prompt}"
-    Territory Data: ${JSON.stringify(territoryData, null, 2)}
-    
-    Provide a comprehensive analysis including:
-    - Territory overview
-    - Key findings
-    - Market opportunities
-    - Challenges identified
-    - Recommendations
-    - Next steps
-    
-    Format the response professionally for a business report.
-    `;
-
-    try {
-      return await this.makeOpenRouterRequest(fullPrompt, systemMessage);
-    } catch (error) {
-      console.error('Error generating TVR:', error);
-      throw new Error('Failed to generate TVR');
-    }
-  }
-
-  // Helper function to find dealer by GPS coordinates
-
-  /**
-   * Analyze competition report data
-   */
-  async analyzeCompetitionReport(reportData: any, analysisType: string): Promise<string> {
-    const systemMessage = `You are a competitive intelligence analyst. Provide insightful analysis of competition data for field service teams.`;
-
-    const prompt = `
-    Analyze the following competition report data:
-    
-    Report Data: ${JSON.stringify(reportData, null, 2)}
-    Analysis Type: ${analysisType}
-    
-    Provide detailed analysis including:
-    - Competitive landscape overview
-    - Key competitor strengths and weaknesses
-    - Market positioning insights
-    - Threat assessment
-    - Strategic recommendations
-    - Action items for field team
-    
-    Make the analysis actionable for field service representatives.
-    `;
-
-    try {
-      return await this.makeOpenRouterRequest(prompt, systemMessage);
-    } catch (error) {
-      console.error('Error analyzing competition report:', error);
-      throw new Error('Failed to analyze competition report');
+      console.error('Data extraction error:', error);
+      return null;
     }
   }
 
   /**
-   * Generate intelligent suggestions for field operations
-   */
-  async generateFieldSuggestions(
-    fieldData: any,
-    context: string
-  ): Promise<string[]> {
-    const systemMessage = `You are a field operations optimization expert. Generate practical, actionable suggestions for field service teams.`;
-
-    const prompt = `
-    Based on the following field data and context, generate 5-7 practical suggestions:
-    
-    Field Data: ${JSON.stringify(fieldData, null, 2)}
-    Context: ${context}
-    
-    Provide suggestions that are:
-    - Specific and actionable
-    - Relevant to field service operations
-    - Focused on improving efficiency and results
-    - Realistic to implement
-    
-    Return only an array of suggestion strings.
-    `;
-
-    try {
-      const response = await this.makeOpenRouterRequest(prompt, systemMessage);
-
-      // Try to parse as JSON array, fallback to splitting by lines
-      try {
-        const parsed = JSON.parse(response);
-        return Array.isArray(parsed) ? parsed : [response];
-      } catch {
-        return response.split('\n').filter(line => line.trim().length > 0);
-      }
-    } catch (error) {
-      console.error('Error generating field suggestions:', error);
-      throw new Error('Failed to generate field suggestions');
-    }
-  }
-
-  /**
-   * Validate and sanitize AI responses
-   */
-  private sanitizeResponse(response: string): string {
-    return response
-      .replace(/[\x00-\x1F\x7F]/g, '') // Remove control characters
-      .replace(/[<>]/g, '') // Remove potential HTML/XML characters
-      .trim();
-  }
-
-  /**
-   * Health check for AI service
+   * Health check
    */
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await this.makeOpenRouterRequest(
-        'Respond with "OK" if you can process this request.',
-        'You are a health check assistant.'
-      );
-      return response.toLowerCase().includes('ok');
+      // Test OpenRouter
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [{ role: "user", content: "Say OK" }],
+        max_tokens: 5
+      });
+
+      // Test Qdrant
+      await this.qdrant.getCollectionInfo("api_endpoints");
+
+      return completion.choices[0]?.message?.content?.toLowerCase().includes('ok') || false;
     } catch (error) {
-      console.error('AI Service health check failed:', error);
+      console.error('Health check failed:', error);
       return false;
     }
   }
+
+  /**
+   * Get available endpoints info
+   */
+  getEndpointsInfo(): string {
+    return this.endpointContext;
+  }
 }
 
-export default new AIService();
-export { AIService, DealerData, DVRData };
+export default new PureRAGService();
+export { PureRAGService, ChatMessage, ChatResponse };

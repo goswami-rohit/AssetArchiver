@@ -26,15 +26,138 @@ import {
 } from 'shared/schema';
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or } from 'drizzle-orm';
 import { z } from 'zod';
-import { AIService } from 'server/bot/aiService';
+import { PureRAGService, ChatMessage } from 'server/bot/aiService';
 import { telegramBot } from './bot/telegram';
 
-const aiService = new AIService(process.env.OPENROUTER_API_KEY || '');
 
 export function setupWebRoutes(app: Express) {
   // PWA route
   app.get('/pwa', (req: Request, res: Response) => {
     res.redirect('/login');
+  });
+
+  // 1. CHAT ROUTE - Natural conversation with proper typing
+  app.post('/api/rag/chat', async (req: Request, res: Response) => {
+    try {
+      const { messages }: { messages: ChatMessage[] } = req.body;
+      // Validate message structure
+      if (!Array.isArray(messages)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Messages must be an array'
+        });
+      }
+      // Validate each message has required fields
+      for (const msg of messages) {
+        if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid message format. Each message needs role and content.'
+          });
+        }
+      }
+      const aiResponse = await PureRAGService.chat(messages);
+      res.json({
+        success: true,
+        message: aiResponse
+      });
+    } catch (error) {
+      console.error('RAG Chat error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Chat failed. Try again.'
+      });
+    }
+  });
+
+  // 2. EXTRACT & SUBMIT ROUTE - When ready to submit with proper typing
+  app.post('/api/rag/submit', async (req: Request, res: Response) => {
+    try {
+      const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
+      // Validate input
+      if (!Array.isArray(messages)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Messages must be an array'
+        });
+      }
+      if (!userId || typeof userId !== 'number') {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid userId is required'
+        });
+      }
+      // Validate message structure
+      for (const msg of messages) {
+        if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid message format. Each message needs role and content.'
+          });
+        }
+      }
+      // Extract data from conversation
+      const extracted = await PureRAGService.extractStructuredData(messages);
+      if (!extracted || extracted.error) {
+        return res.status(400).json({
+          success: false,
+          error: 'Not enough data collected. Continue chatting to provide more details.'
+        });
+      }
+      // Call YOUR ORIGINAL ENDPOINT based on AI decision
+      let submitResult: Response;
+      if (extracted.endpoint === '/api/dvr-manual') {
+        console.log('🎯 Submitting to DVR endpoint with data:', extracted.data);
+
+        submitResult = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr-manual`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId,
+            ...extracted.data
+          })
+        });
+      } else if (extracted.endpoint === '/api/tvr') {
+        console.log('🔧 Submitting to TVR endpoint with data:', extracted.data);
+
+        submitResult = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: userId,
+            ...extracted.data
+          })
+        });
+      } else {
+        return res.status(400).json({
+          success: false,
+          error: `Unknown endpoint: ${extracted.endpoint}`
+        });
+      }
+      if (!submitResult.ok) {
+        const errorData = await submitResult.json();
+        return res.status(submitResult.status).json({
+          success: false,
+          error: `Submission failed: ${errorData.error || 'Unknown error'}`,
+          details: errorData.details
+        });
+      }
+      const result = await submitResult.json();
+      res.json({
+        success: true,
+        endpoint: extracted.endpoint,
+        recordId: result.data?.id || result.primaryDVR?.id,
+        data: result,
+        message: `✅ Successfully submitted ${extracted.endpoint === '/api/dvr-manual' ? 'Daily Visit Report' : 'Technical Visit Report'}!`
+      });
+    } catch (error) {
+      console.error('RAG Submit error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Submission failed. Please try again.',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
   });
 
   // ===== TECHNICAL VISIT REPORTS WITH AI (FIXED WITH SCHEMA VALIDATION) =====
@@ -184,7 +307,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-    // GET /api/tvr/:id
+  // GET /api/tvr/:id
   app.get("/api/tvr/:id", async (req: Request, res: Response) => {
     try {
       const tvrId = req.params.id;
@@ -1445,7 +1568,7 @@ export function setupWebRoutes(app: Express) {
       };
 
       console.log('2. dvrData object before validation:', dvrData);
-      
+
       // ✅ USE SCHEMA VALIDATION INSTEAD OF MANUAL VALIDATION
       const validatedData = insertDailyVisitReportSchema.parse(dvrData);
       console.log('3. Validated data for DVR insertion:', validatedData);
@@ -4223,7 +4346,7 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ error: 'Failed to fetch user tasks' });
     }
   });
-  
+
   // ===== DEALER MANAGEMENT ENDPOINTS (EXACT SCHEMA MATCH) =====
   app.post('/api/dealers', async (req: Request, res: Response) => {
     try {
