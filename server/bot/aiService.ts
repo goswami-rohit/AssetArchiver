@@ -120,6 +120,7 @@ SEARCH TERMS: ${endpoint.searchTerms}
         content: `You are a proactive field service assistant with access to user's recent activity.
 ${this.endpointContext}
 ${contextualInfo}
+IMPORTANT: You already have the user's ID (${userId}) - NEVER ask for it.
 BUTLER BEHAVIOR:
 - Use the recent activity data above to be specific
 - When users mention visits, reference their recent patterns
