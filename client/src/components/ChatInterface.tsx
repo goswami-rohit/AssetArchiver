@@ -341,9 +341,9 @@ What else happened during your field work today? 🚀`,
 
   return (
     <div
-      className={`fixed inset-x-0 bottom-0 bg-white/95 backdrop-blur-xl rounded-t-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 overflow-hidden flex flex-col ${isExpanded
-        ? 'w-full max-h-[calc(100dvh-80px)]'
-        : 'w-full max-h-[calc(100dvh-150px)]'
+      className={`fixed inset-0 flex flex-col bg-white/95 backdrop-blur-xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 overflow-hidden ${isExpanded
+        ? 'h-[100dvh] rounded-none'
+        : 'h-[calc(100dvh-150px)] rounded-t-3xl overflow-hidden'
         }`}
     >
       {/* 🎨 PREMIUM HEADER DESIGN */}
