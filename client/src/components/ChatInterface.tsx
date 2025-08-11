@@ -341,9 +341,9 @@ What else happened during your field work today? 🚀`,
 
   return (
     <div
-      className={`fixed inset-x-0 bottom-0 bg-white/95 backdrop-blur-xl rounded-t-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 overflow-hidden ${isExpanded
-          ? 'w-full max-h-[calc(100vh-80px)]'
-          : 'w-full max-h-[calc(100vh-150px)]'
+      className={`fixed inset-x-0 bottom-0 bg-white/95 backdrop-blur-xl rounded-t-3xl shadow-2xl border border-gray-200/50 transition-all duration-500 z-50 overflow-hidden flex flex-col ${isExpanded
+        ? 'w-full max-h-[calc(100dvh-80px)]'
+        : 'w-full max-h-[calc(100dvh-150px)]'
         }`}
     >
       {/* 🎨 PREMIUM HEADER DESIGN */}
@@ -445,7 +445,7 @@ What else happened during your field work today? 🚀`,
 
       {/* 💬 ENHANCED MESSAGES AREA */}
       {isExpanded && (
-        <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gradient-to-b from-gray-50/50 to-white max-h-[450px]">
+        <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-gradient-to-b from-gray-50/50 to-white">
           {aiThinking && messages.length === 0 && (
             <div className="flex justify-center items-center py-8">
               <div className="text-center">
