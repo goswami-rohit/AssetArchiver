@@ -78,6 +78,53 @@ export function setupWebRoutes(app: Express) {
   app.get('/pwa', (req: Request, res: Response) => {
     res.redirect('/login');
   });
+  app.post('/api/auth/login', async (req: Request, res: Response) => {
+    try {
+      const { loginId, password } = req.body;
+
+      if (!loginId || !password) {
+        return res.status(400).json({ error: 'Login ID and password are required' });
+      }
+
+      // Find user by salesmanLoginId or email
+      const user = await db.query.users.findFirst({
+        where: or(
+          eq(users.salesmanLoginId, loginId),
+          eq(users.email, loginId)
+        ),
+        with: {
+          company: true
+        }
+      });
+
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Check if user is active
+      if (user.status !== 'active') {
+        return res.status(401).json({ error: 'Account is not active' });
+      }
+
+      // For now, simple password check (you should use bcrypt in production)
+      if (user.hashedPassword !== password) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Success - return user data (without password)
+      const { hashedPassword, ...userWithoutPassword } = user;
+
+      res.json({
+        success: true,
+        user: userWithoutPassword,
+        message: 'Login successful'
+      });
+
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ error: 'Login failed' });
+    }
+  });
 
   // ==================== AI/RAG ROUTES (EXISTING) ====================
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
