@@ -59,17 +59,10 @@ const upload = multer({
 const OFFICE_LOCATIONS = [
   {
     name: "Head Office",
-    lat: 28.6139,
-    lng: 77.2090,
+    lat: 26.1200853,
+    lng: 91.7955807,
     radius: 100,
-    polygon: turf.circle([77.2090, 28.6139], 0.1, { units: 'kilometers' })
-  },
-  {
-    name: "Branch Office",
-    lat: 19.0760,
-    lng: 72.8777,
-    radius: 100,
-    polygon: turf.circle([72.8777, 19.0760], 0.1, { units: 'kilometers' })
+    polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
   }
 ];
 
