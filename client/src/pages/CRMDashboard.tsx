@@ -19,7 +19,8 @@ import {
   Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft, 
   RotateCcw, Download, Upload, Eye, Briefcase, Users,
   Activity, BarChart3, PieChart, Smartphone, Laptop,
-  Wifi, WifiOff, RefreshCw, X, Check, AlertCircle
+  Wifi, WifiOff, RefreshCw, X, Check, AlertCircle, Award,
+  Calendar as CalendarIcon, DollarSign, TrendingDown
 } from 'lucide-react';
 
 // Import your custom components
@@ -54,6 +55,7 @@ interface AppState {
   clientReports: any[];
   competitionReports: any[];
   dashboardStats: any;
+  userTargets: any[];
   
   // UI State
   showCreateModal: boolean;
@@ -92,6 +94,7 @@ const useAppStore = create<AppState>((set, get) => ({
   clientReports: [],
   competitionReports: [],
   dashboardStats: {},
+  userTargets: [],
   
   showCreateModal: false,
   createType: 'task',
@@ -152,6 +155,46 @@ const useAPI = () => {
     }
   }, [user, apiCall, setData]);
 
+  const fetchUserTargets = useCallback(async () => {
+    if (!user) return;
+    try {
+      // Fetch user targets from your routes
+      const data = await apiCall(`/api/targets/user/${user.id}`);
+      setData('userTargets', data.data || []);
+    } catch (error) {
+      console.error('Failed to fetch user targets:', error);
+    }
+  }, [user, apiCall, setData]);
+
+  const exportUserData = useCallback(async () => {
+    if (!user) return;
+    try {
+      setLoading(true);
+      const response = await apiCall(`/api/export/user/${user.id}`, {
+        method: 'POST'
+      });
+      
+      if (response.success) {
+        // Create download link
+        const blob = new Blob([JSON.stringify(response.data, null, 2)], {
+          type: 'application/json'
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `user_data_${user.id}_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, apiCall, setLoading]);
+
   const fetchAllData = useCallback(async () => {
     if (!user) return;
     
@@ -188,13 +231,13 @@ const useAPI = () => {
       if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
       if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
       
-      await fetchDashboardStats();
+      await Promise.all([fetchDashboardStats(), fetchUserTargets()]);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
       setLoading(false);
     }
-  }, [user, apiCall, setData, setLoading, fetchDashboardStats]);
+  }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
 
   const handleAttendancePunch = useCallback(async () => {
     if (!user) return;
@@ -336,6 +379,8 @@ const useAPI = () => {
   return {
     fetchAllData,
     fetchDashboardStats,
+    fetchUserTargets,
+    exportUserData,
     handleAttendancePunch,
     createRecord,
     updateRecord,
@@ -442,6 +487,7 @@ export default function AdvancedCRM() {
     dealers,
     reports,
     dashboardStats,
+    userTargets,
     showCreateModal,
     createType,
     setUser,
@@ -455,7 +501,8 @@ export default function AdvancedCRM() {
     handleAttendancePunch, 
     createRecord, 
     updateRecord, 
-    deleteRecord 
+    deleteRecord,
+    exportUserData
   } = useAPI();
 
   // Initialize app
@@ -670,7 +717,7 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  // ============= AI ASSISTANT PAGE (FUNCTIONAL) =============
+  // ============= AI ASSISTANT PAGE (WITH BACK BUTTON) =============
   const AIPage = () => (
     <div className="h-full">
       <ChatInterface
@@ -693,12 +740,12 @@ export default function AdvancedCRM() {
     </div>
   );
 
-  // ============= PROFILE PAGE =============
+  // ============= ENHANCED PROFILE PAGE WITH TARGETS =============
   const ProfilePage = () => (
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 pb-32"
     >
       <StatusBar />
       
@@ -717,21 +764,71 @@ export default function AdvancedCRM() {
           <Badge className="mt-2 bg-blue-600 text-white">{user?.role}</Badge>
         </div>
 
-        {/* Profile Stats */}
+        {/* Achievement Stats */}
         <div className="grid grid-cols-2 gap-4 mb-8">
           <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
             <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-white">{reports.length}</p>
+              <div className="flex items-center justify-center mb-2">
+                <Target className="w-5 h-5 text-blue-400 mr-2" />
+                <p className="text-2xl font-bold text-white">{reports.length}</p>
+              </div>
               <p className="text-sm text-gray-400">Total Reports</p>
             </CardContent>
           </Card>
           <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
             <CardContent className="p-4 text-center">
-              <p className="text-2xl font-bold text-white">{dealers.length}</p>
+              <div className="flex items-center justify-center mb-2">
+                <Building2 className="w-5 h-5 text-orange-400 mr-2" />
+                <p className="text-2xl font-bold text-white">{dealers.length}</p>
+              </div>
               <p className="text-sm text-gray-400">Dealers Managed</p>
             </CardContent>
           </Card>
         </div>
+
+        {/* Monthly Targets */}
+        <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center text-white">
+              <Award className="w-5 h-5 mr-2 text-yellow-400" />
+              Monthly Targets
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {[
+                { label: 'Sales Target', current: 75000, target: 100000, icon: DollarSign, color: 'text-green-400' },
+                { label: 'Dealer Visits', current: 15, target: 20, icon: MapPin, color: 'text-blue-400' },
+                { label: 'Reports Due', current: 8, target: 12, icon: FileText, color: 'text-purple-400' }
+              ].map((item, index) => {
+                const progress = (item.current / item.target) * 100;
+                return (
+                  <div key={item.label} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <item.icon className={`w-4 h-4 ${item.color}`} />
+                        <span className="text-sm text-gray-300">{item.label}</span>
+                      </div>
+                      <span className="text-sm text-white">
+                        {item.current} / {item.target}
+                      </span>
+                    </div>
+                    <div className="w-full bg-gray-700 rounded-full h-2">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${progress}%` }}
+                        transition={{ duration: 1, delay: index * 0.2 }}
+                        className={`h-2 rounded-full ${
+                          progress >= 80 ? 'bg-green-500' : progress >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Profile Actions */}
         <div className="space-y-4">
@@ -739,10 +836,29 @@ export default function AdvancedCRM() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <Settings className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">Settings</span>
+                  <Target className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">View All Targets</span>
                 </div>
                 <ChevronRight className="w-5 h-5 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card 
+            className="bg-gray-800/50 backdrop-blur-lg border-gray-700 cursor-pointer hover:bg-gray-700/50 transition-all"
+            onClick={exportUserData}
+          >
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Download className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">Export Targets & Data</span>
+                </div>
+                {isLoading ? (
+                  <RefreshCw className="w-5 h-5 text-gray-400 animate-spin" />
+                ) : (
+                  <ChevronRight className="w-5 h-5 text-gray-400" />
+                )}
               </div>
             </CardContent>
           </Card>
@@ -751,8 +867,8 @@ export default function AdvancedCRM() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  <Download className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">Export Data</span>
+                  <Settings className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">Settings</span>
                 </div>
                 <ChevronRight className="w-5 h-5 text-gray-400" />
               </div>
@@ -934,14 +1050,14 @@ export default function AdvancedCRM() {
         </AnimatePresence>
       </div>
 
-      {/* Bottom Navigation - Hide for full-screen pages */}
-      {currentPage !== 'ai' && currentPage !== 'journey' && (
+      {/* PERFECTLY POSITIONED BOTTOM NAVIGATION */}
+      {(currentPage !== 'ai' && currentPage !== 'journey') && (
         <motion.div 
           initial={{ y: 100 }}
           animate={{ y: 0 }}
-          className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md bg-gray-900/95 backdrop-blur-lg border-t border-gray-800"
+          className="absolute bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-700/50 shadow-2xl safe-area-pb"
         >
-          <div className="flex items-center justify-around py-2 px-4">
+          <div className="flex items-center justify-around py-3 px-4">
             {[
               { key: 'home', icon: Home, label: 'Home' },
               { key: 'ai', icon: MessageCircle, label: 'AI' },
@@ -950,18 +1066,30 @@ export default function AdvancedCRM() {
             ].map((nav) => (
               <motion.button
                 key={nav.key}
-                whileTap={{ scale: 0.9 }}
+                whileTap={{ scale: 0.85 }}
+                whileHover={{ scale: 1.05 }}
                 onClick={() => setCurrentPage(nav.key)}
                 className={`
-                  flex flex-col items-center space-y-1 p-2 rounded-lg transition-all duration-200
+                  flex flex-col items-center justify-center space-y-1 px-4 py-2 rounded-2xl 
+                  transition-all duration-300 min-w-[60px] relative overflow-hidden
                   ${currentPage === nav.key 
-                    ? 'bg-blue-600 text-white' 
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25' 
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800/60'
                   }
                 `}
               >
-                <nav.icon className="w-5 h-5" />
-                <span className="text-xs font-medium">{nav.label}</span>
+                {currentPage === nav.key && (
+                  <motion.div
+                    layoutId="activeTab"
+                    className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl"
+                    initial={false}
+                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                  />
+                )}
+                <nav.icon className={`w-5 h-5 relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`} />
+                <span className={`text-xs font-medium relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`}>
+                  {nav.label}
+                </span>
               </motion.button>
             ))}
           </div>
