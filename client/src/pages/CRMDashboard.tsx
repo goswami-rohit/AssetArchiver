@@ -22,6 +22,10 @@ import {
   Wifi, WifiOff, RefreshCw, X, Check, AlertCircle
 } from 'lucide-react';
 
+// Import your custom components
+import ChatInterface from '@/components/ChatInterface';
+import JourneyTracker from '@/components/JourneyTracker';
+
 // ============= STATE MANAGEMENT =============
 interface User {
   id: number;
@@ -666,6 +670,122 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
+  // ============= AI ASSISTANT PAGE (FUNCTIONAL) =============
+  const AIPage = () => (
+    <div className="h-full">
+      <ChatInterface
+        onBack={() => setCurrentPage('home')}
+      />
+    </div>
+  );
+
+  // ============= JOURNEY TRACKER PAGE =============
+  const JourneyPage = () => (
+    <div className="h-full">
+      <JourneyTracker
+        userId={user?.id || 1}
+        onBack={() => setCurrentPage('home')}
+        onJourneyEnd={() => {
+          fetchAllData();
+          setCurrentPage('home');
+        }}
+      />
+    </div>
+  );
+
+  // ============= PROFILE PAGE =============
+  const ProfilePage = () => (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+    >
+      <StatusBar />
+      
+      <div className="px-6 py-8">
+        {/* Profile Header */}
+        <div className="text-center mb-8">
+          <Avatar className="h-24 w-24 mx-auto mb-4 ring-4 ring-blue-500/30">
+            <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-2xl font-bold">
+              {user?.firstName?.[0]}{user?.lastName?.[0]}
+            </AvatarFallback>
+          </Avatar>
+          <h2 className="text-2xl font-bold text-white mb-1">
+            {user?.firstName} {user?.lastName}
+          </h2>
+          <p className="text-gray-400">{user?.email}</p>
+          <Badge className="mt-2 bg-blue-600 text-white">{user?.role}</Badge>
+        </div>
+
+        {/* Profile Stats */}
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-white">{reports.length}</p>
+              <p className="text-sm text-gray-400">Total Reports</p>
+            </CardContent>
+          </Card>
+          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-white">{dealers.length}</p>
+              <p className="text-sm text-gray-400">Dealers Managed</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Profile Actions */}
+        <div className="space-y-4">
+          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Settings className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">Settings</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Download className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">Export Data</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <Activity className="w-5 h-5 text-gray-400" />
+                  <span className="text-white">Activity Log</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-gray-400" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Button 
+            onClick={() => {
+              localStorage.removeItem('user');
+              setUser(null);
+            }}
+            className="w-full bg-red-600 hover:bg-red-700 text-white py-3"
+          >
+            <LogOut className="w-4 h-4 mr-2" />
+            Logout
+          </Button>
+        </div>
+      </div>
+    </motion.div>
+  );
+
   // ============= SECTION COMPONENT =============
   const Section = ({ 
     title, 
@@ -793,89 +913,13 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  // ============= AI ASSISTANT PAGE =============
-  const AIPage = () => (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
-    >
-      <StatusBar />
-      
-      <div className="px-6 py-8">
-        <div className="text-center mb-8">
-          <motion.div
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: "spring", stiffness: 200 }}
-            className="w-20 h-20 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full mx-auto mb-4 flex items-center justify-center"
-          >
-            <MessageCircle className="w-10 h-10 text-white" />
-          </motion.div>
-          <h2 className="text-2xl font-bold text-white mb-2">AI Assistant</h2>
-          <p className="text-gray-400">How can I help you today?</p>
-        </div>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-          {[
-            { icon: FileText, title: "Create DVR Report", color: "from-blue-500 to-blue-600" },
-            { icon: Zap, title: "Create TVR Report", color: "from-purple-500 to-purple-600" },
-            { icon: TrendingUp, title: "Competition Analysis", color: "from-green-500 to-green-600" },
-            { icon: Building2, title: "Dealer Insights", color: "from-orange-500 to-orange-600" }
-          ].map((action, index) => (
-            <motion.div
-              key={action.title}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300 cursor-pointer">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-4">
-                    <div className={`p-3 rounded-xl bg-gradient-to-r ${action.color}`}>
-                      <action.icon className="w-6 h-6 text-white" />
-                    </div>
-                    <span className="font-semibold text-white">{action.title}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </motion.div>
-          ))}
-        </div>
-
-        {/* Chat Input */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-gray-800/50 backdrop-blur-lg border border-gray-700 rounded-2xl p-4"
-        >
-          <div className="flex items-center space-x-3">
-            <div className="flex-1 relative">
-              <Input 
-                placeholder="Ask me anything..."
-                className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400 pr-12 py-3 rounded-xl"
-              />
-              <Button className="absolute right-1 top-1 bottom-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-            <Button variant="outline" className="p-3 rounded-xl border-gray-600 hover:bg-gray-700">
-              <Mic className="w-4 h-4" />
-            </Button>
-          </div>
-        </motion.div>
-      </div>
-    </motion.div>
-  );
-
   // ============= RENDER PAGE =============
   const renderPage = () => {
     switch (currentPage) {
       case 'home': return <HomePage />;
       case 'ai': return <AIPage />;
+      case 'journey': return <JourneyPage />;
+      case 'profile': return <ProfilePage />;
       default: return <HomePage />;
     }
   };
@@ -890,37 +934,39 @@ export default function AdvancedCRM() {
         </AnimatePresence>
       </div>
 
-      {/* Bottom Navigation */}
-      <motion.div 
-        initial={{ y: 100 }}
-        animate={{ y: 0 }}
-        className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md bg-gray-900/95 backdrop-blur-lg border-t border-gray-800"
-      >
-        <div className="flex items-center justify-around py-2 px-4">
-          {[
-            { key: 'home', icon: Home, label: 'Home' },
-            { key: 'ai', icon: MessageCircle, label: 'AI' },
-            { key: 'journey', icon: MapPin, label: 'Journey' },
-            { key: 'profile', icon: User, label: 'Profile' }
-          ].map((nav) => (
-            <motion.button
-              key={nav.key}
-              whileTap={{ scale: 0.9 }}
-              onClick={() => setCurrentPage(nav.key)}
-              className={`
-                flex flex-col items-center space-y-1 p-2 rounded-lg transition-all duration-200
-                ${currentPage === nav.key 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                }
-              `}
-            >
-              <nav.icon className="w-5 h-5" />
-              <span className="text-xs font-medium">{nav.label}</span>
-            </motion.button>
-          ))}
-        </div>
-      </motion.div>
+      {/* Bottom Navigation - Hide for full-screen pages */}
+      {currentPage !== 'ai' && currentPage !== 'journey' && (
+        <motion.div 
+          initial={{ y: 100 }}
+          animate={{ y: 0 }}
+          className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md bg-gray-900/95 backdrop-blur-lg border-t border-gray-800"
+        >
+          <div className="flex items-center justify-around py-2 px-4">
+            {[
+              { key: 'home', icon: Home, label: 'Home' },
+              { key: 'ai', icon: MessageCircle, label: 'AI' },
+              { key: 'journey', icon: MapPin, label: 'Journey' },
+              { key: 'profile', icon: User, label: 'Profile' }
+            ].map((nav) => (
+              <motion.button
+                key={nav.key}
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setCurrentPage(nav.key)}
+                className={`
+                  flex flex-col items-center space-y-1 p-2 rounded-lg transition-all duration-200
+                  ${currentPage === nav.key 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                  }
+                `}
+              >
+                <nav.icon className="w-5 h-5" />
+                <span className="text-xs font-medium">{nav.label}</span>
+              </motion.button>
+            ))}
+          </div>
+        </motion.div>
+      )}
 
       {/* Create Modal */}
       <AnimatePresence>
@@ -1050,8 +1096,6 @@ const CreateModal = ({
               </div>
             </>
           )}
-
-          {/* Add more form fields for other types... */}
 
           <div className="flex space-x-3 pt-4">
             <Button 
