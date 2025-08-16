@@ -1,7 +1,6 @@
-import { pgTable, text, serial, varchar, integer, boolean, date, real, timestamp, decimal, uuid, index, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, varchar, integer, boolean, date, real, timestamp, decimal, uuid } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
-import crypto from "crypto";
 import { z } from "zod";
 
 // Companies table
@@ -18,10 +17,6 @@ export const companies = pgTable("companies", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
   workosOrganizationId: text("workos_organization_id").unique(),
 });
-
-// Company indexes
-export const companiesIdxAdminUserId = index("idx_admin_user_id").on([companies.adminUserId]);
-
 
 // Users table
 export const users = pgTable("users", {
@@ -43,11 +38,6 @@ export const users = pgTable("users", {
   hashedPassword: text("hashed_password"),
   reportsToId: integer("reports_to_id").references(() => users.id, { onDelete: "set null" }),
 });
-
-// User indexes
-export const usersUniqueCompanyEmail = unique().on([users.companyId, users.email]);
-export const usersIdxUserCompanyId = index("idx_user_company_id").on([users.companyId]);
-export const usersIdxWorkosUserId = index("idx_workos_user_id").on([users.workosUserId]);
 
 // Daily Visit Reports table
 export const dailyVisitReports = pgTable("daily_visit_reports", {
@@ -79,8 +69,6 @@ export const dailyVisitReports = pgTable("daily_visit_reports", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-export const dailyVisitReportsIdxUserId = index("idx_daily_visit_reports_user_id").on([dailyVisitReports.userId]);
-
 // Technical Visit Reports table
 export const technicalVisitReports = pgTable("technical_visit_reports", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -100,8 +88,6 @@ export const technicalVisitReports = pgTable("technical_visit_reports", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-export const technicalVisitReportsIdxUserId = index("idx_technical_visit_reports_user_id").on([technicalVisitReports.userId]);
-
 // Permanent Journey Plans table
 export const permanentJourneyPlans = pgTable("permanent_journey_plans", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -113,8 +99,6 @@ export const permanentJourneyPlans = pgTable("permanent_journey_plans", {
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
-
-export const permanentJourneyPlansIdxUserId = index("idx_permanent_journey_plans_user_id").on([permanentJourneyPlans.userId]);
 
 // Dealers table
 export const dealers = pgTable("dealers", {
@@ -135,9 +119,6 @@ export const dealers = pgTable("dealers", {
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
-
-export const dealersIdxUserId = index("idx_dealers_user_id").on([dealers.userId]);
-export const dealersIdxParentDealerId = index("idx_dealers_parent_dealer_id").on([dealers.parentDealerId]);
 
 // Salesman Attendance table
 export const salesmanAttendance = pgTable("salesman_attendance", {
@@ -167,8 +148,6 @@ export const salesmanAttendance = pgTable("salesman_attendance", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-export const salesmanAttendanceIdxUserId = index("idx_salesman_attendance_user_id").on([salesmanAttendance.userId]);
-
 // Salesman Leave Applications table
 export const salesmanLeaveApplications = pgTable("salesman_leave_applications", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -182,8 +161,6 @@ export const salesmanLeaveApplications = pgTable("salesman_leave_applications", 
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
-
-export const salesmanLeaveApplicationsIdxUserId = index("idx_salesman_leave_applications_user_id").on([salesmanLeaveApplications.userId]);
 
 // Client Reports table
 export const clientReports = pgTable("client_reports", {
@@ -224,8 +201,6 @@ export const competitionReports = pgTable("competition_reports", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-export const competitionReportsIdxUserId = index().on([competitionReports.userId]);
-
 // Geo Tracking table
 export const geoTracking = pgTable("geo_tracking", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -252,9 +227,6 @@ export const geoTracking = pgTable("geo_tracking", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
 });
 
-export const geoTrackingIdxUserId = index("idx_geo_tracking_user_id").on([geoTracking.userId]);
-export const geoTrackingIdxRecordedAt = index("idx_geo_tracking_recorded_at").on([geoTracking.recordedAt]);
-
 // Daily Tasks table
 export const dailyTasks = pgTable("daily_tasks", {
   id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
@@ -270,11 +242,6 @@ export const dailyTasks = pgTable("daily_tasks", {
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
   pjpId: varchar("pjp_id", { length: 255 }).references(() => permanentJourneyPlans.id, { onDelete: "set null" }),
 });
-
-export const dailyTasksIdxUserId = index("idx_daily_tasks_user_id").on([dailyTasks.userId]);
-export const dailyTasksIdxAssignedByUserId = index("idx_daily_tasks_assigned_by_user_id").on([dailyTasks.assignedByUserId]);
-export const dailyTasksIdxTaskDate = index("idx_daily_tasks_task_date").on([dailyTasks.taskDate]);
-export const dailyTasksIdxPjpId = index("idx_daily_tasks_pjp_id").on([dailyTasks.pjpId]);
 
 // Dealer Reports and Scores table
 export const dealerReportsAndScores = pgTable("dealer_reports_and_scores", {
@@ -353,7 +320,12 @@ export const dealersRelations = relations(dealers, ({ one, many }) => ({
   }),
   subDealers: many(dealers, { relationName: "SubDealers" }),
   dailyTasks: many(dailyTasks, { relationName: "DealerDailyTasks" }),
-  reportsAndScores: one(dealerReportsAndScores, { relationName: "DealerScores" }),
+  // ✅ FIXED - added missing fields and references
+  reportsAndScores: one(dealerReportsAndScores, { 
+    fields: [dealers.id],
+    references: [dealerReportsAndScores.dealerId],
+    relationName: "DealerScores" 
+  }),
 }));
 
 export const salesmanAttendanceRelations = relations(salesmanAttendance, ({ one }) => ({
