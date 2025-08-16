@@ -743,18 +743,7 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Check existing attendance
       const today = new Date().toISOString().split('T')[0];
-      const existing = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today)
-        )).limit(1);
-
-      if (existing && existing.length > 0 && existing[0].inTimeTimestamp) {
-        return res.status(400).json({ success: false, error: 'Already punched in today' });
-      }
-
       const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
 
       // Use schema validation
@@ -772,7 +761,6 @@ export function setupWebRoutes(app: Express) {
         inTimeSpeed: speed ? speed.toString() : null,
         inTimeHeading: heading ? heading.toString() : null,
         inTimeAltitude: altitude ? altitude.toString() : null,
-        // Note: createdAt and updatedAt will be handled by the database defaults
       });
 
       const newAttendance = await db.insert(salesmanAttendance)
@@ -808,18 +796,18 @@ export function setupWebRoutes(app: Express) {
       }
 
       const today = new Date().toISOString().split('T')[0];
+      // Find the most recent unpunched attendance record
       const attendanceRecord = await db.select().from(salesmanAttendance)
         .where(and(
           eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today)
-        )).limit(1);
+          eq(salesmanAttendance.attendanceDate, today),
+          isNull(salesmanAttendance.outTimeTimestamp) // Only unpunched records
+        ))
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp)) // Most recent first
+        .limit(1);
 
       if (!attendanceRecord || attendanceRecord.length === 0) {
-        return res.status(400).json({ success: false, error: 'No punch-in record found' });
-      }
-
-      if (attendanceRecord[0].outTimeTimestamp) {
-        return res.status(400).json({ success: false, error: 'Already punched out' });
+        return res.status(400).json({ success: false, error: 'No unpunched attendance record found' });
       }
 
       const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;

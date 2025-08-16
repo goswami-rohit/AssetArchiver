@@ -105,9 +105,10 @@ I'll understand the context and create the right reports automatically! ✨`,
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
-          userId: userId,
-          mode: 'auto' // Let AI decide whether to use tools or just chat
+          message: currentInput,  // ← Single message string
+          userId: userId,         // ← Correct
+          context: { messages }   // ← Pass messages as context
+
         })
       });
 
@@ -157,7 +158,7 @@ I'll understand the context and create the right reports automatically! ✨`,
 
 🎉 Your data has been saved successfully! What else can I help you with?`;
     }
-    
+
     if (data.retrieved) {
       return `📊 **Data Retrieved**
 
@@ -205,9 +206,9 @@ Would you like me to analyze this data further?`;
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               {onBack && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={onBack}
                   className="p-1 hover:bg-gray-100 rounded-full"
                 >
@@ -255,22 +256,20 @@ Would you like me to analyze this data further?`;
             {/* Quick Actions Grid */}
             <div className="grid grid-cols-1 gap-4 mb-6">
               {quickActions.map((action, index) => (
-                <Card 
-                  key={index} 
+                <Card
+                  key={index}
                   className="cursor-pointer hover:shadow-md transition-all duration-200 border border-gray-200"
                   onClick={() => handleSendMessage(action.text)}
                 >
                   <div className="p-4 flex items-center space-x-4">
-                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-                      action.color === 'blue' ? 'bg-blue-100' :
-                      action.color === 'purple' ? 'bg-purple-100' :
-                      action.color === 'green' ? 'bg-green-100' : 'bg-orange-100'
-                    }`}>
-                      <action.icon className={`w-6 h-6 ${
-                        action.color === 'blue' ? 'text-blue-600' :
-                        action.color === 'purple' ? 'text-purple-600' :
-                        action.color === 'green' ? 'text-green-600' : 'text-orange-600'
-                      }`} />
+                    <div className={`w-12 h-12 rounded-full flex items-center justify-center ${action.color === 'blue' ? 'bg-blue-100' :
+                        action.color === 'purple' ? 'bg-purple-100' :
+                          action.color === 'green' ? 'bg-green-100' : 'bg-orange-100'
+                      }`}>
+                      <action.icon className={`w-6 h-6 ${action.color === 'blue' ? 'text-blue-600' :
+                          action.color === 'purple' ? 'text-purple-600' :
+                            action.color === 'green' ? 'text-green-600' : 'text-orange-600'
+                        }`} />
                     </div>
                     <div className="flex-1">
                       <p className="font-medium text-gray-900">{action.text}</p>
@@ -328,14 +327,13 @@ Would you like me to analyze this data further?`;
                     </Badge>
                   </div>
                 )}
-                
-                <div className={`p-4 rounded-3xl ${
-                  message.role === 'user' 
-                    ? 'bg-blue-500 text-white' 
+
+                <div className={`p-4 rounded-3xl ${message.role === 'user'
+                    ? 'bg-blue-500 text-white'
                     : 'bg-white border border-gray-200'
-                }`}>
+                  }`}>
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
-                  
+
                   {message.type === 'action_result' && message.data && (
                     <div className="mt-3 p-3 bg-gray-50 rounded-2xl">
                       <div className="flex items-center space-x-2 mb-2">
@@ -348,7 +346,7 @@ Would you like me to analyze this data further?`;
                     </div>
                   )}
                 </div>
-                
+
                 <div className="flex items-center justify-between mt-2 px-1">
                   <span className="text-xs text-gray-500">
                     {message.timestamp?.toLocaleTimeString()}
@@ -398,7 +396,7 @@ Would you like me to analyze this data further?`;
           <Button variant="ghost" size="sm" className="p-2 rounded-full">
             <Camera className="w-5 h-5 text-gray-600" />
           </Button>
-          
+
           <div className="flex-1 relative">
             <Input
               value={inputValue}
@@ -408,9 +406,9 @@ Would you like me to analyze this data further?`;
               disabled={isLoading}
               className="w-full pr-12 py-3 border-gray-300 rounded-full bg-gray-100 focus:bg-white focus:border-blue-500 transition-all"
             />
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               className="absolute right-2 top-1/2 transform -translate-y-1/2 p-1 rounded-full"
             >
               <Mic className="w-4 h-4 text-gray-600" />
@@ -420,11 +418,10 @@ Would you like me to analyze this data further?`;
           <Button
             onClick={() => handleSendMessage()}
             disabled={isLoading || !inputValue.trim()}
-            className={`p-3 rounded-full transition-all ${
-              inputValue.trim() 
-                ? 'bg-blue-500 hover:bg-blue-600 text-white' 
+            className={`p-3 rounded-full transition-all ${inputValue.trim()
+                ? 'bg-blue-500 hover:bg-blue-600 text-white'
                 : 'bg-gray-200 text-gray-400'
-            }`}
+              }`}
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -433,7 +430,7 @@ Would you like me to analyze this data further?`;
             )}
           </Button>
         </div>
-        
+
         {/* Status Bar */}
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center space-x-3 text-xs text-gray-500">
