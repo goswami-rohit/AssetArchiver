@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { create } from 'zustand';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,14 +10,19 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
   Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar, 
-  Building2, Target, Send, Mic, Camera, Search, Filter, MoreHorizontal,
+  Building2, Target, Send, Mic, Search, Filter, MoreHorizontal,
   Clock, Zap, FileText, TrendingUp, LogIn, LogOut, Navigation,
-  Settings, Bell, Heart, Share, Bookmark, Eye, Edit, Trash2,
-  ChevronRight, ArrowLeft, RotateCcw, Download, Upload
+  Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft, 
+  RotateCcw, Download, Upload, Eye, Briefcase, Users,
+  Activity, BarChart3, PieChart, Smartphone, Laptop,
+  Wifi, WifiOff, RefreshCw, X, Check, AlertCircle
 } from 'lucide-react';
 
+// ============= STATE MANAGEMENT =============
 interface User {
   id: number;
   firstName: string;
@@ -25,658 +32,1004 @@ interface User {
   company: { companyName: string };
 }
 
-export default function ModernCRM() {
-  // Core State
-  const [user, setUser] = useState<User | null>(null);
-  const [currentPage, setCurrentPage] = useState('home');
-  const [attendanceStatus, setAttendanceStatus] = useState<'in' | 'out'>('out');
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number, lng: number } | null>(null);
-
-  // Data State
-  const [dailyTasks, setDailyTasks] = useState<any[]>([]);
-  const [pjps, setPjps] = useState<any[]>([]);
-  const [dealers, setDealers] = useState<any[]>([]);
-  const [targets, setTargets] = useState<any[]>([]);
-  const [reports, setReports] = useState<any[]>([]);
-  const [journeyData, setJourneyData] = useState<any>(null);
-
+interface AppState {
+  user: User | null;
+  currentPage: string;
+  attendanceStatus: 'in' | 'out';
+  isLoading: boolean;
+  isOnline: boolean;
+  lastSync: Date | null;
+  
+  // Data
+  dailyTasks: any[];
+  pjps: any[];
+  dealers: any[];
+  reports: any[];
+  attendance: any[];
+  leaveApplications: any[];
+  clientReports: any[];
+  competitionReports: any[];
+  dashboardStats: any;
+  
   // UI State
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createType, setCreateType] = useState<'task' | 'pjp' | 'dealer' | 'target'>('task');
-  const [isLoading, setIsLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  showCreateModal: boolean;
+  createType: 'task' | 'pjp' | 'dealer' | 'dvr' | 'tvr' | 'leave' | 'client-report' | 'competition-report';
+  selectedItem: any;
+  showDetailModal: boolean;
+  searchQuery: string;
+  filterType: string;
+  
+  // Actions
+  setUser: (user: User | null) => void;
+  setCurrentPage: (page: string) => void;
+  setAttendanceStatus: (status: 'in' | 'out') => void;
+  setLoading: (loading: boolean) => void;
+  setOnlineStatus: (online: boolean) => void;
+  updateLastSync: () => void;
+  setData: (key: string, data: any) => void;
+  setUIState: (key: string, value: any) => void;
+  resetModals: () => void;
+}
 
-  // Form States
-  const [taskForm, setTaskForm] = useState({
-    title: '', description: '', priority: 'medium', dueDate: '', visitType: ''
-  });
+const useAppStore = create<AppState>((set, get) => ({
+  user: null,
+  currentPage: 'home',
+  attendanceStatus: 'out',
+  isLoading: false,
+  isOnline: true,
+  lastSync: null,
+  
+  dailyTasks: [],
+  pjps: [],
+  dealers: [],
+  reports: [],
+  attendance: [],
+  leaveApplications: [],
+  clientReports: [],
+  competitionReports: [],
+  dashboardStats: {},
+  
+  showCreateModal: false,
+  createType: 'task',
+  selectedItem: null,
+  showDetailModal: false,
+  searchQuery: '',
+  filterType: 'all',
+  
+  setUser: (user) => set({ user }),
+  setCurrentPage: (page) => set({ currentPage: page }),
+  setAttendanceStatus: (status) => set({ attendanceStatus: status }),
+  setLoading: (loading) => set({ isLoading: loading }),
+  setOnlineStatus: (online) => set({ isOnline: online }),
+  updateLastSync: () => set({ lastSync: new Date() }),
+  setData: (key, data) => set({ [key]: data }),
+  setUIState: (key, value) => set({ [key]: value }),
+  resetModals: () => set({ 
+    showCreateModal: false, 
+    showDetailModal: false, 
+    selectedItem: null 
+  })
+}));
 
-  const [pjpForm, setPjpForm] = useState({
-    plannedDate: '', dealerId: '', location: '', objective: '', status: 'planned'
-  });
-
-  const [dealerForm, setDealerForm] = useState({
-    name: '', type: 'Dealer', region: '', area: '', phoneNo: '', address: '',
-    totalPotential: '', bestPotential: '', brandSelling: '', feedbacks: ''
-  });
-
-  const [targetForm, setTargetForm] = useState({
-    dealerId: '', targetAmount: '', achievedAmount: '', period: '', notes: ''
-  });
-
-  // Initialize
-  useEffect(() => {
-    initializeApp();
-    setupLocation();
-  }, []);
-
-  const initializeApp = async () => {
-    // Get user from localStorage or API
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      const parsedUser = JSON.parse(userData);
-      setUser(parsedUser);
-      await fetchAllData(parsedUser.id);
-    }
-  };
-
-  const setupLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude
-          });
-        }
-      );
-    }
-  };
-
-  const fetchAllData = async (userId: number) => {
-    setIsLoading(true);
+// ============= API HOOKS =============
+const useAPI = () => {
+  const { user, setLoading, setData, updateLastSync } = useAppStore();
+  
+  const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
     try {
-      const [tasksRes, pjpsRes, dealersRes, targetsRes] = await Promise.all([
-        fetch(`/api/daily-tasks/user/${userId}`),
-        fetch(`/api/pjp/user/${userId}`),
-        fetch(`/api/dealers/user/${userId}`),
-        fetch(`/api/dealer-reports-scores/user/${userId}`)
-      ]);
-
-      const [tasksData, pjpsData, dealersData, targetsData] = await Promise.all([
-        tasksRes.json(), pjpsRes.json(), dealersRes.json(), targetsRes.json()
-      ]);
-
-      setDailyTasks(tasksData.data || []);
-      setPjps(pjpsData.data || []);
-      setDealers(dealersData.data || []);
-      setTargets(targetsData.data || []);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleAttendancePunch = async () => {
-    if (!user || !currentLocation) return;
-
-    setIsLoading(true);
-    try {
-      const endpoint = attendanceStatus === 'out' ? '/api/attendance/punch-in' : '/api/attendance/punch-out';
-      const method = attendanceStatus === 'out' ? 'POST' : 'POST';
-
       const response = await fetch(endpoint, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        ...options,
+      });
+      
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      updateLastSync();
+      return data;
+    } catch (error) {
+      console.error('API call failed:', error);
+      throw error;
+    }
+  }, [updateLastSync]);
+
+  const fetchDashboardStats = useCallback(async () => {
+    if (!user) return;
+    try {
+      const data = await apiCall(`/api/dashboard/stats/${user.id}`);
+      setData('dashboardStats', data.data);
+    } catch (error) {
+      console.error('Failed to fetch dashboard stats:', error);
+    }
+  }, [user, apiCall, setData]);
+
+  const fetchAllData = useCallback(async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    try {
+      const [
+        tasksRes,
+        pjpsRes,
+        dealersRes,
+        dvrRes,
+        tvrRes,
+        attendanceRes,
+        leaveRes,
+        clientRes,
+        competitionRes
+      ] = await Promise.allSettled([
+        apiCall(`/api/daily-tasks/user/${user.id}`),
+        apiCall(`/api/pjp/user/${user.id}`),
+        apiCall(`/api/dealers/user/${user.id}`),
+        apiCall(`/api/dvr/user/${user.id}?limit=20`),
+        apiCall(`/api/tvr/user/${user.id}`),
+        apiCall(`/api/attendance/user/${user.id}`),
+        apiCall(`/api/leave-applications/user/${user.id}`),
+        apiCall(`/api/client-reports/user/${user.id}`),
+        apiCall(`/api/competition-reports/user/${user.id}`)
+      ]);
+
+      if (tasksRes.status === 'fulfilled') setData('dailyTasks', tasksRes.value.data || []);
+      if (pjpsRes.status === 'fulfilled') setData('pjps', pjpsRes.value.data || []);
+      if (dealersRes.status === 'fulfilled') setData('dealers', dealersRes.value.data || []);
+      if (dvrRes.status === 'fulfilled') setData('reports', dvrRes.value.data || []);
+      if (attendanceRes.status === 'fulfilled') setData('attendance', attendanceRes.value.data || []);
+      if (leaveRes.status === 'fulfilled') setData('leaveApplications', leaveRes.value.data || []);
+      if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
+      if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
+      
+      await fetchDashboardStats();
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [user, apiCall, setData, setLoading, fetchDashboardStats]);
+
+  const handleAttendancePunch = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      setLoading(true);
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject);
+      });
+
+      const { latitude, longitude } = position.coords;
+      const endpoint = useAppStore.getState().attendanceStatus === 'out' 
+        ? '/api/attendance/punch-in' 
+        : '/api/attendance/punch-out';
+
+      const response = await apiCall(endpoint, {
+        method: 'POST',
         body: JSON.stringify({
           userId: user.id,
-          latitude: currentLocation.lat,
-          longitude: currentLocation.lng,
+          latitude,
+          longitude,
           locationName: 'Mobile App',
-          accuracy: 10
+          accuracy: position.coords.accuracy
         })
       });
 
-      const data = await response.json();
-      if (data.success) {
-        setAttendanceStatus(attendanceStatus === 'out' ? 'in' : 'out');
+      if (response.success) {
+        useAppStore.getState().setAttendanceStatus(
+          useAppStore.getState().attendanceStatus === 'out' ? 'in' : 'out'
+        );
+        await fetchDashboardStats();
       }
     } catch (error) {
-      console.error('Attendance error:', error);
+      console.error('Attendance punch failed:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  };
+  }, [user, apiCall, setLoading, fetchDashboardStats]);
 
-  const handleCreate = async () => {
+  const createRecord = useCallback(async (type: string, data: any) => {
     if (!user) return;
 
-    setIsLoading(true);
+    const endpoints = {
+      task: '/api/daily-tasks',
+      pjp: '/api/pjp',
+      dealer: '/api/dealers',
+      dvr: '/api/dvr',
+      tvr: '/api/tvr',
+      leave: '/api/leave-applications',
+      'client-report': '/api/client-reports',
+      'competition-report': '/api/competition-reports'
+    };
+
     try {
-      let endpoint = '';
-      let payload = {};
-
-      switch (createType) {
-        case 'task':
-          endpoint = '/api/daily-tasks';
-          payload = { ...taskForm, userId: user.id };
-          break;
-        case 'pjp':
-          endpoint = '/api/pjp';
-          payload = { ...pjpForm, userId: user.id };
-          break;
-        case 'dealer':
-          endpoint = '/api/dealers';
-          payload = { 
-            ...dealerForm, 
-            userId: user.id,
-            brandSelling: dealerForm.brandSelling.split(',').map(b => b.trim())
-          };
-          break;
-        case 'target':
-          endpoint = '/api/dealer-reports-scores';
-          payload = { ...targetForm, userId: user.id };
-          break;
-      }
-
-      const response = await fetch(endpoint, {
+      setLoading(true);
+      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...data, userId: user.id })
       });
 
-      if (response.ok) {
-        setShowCreateModal(false);
-        await fetchAllData(user.id);
-        // Reset forms
-        setTaskForm({ title: '', description: '', priority: 'medium', dueDate: '', visitType: '' });
-        setPjpForm({ plannedDate: '', dealerId: '', location: '', objective: '', status: 'planned' });
-        setDealerForm({ name: '', type: 'Dealer', region: '', area: '', phoneNo: '', address: '', totalPotential: '', bestPotential: '', brandSelling: '', feedbacks: '' });
-        setTargetForm({ dealerId: '', targetAmount: '', achievedAmount: '', period: '', notes: '' });
+      if (response.success) {
+        useAppStore.getState().resetModals();
+        await fetchAllData();
+        return response;
       }
     } catch (error) {
-      console.error('Create error:', error);
+      console.error(`Failed to create ${type}:`, error);
+      throw error;
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
+  }, [user, apiCall, setLoading, fetchAllData]);
+
+  const updateRecord = useCallback(async (type: string, id: string, data: any) => {
+    if (!user) return;
+
+    const endpoints = {
+      task: `/api/daily-tasks/${id}`,
+      pjp: `/api/pjp/${id}`,
+      dealer: `/api/dealers/${id}`,
+      dvr: `/api/dvr/${id}`,
+      tvr: `/api/tvr/${id}`,
+      leave: `/api/leave-applications/${id}`,
+      'client-report': `/api/client-reports/${id}`,
+      'competition-report': `/api/competition-reports/${id}`
+    };
+
+    try {
+      setLoading(true);
+      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      });
+
+      if (response.success) {
+        await fetchAllData();
+        return response;
+      }
+    } catch (error) {
+      console.error(`Failed to update ${type}:`, error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [user, apiCall, setLoading, fetchAllData]);
+
+  const deleteRecord = useCallback(async (type: string, id: string) => {
+    if (!user) return;
+
+    const endpoints = {
+      task: `/api/daily-tasks/${id}`,
+      pjp: `/api/pjp/${id}`,
+      dealer: `/api/dealers/${id}`,
+      dvr: `/api/dvr/${id}`,
+      tvr: `/api/tvr/${id}`,
+      leave: `/api/leave-applications/${id}`,
+      'client-report': `/api/client-reports/${id}`,
+      'competition-report': `/api/competition-reports/${id}`
+    };
+
+    try {
+      setLoading(true);
+      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
+        method: 'DELETE'
+      });
+
+      if (response.success) {
+        await fetchAllData();
+        return response;
+      }
+    } catch (error) {
+      console.error(`Failed to delete ${type}:`, error);
+      throw error;
+    } finally {
+      setLoading(false);
+    }
+  }, [user, apiCall, setLoading, fetchAllData]);
+
+  return {
+    fetchAllData,
+    fetchDashboardStats,
+    handleAttendancePunch,
+    createRecord,
+    updateRecord,
+    deleteRecord
+  };
+};
+
+// ============= COMPONENTS =============
+const StatusBar = () => {
+  const { isOnline, lastSync } = useAppStore();
+  
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center justify-between px-4 py-2 bg-gray-900/50 backdrop-blur-lg border-b border-gray-800"
+    >
+      <div className="flex items-center space-x-2">
+        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
+        <span className="text-xs text-gray-400">
+          {isOnline ? 'Online' : 'Offline'}
+        </span>
+      </div>
+      
+      {lastSync && (
+        <span className="text-xs text-gray-500">
+          Last sync: {lastSync.toLocaleTimeString()}
+        </span>
+      )}
+    </motion.div>
+  );
+};
+
+const LoadingSkeleton = ({ rows = 3 }: { rows?: number }) => (
+  <div className="space-y-3">
+    {Array.from({ length: rows }).map((_, i) => (
+      <Card key={i} className="bg-gray-900/30 border-gray-800">
+        <CardContent className="p-4">
+          <div className="flex items-center space-x-3">
+            <Skeleton className="h-12 w-12 rounded-full bg-gray-700" />
+            <div className="space-y-2 flex-1">
+              <Skeleton className="h-4 w-3/4 bg-gray-700" />
+              <Skeleton className="h-3 w-1/2 bg-gray-700" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    ))}
+  </div>
+);
+
+const ActionButton = ({ 
+  icon: Icon, 
+  label, 
+  variant = 'default',
+  onClick,
+  loading = false 
+}: {
+  icon: any;
+  label: string;
+  variant?: 'default' | 'primary' | 'success' | 'danger';
+  onClick: () => void;
+  loading?: boolean;
+}) => {
+  const variants = {
+    default: 'bg-gray-800 hover:bg-gray-700 text-gray-200',
+    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
+    success: 'bg-green-600 hover:bg-green-700 text-white',
+    danger: 'bg-red-600 hover:bg-red-700 text-white'
   };
 
-  // HOME PAGE COMPONENT
+  return (
+    <motion.button
+      whileTap={{ scale: 0.95 }}
+      whileHover={{ scale: 1.02 }}
+      onClick={onClick}
+      disabled={loading}
+      className={`
+        flex items-center space-x-2 px-4 py-2 rounded-xl font-medium
+        transition-all duration-200 shadow-lg
+        ${variants[variant]}
+        ${loading ? 'opacity-50 cursor-not-allowed' : ''}
+      `}
+    >
+      {loading ? (
+        <RefreshCw className="w-4 h-4 animate-spin" />
+      ) : (
+        <Icon className="w-4 h-4" />
+      )}
+      <span>{label}</span>
+    </motion.button>
+  );
+};
+
+// ============= MAIN DASHBOARD COMPONENT =============
+export default function AdvancedCRM() {
+  const {
+    user,
+    currentPage,
+    attendanceStatus,
+    isLoading,
+    dailyTasks,
+    pjps,
+    dealers,
+    reports,
+    dashboardStats,
+    showCreateModal,
+    createType,
+    setUser,
+    setCurrentPage,
+    setUIState,
+    resetModals
+  } = useAppStore();
+
+  const { 
+    fetchAllData, 
+    handleAttendancePunch, 
+    createRecord, 
+    updateRecord, 
+    deleteRecord 
+  } = useAPI();
+
+  // Initialize app
+  useEffect(() => {
+    const initializeApp = async () => {
+      const userData = localStorage.getItem('user');
+      if (userData) {
+        const parsedUser = JSON.parse(userData);
+        setUser(parsedUser);
+      }
+    };
+
+    initializeApp();
+  }, [setUser]);
+
+  // Fetch data when user changes
+  useEffect(() => {
+    if (user) {
+      fetchAllData();
+    }
+  }, [user, fetchAllData]);
+
+  // Network status monitoring
+  useEffect(() => {
+    const handleOnline = () => useAppStore.getState().setOnlineStatus(true);
+    const handleOffline = () => useAppStore.getState().setOnlineStatus(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Memoized filtered data
+  const filteredTasks = useMemo(() => 
+    dailyTasks.filter(task => task.status !== 'Completed').slice(0, 5),
+    [dailyTasks]
+  );
+
+  const activePJPs = useMemo(() => 
+    pjps.filter(pjp => pjp.status === 'active').slice(0, 3),
+    [pjps]
+  );
+
+  const recentReports = useMemo(() => 
+    reports.slice(0, 3),
+    [reports]
+  );
+
+  // ============= HOME PAGE =============
   const HomePage = () => (
-    <div className="h-full bg-gray-50 overflow-y-auto pb-20">
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+    >
+      <StatusBar />
+      
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-blue-500 text-white">
+      <div className="relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
+        <div className="relative px-6 py-8">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-4">
+              <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
+                <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
                   {user?.firstName?.[0]}{user?.lastName?.[0]}
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h1 className="font-semibold text-lg">{user?.firstName} {user?.lastName}</h1>
-                <p className="text-sm text-gray-500">{user?.company?.companyName}</p>
+                <motion.h1 
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="text-2xl font-bold text-white"
+                >
+                  {user?.firstName} {user?.lastName}
+                </motion.h1>
+                <p className="text-blue-200">{user?.company?.companyName}</p>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Button
+            
+            <div className="flex items-center space-x-3">
+              <ActionButton
+                icon={attendanceStatus === 'in' ? LogOut : LogIn}
+                label={attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                variant={attendanceStatus === 'in' ? 'danger' : 'success'}
                 onClick={handleAttendancePunch}
-                className={`${attendanceStatus === 'in' 
-                  ? 'bg-red-500 hover:bg-red-600' 
-                  : 'bg-green-500 hover:bg-green-600'} text-white px-4 py-2 rounded-full`}
+                loading={isLoading}
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-white hover:bg-white/10"
               >
-                {attendanceStatus === 'in' ? <LogOut className="w-4 h-4 mr-1" /> : <LogIn className="w-4 h-4 mr-1" />}
-                {attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                <Bell className="w-5 h-5" />
               </Button>
-              <Bell className="w-6 h-6 text-gray-600" />
             </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+            {[
+              { 
+                label: "Today's Tasks", 
+                value: filteredTasks.length, 
+                icon: CheckCircle, 
+                color: "from-blue-500 to-blue-600" 
+              },
+              { 
+                label: "Active PJPs", 
+                value: activePJPs.length, 
+                icon: Calendar, 
+                color: "from-purple-500 to-purple-600" 
+              },
+              { 
+                label: "Total Dealers", 
+                value: dealers.length, 
+                icon: Building2, 
+                color: "from-orange-500 to-orange-600" 
+              },
+              { 
+                label: "This Month", 
+                value: reports.length, 
+                icon: BarChart3, 
+                color: "from-green-500 to-green-600" 
+              }
+            ].map((stat, index) => (
+              <motion.div
+                key={stat.label}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.1 }}
+              >
+                <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+                  <CardContent className="p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-gray-400 text-sm">{stat.label}</p>
+                        <p className="text-2xl font-bold text-white">{stat.value}</p>
+                      </div>
+                      <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
+                        <stat.icon className="w-6 h-6 text-white" />
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Quick Stats */}
-      <div className="p-4">
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm">Today's Tasks</p>
-                  <p className="text-2xl font-bold">{dailyTasks.filter(t => t.status === 'pending').length}</p>
-                </div>
-                <CheckCircle className="w-8 h-8 text-blue-200" />
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm">Active PJPs</p>
-                  <p className="text-2xl font-bold">{pjps.filter(p => p.status === 'active').length}</p>
-                </div>
-                <Calendar className="w-8 h-8 text-purple-200" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Daily Tasks Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Today's Tasks</h2>
-            <Button 
-              onClick={() => { setCreateType('task'); setShowCreateModal(true); }}
-              className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {dailyTasks.slice(0, 3).map(task => (
-              <Card key={task.id} className="bg-white border border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium">{task.title}</h3>
-                      <p className="text-sm text-gray-600">{task.description}</p>
-                      <div className="flex items-center space-x-2 mt-2">
-                        <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
-                          {task.priority}
-                        </Badge>
-                        <span className="text-xs text-gray-500">{task.dueDate}</span>
-                      </div>
-                    </div>
-                    <CheckCircle className="w-5 h-5 text-gray-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+      {/* Content Sections */}
+      <div className="px-6 pb-32">
+        {/* Tasks Section */}
+        <Section
+          title="Today's Tasks"
+          icon={CheckCircle}
+          onAdd={() => setUIState('showCreateModal', true)}
+          onAddType={() => setUIState('createType', 'task')}
+        >
+          {isLoading ? (
+            <LoadingSkeleton rows={3} />
+          ) : (
+            <AnimatePresence>
+              {filteredTasks.map((task, index) => (
+                <TaskCard key={task.id} task={task} index={index} />
+              ))}
+            </AnimatePresence>
+          )}
+        </Section>
 
         {/* PJP Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Journey Plans</h2>
-            <Button 
-              onClick={() => { setCreateType('pjp'); setShowCreateModal(true); }}
-              className="bg-purple-500 hover:bg-purple-600 text-white rounded-full p-2"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {pjps.slice(0, 3).map(pjp => (
-              <Card key={pjp.id} className="bg-white border border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium">{pjp.objective}</h3>
-                      <p className="text-sm text-gray-600">{pjp.location}</p>
-                      <div className="flex items-center space-x-2 mt-2">
-                        <Badge variant="outline">{pjp.status}</Badge>
-                        <span className="text-xs text-gray-500">{pjp.plannedDate}</span>
-                      </div>
-                    </div>
-                    <Navigation className="w-5 h-5 text-gray-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+        <Section
+          title="Journey Plans"
+          icon={Navigation}
+          onAdd={() => setUIState('showCreateModal', true)}
+          onAddType={() => setUIState('createType', 'pjp')}
+        >
+          {isLoading ? (
+            <LoadingSkeleton rows={3} />
+          ) : (
+            <AnimatePresence>
+              {activePJPs.map((pjp, index) => (
+                <PJPCard key={pjp.id} pjp={pjp} index={index} />
+              ))}
+            </AnimatePresence>
+          )}
+        </Section>
 
         {/* Dealers Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Dealers</h2>
-            <Button 
-              onClick={() => { setCreateType('dealer'); setShowCreateModal(true); }}
-              className="bg-orange-500 hover:bg-orange-600 text-white rounded-full p-2"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {dealers.slice(0, 3).map(dealer => (
-              <Card key={dealer.id} className="bg-white border border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium">{dealer.name}</h3>
-                      <p className="text-sm text-gray-600">{dealer.region} - {dealer.area}</p>
-                      <div className="flex items-center space-x-2 mt-2">
-                        <Badge variant="outline">{dealer.type}</Badge>
-                        <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
-                      </div>
-                    </div>
-                    <Building2 className="w-5 h-5 text-gray-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-
-        {/* Targets Section */}
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Targets & Scores</h2>
-            <Button 
-              onClick={() => { setCreateType('target'); setShowCreateModal(true); }}
-              className="bg-green-500 hover:bg-green-600 text-white rounded-full p-2"
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className="space-y-3">
-            {targets.slice(0, 3).map(target => (
-              <Card key={target.id} className="bg-white border border-gray-200">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <h3 className="font-medium">Target Achievement</h3>
-                      <p className="text-sm text-gray-600">₹{target.achievedAmount} / ₹{target.targetAmount}</p>
-                      <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                        <div 
-                          className="bg-green-500 h-2 rounded-full" 
-                          style={{ width: `${(target.achievedAmount / target.targetAmount) * 100}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                    <Target className="w-5 h-5 text-gray-400" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
+        <Section
+          title="Recent Dealers"
+          icon={Building2}
+          onAdd={() => setUIState('showCreateModal', true)}
+          onAddType={() => setUIState('createType', 'dealer')}
+        >
+          {isLoading ? (
+            <LoadingSkeleton rows={3} />
+          ) : (
+            <AnimatePresence>
+              {dealers.slice(0, 3).map((dealer, index) => (
+                <DealerCard key={dealer.id} dealer={dealer} index={index} />
+              ))}
+            </AnimatePresence>
+          )}
+        </Section>
       </div>
-    </div>
+    </motion.div>
   );
 
-  // AI ASSISTANT PAGE
-  const AIPage = () => (
-    <div className="h-full bg-gray-50 flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center">
-        <h1 className="text-lg font-semibold">AI Assistant</h1>
+  // ============= SECTION COMPONENT =============
+  const Section = ({ 
+    title, 
+    icon: Icon, 
+    children, 
+    onAdd, 
+    onAddType 
+  }: {
+    title: string;
+    icon: any;
+    children: React.ReactNode;
+    onAdd: () => void;
+    onAddType: () => void;
+  }) => (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mb-8"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-3">
+          <Icon className="w-6 h-6 text-blue-400" />
+          <h2 className="text-xl font-bold text-white">{title}</h2>
+        </div>
+        <Button
+          onClick={() => {
+            onAddType();
+            onAdd();
+          }}
+          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
+        >
+          <Plus className="w-4 h-4" />
+        </Button>
       </div>
-      
-      {/* Chat Container - OpenAI Style */}
-      <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
-        <div className="flex-1 overflow-y-auto p-4">
-          {/* Welcome Message */}
-          <div className="text-center py-8">
-            <div className="w-12 h-12 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full mx-auto mb-4 flex items-center justify-center">
-              <MessageCircle className="w-6 h-6 text-white" />
-            </div>
-            <h2 className="text-xl font-semibold mb-2">How can I help you today?</h2>
-            <p className="text-gray-600">Ask me about your tasks, create reports, or get insights</p>
-          </div>
+      <div className="space-y-3">
+        {children}
+      </div>
+    </motion.div>
+  );
 
-          {/* Quick Actions */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-            <Card className="cursor-pointer hover:bg-gray-50 border border-gray-200">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-3">
-                  <FileText className="w-5 h-5 text-blue-500" />
-                  <span className="font-medium">Create DVR Report</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="cursor-pointer hover:bg-gray-50 border border-gray-200">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-3">
-                  <Zap className="w-5 h-5 text-purple-500" />
-                  <span className="font-medium">Create TVR Report</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="cursor-pointer hover:bg-gray-50 border border-gray-200">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-3">
-                  <TrendingUp className="w-5 h-5 text-green-500" />
-                  <span className="font-medium">Competition Analysis</span>
-                </div>
-              </CardContent>
-            </Card>
-            <Card className="cursor-pointer hover:bg-gray-50 border border-gray-200">
-              <CardContent className="p-4">
-                <div className="flex items-center space-x-3">
-                  <Building2 className="w-5 h-5 text-orange-500" />
-                  <span className="font-medium">Dealer Insights</span>
-                </div>
-              </CardContent>
-            </Card>
+  // ============= CARD COMPONENTS =============
+  const TaskCard = ({ task, index }: { task: any; index: number }) => (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.1 }}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+    >
+      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="font-semibold text-white">{task.title}</h3>
+              <p className="text-sm text-gray-400 mt-1">{task.description}</p>
+              <div className="flex items-center space-x-2 mt-3">
+                <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
+                  {task.priority}
+                </Badge>
+                <span className="text-xs text-gray-500">{task.dueDate}</span>
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-gray-400 hover:text-white"
+            >
+              <CheckCircle className="w-5 h-5" />
+            </Button>
           </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+
+  const PJPCard = ({ pjp, index }: { pjp: any; index: number }) => (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.1 }}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+    >
+      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="font-semibold text-white">{pjp.objective}</h3>
+              <p className="text-sm text-gray-400 mt-1">{pjp.location}</p>
+              <div className="flex items-center space-x-2 mt-3">
+                <Badge variant="outline">{pjp.status}</Badge>
+                <span className="text-xs text-gray-500">{pjp.plannedDate}</span>
+              </div>
+            </div>
+            <Navigation className="w-5 h-5 text-purple-400" />
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+
+  const DealerCard = ({ dealer, index }: { dealer: any; index: number }) => (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: index * 0.1 }}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+    >
+      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <h3 className="font-semibold text-white">{dealer.name}</h3>
+              <p className="text-sm text-gray-400 mt-1">{dealer.region} - {dealer.area}</p>
+              <div className="flex items-center space-x-2 mt-3">
+                <Badge variant="outline">{dealer.type}</Badge>
+                <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
+              </div>
+            </div>
+            <Building2 className="w-5 h-5 text-orange-400" />
+          </div>
+        </CardContent>
+      </Card>
+    </motion.div>
+  );
+
+  // ============= AI ASSISTANT PAGE =============
+  const AIPage = () => (
+    <motion.div 
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
+    >
+      <StatusBar />
+      
+      <div className="px-6 py-8">
+        <div className="text-center mb-8">
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: "spring", stiffness: 200 }}
+            className="w-20 h-20 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full mx-auto mb-4 flex items-center justify-center"
+          >
+            <MessageCircle className="w-10 h-10 text-white" />
+          </motion.div>
+          <h2 className="text-2xl font-bold text-white mb-2">AI Assistant</h2>
+          <p className="text-gray-400">How can I help you today?</p>
         </div>
 
-        {/* Chat Input - OpenAI Style */}
-        <div className="border-t border-gray-200 bg-white p-4">
-          <div className="flex items-center space-x-3 max-w-3xl mx-auto">
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          {[
+            { icon: FileText, title: "Create DVR Report", color: "from-blue-500 to-blue-600" },
+            { icon: Zap, title: "Create TVR Report", color: "from-purple-500 to-purple-600" },
+            { icon: TrendingUp, title: "Competition Analysis", color: "from-green-500 to-green-600" },
+            { icon: Building2, title: "Dealer Insights", color: "from-orange-500 to-orange-600" }
+          ].map((action, index) => (
+            <motion.div
+              key={action.title}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.1 }}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300 cursor-pointer">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-4">
+                    <div className={`p-3 rounded-xl bg-gradient-to-r ${action.color}`}>
+                      <action.icon className="w-6 h-6 text-white" />
+                    </div>
+                    <span className="font-semibold text-white">{action.title}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Chat Input */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gray-800/50 backdrop-blur-lg border border-gray-700 rounded-2xl p-4"
+        >
+          <div className="flex items-center space-x-3">
             <div className="flex-1 relative">
               <Input 
-                placeholder="Message AI Assistant..."
-                className="pr-12 py-3 rounded-full border-gray-300"
+                placeholder="Ask me anything..."
+                className="bg-gray-900/50 border-gray-600 text-white placeholder-gray-400 pr-12 py-3 rounded-xl"
               />
-              <Button className="absolute right-1 top-1 bottom-1 px-3 bg-black hover:bg-gray-800 text-white rounded-full">
+              <Button className="absolute right-1 top-1 bottom-1 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
                 <Send className="w-4 h-4" />
               </Button>
             </div>
-            <Button variant="outline" className="p-3 rounded-full">
+            <Button variant="outline" className="p-3 rounded-xl border-gray-600 hover:bg-gray-700">
               <Mic className="w-4 h-4" />
             </Button>
           </div>
-        </div>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 
-  // JOURNEY & REPORTS PAGE
-  const JourneyPage = () => (
-    <div className="h-full bg-gray-50 overflow-y-auto pb-20">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3">
-        <h1 className="text-lg font-semibold">Journey & Reports</h1>
-      </div>
-
-      <div className="p-4">
-        {/* Journey Tracking */}
-        <Card className="mb-6 bg-gradient-to-r from-indigo-500 to-purple-600 text-white">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold mb-2">Journey Tracking</h2>
-                <p className="text-indigo-100">Track your field visits and routes</p>
-              </div>
-              <Navigation className="w-8 h-8 text-indigo-200" />
-            </div>
-            <Button className="mt-4 bg-white text-indigo-600 hover:bg-gray-100">
-              Start Journey
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Reports Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3 mb-3">
-                <FileText className="w-5 h-5 text-blue-500" />
-                <h3 className="font-semibold">Daily Visit Reports</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">Track your dealer visits and activities</p>
-              <Button variant="outline" className="w-full">View DVRs</Button>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3 mb-3">
-                <Zap className="w-5 h-5 text-purple-500" />
-                <h3 className="font-semibold">Technical Visit Reports</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">Document technical visits and solutions</p>
-              <Button variant="outline" className="w-full">View TVRs</Button>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3 mb-3">
-                <TrendingUp className="w-5 h-5 text-green-500" />
-                <h3 className="font-semibold">Competition Reports</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">Market intelligence and competitor analysis</p>
-              <Button variant="outline" className="w-full">View Competition</Button>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center space-x-3 mb-3">
-                <Building2 className="w-5 h-5 text-orange-500" />
-                <h3 className="font-semibold">Client Reports</h3>
-              </div>
-              <p className="text-sm text-gray-600 mb-3">Client interactions and feedback</p>
-              <Button variant="outline" className="w-full">View Clients</Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Leave Applications */}
-        <Card className="border border-gray-200">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Leave Applications</span>
-              <Button className="bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2">
-                <Plus className="w-4 h-4" />
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">Manage your leave requests and applications</p>
-            <Button variant="outline" className="w-full">View Applications</Button>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-
-  // PROFILE PAGE
-  const ProfilePage = () => (
-    <div className="h-full bg-gray-50 overflow-y-auto pb-20">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-10 px-4 py-3">
-        <h1 className="text-lg font-semibold">Profile</h1>
-      </div>
-
-      <div className="p-4">
-        {/* User Info */}
-        <Card className="mb-6 border border-gray-200">
-          <CardContent className="p-6 text-center">
-            <Avatar className="h-20 w-20 mx-auto mb-4">
-              <AvatarFallback className="bg-blue-500 text-white text-xl">
-                {user?.firstName?.[0]}{user?.lastName?.[0]}
-              </AvatarFallback>
-            </Avatar>
-            <h2 className="text-xl font-semibold">{user?.firstName} {user?.lastName}</h2>
-            <p className="text-gray-600">{user?.role}</p>
-            <p className="text-sm text-gray-500">{user?.company?.companyName}</p>
-          </CardContent>
-        </Card>
-
-        {/* Settings Menu */}
-        <div className="space-y-3">
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Settings className="w-5 h-5 text-gray-600" />
-                  <span className="font-medium">Settings</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Bell className="w-5 h-5 text-gray-600" />
-                  <span className="font-medium">Notifications</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="border border-gray-200">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Clock className="w-5 h-5 text-gray-600" />
-                  <span className="font-medium">Attendance History</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Render different pages
+  // ============= RENDER PAGE =============
   const renderPage = () => {
     switch (currentPage) {
       case 'home': return <HomePage />;
       case 'ai': return <AIPage />;
-      case 'journey': return <JourneyPage />;
-      case 'profile': return <ProfilePage />;
       default: return <HomePage />;
     }
   };
 
-  // CREATE MODAL
-  const CreateModal = () => (
-    <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Create New {createType === 'task' ? 'Task' : createType === 'pjp' ? 'PJP' : createType === 'dealer' ? 'Dealer' : 'Target'}
-          </DialogTitle>
-        </DialogHeader>
-        
-        <div className="space-y-4">
-          {createType === 'task' && (
+  // ============= MAIN RENDER =============
+  return (
+    <div className="h-screen flex flex-col bg-gray-900 max-w-md mx-auto relative overflow-hidden">
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {renderPage()}
+        </AnimatePresence>
+      </div>
+
+      {/* Bottom Navigation */}
+      <motion.div 
+        initial={{ y: 100 }}
+        animate={{ y: 0 }}
+        className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-md bg-gray-900/95 backdrop-blur-lg border-t border-gray-800"
+      >
+        <div className="flex items-center justify-around py-2 px-4">
+          {[
+            { key: 'home', icon: Home, label: 'Home' },
+            { key: 'ai', icon: MessageCircle, label: 'AI' },
+            { key: 'journey', icon: MapPin, label: 'Journey' },
+            { key: 'profile', icon: User, label: 'Profile' }
+          ].map((nav) => (
+            <motion.button
+              key={nav.key}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => setCurrentPage(nav.key)}
+              className={`
+                flex flex-col items-center space-y-1 p-2 rounded-lg transition-all duration-200
+                ${currentPage === nav.key 
+                  ? 'bg-blue-600 text-white' 
+                  : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                }
+              `}
+            >
+              <nav.icon className="w-5 h-5" />
+              <span className="text-xs font-medium">{nav.label}</span>
+            </motion.button>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Create Modal */}
+      <AnimatePresence>
+        {showCreateModal && (
+          <CreateModal 
+            type={createType}
+            onClose={resetModals}
+            onCreate={createRecord}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ============= CREATE MODAL =============
+const CreateModal = ({ 
+  type, 
+  onClose, 
+  onCreate 
+}: {
+  type: string;
+  onClose: () => void;
+  onCreate: (type: string, data: any) => Promise<any>;
+}) => {
+  const [formData, setFormData] = useState<any>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    
+    try {
+      await onCreate(type, formData);
+      onClose();
+    } catch (error) {
+      console.error('Failed to create record:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const titles = {
+    task: 'Create New Task',
+    pjp: 'Create New PJP',
+    dealer: 'Create New Dealer',
+    dvr: 'Create DVR Report',
+    tvr: 'Create TVR Report',
+    leave: 'Apply for Leave',
+    'client-report': 'Create Client Report',
+    'competition-report': 'Create Competition Report'
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="bg-gray-800 rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto"
+      >
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-white">
+            {titles[type as keyof typeof titles]}
+          </h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            className="text-gray-400 hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </Button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {type === 'task' && (
             <>
               <div>
-                <Label>Title</Label>
+                <Label className="text-gray-300">Title</Label>
                 <Input 
-                  value={taskForm.title}
-                  onChange={(e) => setTaskForm({...taskForm, title: e.target.value})}
+                  value={formData.title || ''}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
                   placeholder="Enter task title"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
                 />
               </div>
               <div>
-                <Label>Description</Label>
+                <Label className="text-gray-300">Description</Label>
                 <Textarea 
-                  value={taskForm.description}
-                  onChange={(e) => setTaskForm({...taskForm, description: e.target.value})}
+                  value={formData.description || ''}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
                   placeholder="Task description"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
               <div>
-                <Label>Priority</Label>
-                <Select value={taskForm.priority} onValueChange={(value) => setTaskForm({...taskForm, priority: value})}>
-                  <SelectTrigger>
+                <Label className="text-gray-300">Priority</Label>
+                <Select 
+                  value={formData.priority || 'medium'} 
+                  onValueChange={(value) => setFormData({...formData, priority: value})}
+                >
+                  <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -687,179 +1040,41 @@ export default function ModernCRM() {
                 </Select>
               </div>
               <div>
-                <Label>Due Date</Label>
+                <Label className="text-gray-300">Due Date</Label>
                 <Input 
                   type="date"
-                  value={taskForm.dueDate}
-                  onChange={(e) => setTaskForm({...taskForm, dueDate: e.target.value})}
+                  value={formData.dueDate || ''}
+                  onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
             </>
           )}
 
-          {createType === 'pjp' && (
-            <>
-              <div>
-                <Label>Planned Date</Label>
-                <Input 
-                  type="date"
-                  value={pjpForm.plannedDate}
-                  onChange={(e) => setPjpForm({...pjpForm, plannedDate: e.target.value})}
-                />
-              </div>
-              <div>
-                <Label>Location</Label>
-                <Input 
-                  value={pjpForm.location}
-                  onChange={(e) => setPjpForm({...pjpForm, location: e.target.value})}
-                  placeholder="Visit location"
-                />
-              </div>
-              <div>
-                <Label>Objective</Label>
-                <Textarea 
-                  value={pjpForm.objective}
-                  onChange={(e) => setPjpForm({...pjpForm, objective: e.target.value})}
-                  placeholder="Journey objective"
-                />
-              </div>
-            </>
-          )}
+          {/* Add more form fields for other types... */}
 
-          {createType === 'dealer' && (
-            <>
-              <div>
-                <Label>Name</Label>
-                <Input 
-                  value={dealerForm.name}
-                  onChange={(e) => setDealerForm({...dealerForm, name: e.target.value})}
-                  placeholder="Dealer name"
-                />
-              </div>
-              <div>
-                <Label>Type</Label>
-                <Select value={dealerForm.type} onValueChange={(value) => setDealerForm({...dealerForm, type: value})}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Dealer">Dealer</SelectItem>
-                    <SelectItem value="Sub Dealer">Sub Dealer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>Region</Label>
-                <Input 
-                  value={dealerForm.region}
-                  onChange={(e) => setDealerForm({...dealerForm, region: e.target.value})}
-                  placeholder="Region"
-                />
-              </div>
-              <div>
-                <Label>Phone Number</Label>
-                <Input 
-                  value={dealerForm.phoneNo}
-                  onChange={(e) => setDealerForm({...dealerForm, phoneNo: e.target.value})}
-                  placeholder="Phone number"
-                />
-              </div>
-            </>
-          )}
-
-          {createType === 'target' && (
-            <>
-              <div>
-                <Label>Target Amount</Label>
-                <Input 
-                  type="number"
-                  value={targetForm.targetAmount}
-                  onChange={(e) => setTargetForm({...targetForm, targetAmount: e.target.value})}
-                  placeholder="Target amount"
-                />
-              </div>
-              <div>
-                <Label>Achieved Amount</Label>
-                <Input 
-                  type="number"
-                  value={targetForm.achievedAmount}
-                  onChange={(e) => setTargetForm({...targetForm, achievedAmount: e.target.value})}
-                  placeholder="Achieved amount"
-                />
-              </div>
-              <div>
-                <Label>Period</Label>
-                <Input 
-                  value={targetForm.period}
-                  onChange={(e) => setTargetForm({...targetForm, period: e.target.value})}
-                  placeholder="e.g., Monthly, Quarterly"
-                />
-              </div>
-            </>
-          )}
-
-          <div className="flex space-x-2 pt-4">
-            <Button onClick={handleCreate} disabled={isLoading} className="flex-1">
-              {isLoading ? 'Creating...' : 'Create'}
+          <div className="flex space-x-3 pt-4">
+            <Button 
+              type="submit" 
+              disabled={isSubmitting} 
+              className="flex-1 bg-blue-600 hover:bg-blue-700"
+            >
+              {isSubmitting ? (
+                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+              ) : null}
+              {isSubmitting ? 'Creating...' : 'Create'}
             </Button>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+            <Button 
+              type="button"
+              variant="outline" 
+              onClick={onClose}
+              className="border-gray-600 text-gray-300 hover:bg-gray-700"
+            >
               Cancel
             </Button>
           </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+        </form>
+      </motion.div>
+    </motion.div>
   );
-
-  return (
-    <div className="h-screen flex flex-col bg-white max-w-md mx-auto relative">
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        {renderPage()}
-      </div>
-
-      {/* Bottom Navigation - Instagram Style */}
-      <div className="bg-white border-t border-gray-200 px-4 py-2 sticky bottom-0">
-        <div className="flex items-center justify-around">
-          <Button
-            variant={currentPage === 'home' ? 'default' : 'ghost'}
-            onClick={() => setCurrentPage('home')}
-            className="flex flex-col items-center space-y-1 p-2 rounded-lg"
-          >
-            <Home className="w-5 h-5" />
-            <span className="text-xs">Home</span>
-          </Button>
-          
-          <Button
-            variant={currentPage === 'ai' ? 'default' : 'ghost'}
-            onClick={() => setCurrentPage('ai')}
-            className="flex flex-col items-center space-y-1 p-2 rounded-lg"
-          >
-            <MessageCircle className="w-5 h-5" />
-            <span className="text-xs">AI</span>
-          </Button>
-          
-          <Button
-            variant={currentPage === 'journey' ? 'default' : 'ghost'}
-            onClick={() => setCurrentPage('journey')}
-            className="flex flex-col items-center space-y-1 p-2 rounded-lg"
-          >
-            <MapPin className="w-5 h-5" />
-            <span className="text-xs">Journey</span>
-          </Button>
-          
-          <Button
-            variant={currentPage === 'profile' ? 'default' : 'ghost'}
-            onClick={() => setCurrentPage('profile')}
-            className="flex flex-col items-center space-y-1 p-2 rounded-lg"
-          >
-            <User className="w-5 h-5" />
-            <span className="text-xs">Profile</span>
-          </Button>
-        </div>
-      </div>
-
-      <CreateModal />
-    </div>
-  );
-}
+};
