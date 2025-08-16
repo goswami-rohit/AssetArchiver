@@ -729,6 +729,8 @@ export function setupWebRoutes(app: Express) {
       const { userId, latitude, longitude, locationName, accuracy, speed, heading, altitude } = req.body;
       const selfieFile = req.file;
 
+      console.log('🔍 Punch-in request:', { userId, latitude, longitude }); // DEBUG
+
       if (!userId || !latitude || !longitude) {
         return res.status(400).json({ success: false, error: 'Missing required fields' });
       }
@@ -746,8 +748,8 @@ export function setupWebRoutes(app: Express) {
       const today = new Date().toISOString().split('T')[0];
       const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
 
-      // Use schema validation
-      const attendanceData = insertSalesmanAttendanceSchema.parse({
+      // ✅ ADD DEBUG: Check what's being parsed
+      const attendanceData = {
         userId: parseInt(userId),
         attendanceDate: today,
         locationName: locationName || geoCheck.officeName || 'Office',
@@ -761,15 +763,23 @@ export function setupWebRoutes(app: Express) {
         inTimeSpeed: speed ? speed.toString() : null,
         inTimeHeading: heading ? heading.toString() : null,
         inTimeAltitude: altitude ? altitude.toString() : null,
-      });
+      };
+
+      console.log('🔍 Attendance data to validate:', attendanceData); // DEBUG
+
+      // Use schema validation with better error handling
+      const validatedData = insertSalesmanAttendanceSchema.parse(attendanceData);
+      console.log('✅ Schema validation passed'); // DEBUG
 
       const newAttendance = await db.insert(salesmanAttendance)
         .values({
-          ...attendanceData,
+          ...validatedData,
           createdAt: new Date(),
           updatedAt: new Date()
         })
         .returning();
+
+      console.log('✅ Database insert successful'); // DEBUG
 
       res.json({
         success: true,
@@ -779,16 +789,17 @@ export function setupWebRoutes(app: Express) {
       });
 
     } catch (error) {
+      console.error('❌ Punch-in error:', error); // DETAILED DEBUG
       res.status(400).json({
         success: false,
-        error: 'Failed to punch in',
+        error: error instanceof Error ? error.message : 'Failed to punch in', // Show actual error
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
   app.post('/api/attendance/punch-out', upload.single('selfie'), async (req: MulterRequest, res: Response) => {
     try {
-      const { userId } = req.body;
+      const { userId, latitude, longitude, locationName, accuracy, speed, heading, altitude } = req.body;
       const selfieFile = req.file;
 
       if (!userId) {
@@ -796,41 +807,89 @@ export function setupWebRoutes(app: Express) {
       }
 
       const today = new Date().toISOString().split('T')[0];
-      // Find the most recent unpunched attendance record
-      const attendanceRecord = await db.select().from(salesmanAttendance)
+      const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
+
+      // Check if there's an unpunched record first (preferred behavior)
+      const unpunchedRecord = await db.select().from(salesmanAttendance)
         .where(and(
           eq(salesmanAttendance.userId, parseInt(userId)),
           eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp) // Only unpunched records
+          isNull(salesmanAttendance.outTimeTimestamp)
         ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp)) // Most recent first
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
         .limit(1);
 
-      if (!attendanceRecord || attendanceRecord.length === 0) {
-        return res.status(400).json({ success: false, error: 'No unpunched attendance record found' });
+      let result;
+
+      if (unpunchedRecord && unpunchedRecord.length > 0) {
+        // Update existing unpunched record
+        result = await db.update(salesmanAttendance)
+          .set({
+            outTimeTimestamp: new Date(),
+            outTimeImageCaptured: !!selfieFile,
+            outTimeImageUrl: selfieUrl,
+            outTimeLatitude: latitude ? latitude.toString() : null,
+            outTimeLongitude: longitude ? longitude.toString() : null,
+            outTimeAccuracy: accuracy ? accuracy.toString() : null,
+            outTimeSpeed: speed ? speed.toString() : null,
+            outTimeHeading: heading ? heading.toString() : null,
+            outTimeAltitude: altitude ? altitude.toString() : null,
+            updatedAt: new Date()
+          })
+          .where(eq(salesmanAttendance.id, unpunchedRecord[0].id))
+          .returning();
+
+        res.json({
+          success: true,
+          data: result[0],
+          message: 'Punched out successfully',
+          type: 'updated_existing'
+        });
+      } else {
+        // Create new standalone punch-out record
+        const newPunchOut = await db.insert(salesmanAttendance)
+          .values({
+            userId: parseInt(userId),
+            attendanceDate: today,
+            locationName: locationName || 'Office',
+            inTimeTimestamp: new Date(), // Same as out time for standalone punch-out
+            outTimeTimestamp: new Date(),
+            inTimeImageCaptured: false,
+            outTimeImageCaptured: !!selfieFile,
+            inTimeImageUrl: null,
+            outTimeImageUrl: selfieUrl,
+            inTimeLatitude: latitude ? latitude.toString() : null,
+            inTimeLongitude: longitude ? longitude.toString() : null,
+            outTimeLatitude: latitude ? latitude.toString() : null,
+            outTimeLongitude: longitude ? longitude.toString() : null,
+            inTimeAccuracy: accuracy ? accuracy.toString() : null,
+            inTimeSpeed: speed ? speed.toString() : null,
+            inTimeHeading: heading ? heading.toString() : null,
+            inTimeAltitude: altitude ? altitude.toString() : null,
+            outTimeAccuracy: accuracy ? accuracy.toString() : null,
+            outTimeSpeed: speed ? speed.toString() : null,
+            outTimeHeading: heading ? heading.toString() : null,
+            outTimeAltitude: altitude ? altitude.toString() : null,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          })
+          .returning();
+
+        res.json({
+          success: true,
+          data: newPunchOut[0],
+          message: 'Standalone punch-out created successfully',
+          type: 'new_standalone'
+        });
       }
 
-      const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
-
-      const updatedAttendance = await db.update(salesmanAttendance)
-        .set({
-          outTimeTimestamp: new Date(),
-          outTimeImageCaptured: !!selfieFile,
-          outTimeImageUrl: selfieUrl,
-          outTimeLatitude: req.body.latitude ? req.body.latitude.toString() : null,
-          outTimeLongitude: req.body.longitude ? req.body.longitude.toString() : null,
-          outTimeAccuracy: req.body.accuracy ? req.body.accuracy.toString() : null,
-          outTimeSpeed: req.body.speed ? req.body.speed.toString() : null,
-          outTimeHeading: req.body.heading ? req.body.heading.toString() : null,
-          outTimeAltitude: req.body.altitude ? req.body.altitude.toString() : null,
-          updatedAt: new Date()
-        })
-        .where(eq(salesmanAttendance.id, attendanceRecord[0].id))
-        .returning();
-
-      res.json({ success: true, data: updatedAttendance[0], message: 'Punched out successfully' });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to punch out' });
+      console.error('❌ Punch-out error:', error);
+      res.status(400).json({
+        success: false,
+        error: 'Failed to punch out',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
