@@ -11,6 +11,7 @@ import {
   competitionReports,
   geoTracking,
   dailyTasks,
+  dealerReportsAndScores,
   type User, 
   type InsertUser,
   type Company,
@@ -34,22 +35,30 @@ import {
   type GeoTracking,
   type InsertGeoTracking,
   type DailyTask,
-  type InsertDailyTask
+  type InsertDailyTask,
+  type DealerReportsAndScores,
+  type InsertDealerReportsAndScores
 } from "../shared/schema";
 import { db } from "./db";
-import { eq, and, gte, lte, desc, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lte, desc, asc, sql, isNull } from "drizzle-orm";
 
 export interface IStorage {
   // Company operations
   getCompany(id: number): Promise<Company | undefined>;
   getCompanyByAdminUserId(adminUserId: string): Promise<Company | undefined>;
+  getCompaniesByRegion(region: string): Promise<Company[]>;
   createCompany(insertCompany: InsertCompany): Promise<Company>;
   updateCompany(id: number, updates: Partial<InsertCompany>): Promise<Company>;
 
   // User operations
   getUser(id: number): Promise<User | undefined>;
   getUserByWorkosUserId(workosUserId: string): Promise<User | undefined>;
+  getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | undefined>;
   getUsersByCompanyId(companyId: number): Promise<User[]>;
+  getUsersByRegion(region: string): Promise<User[]>;
+  getUsersByArea(area: string): Promise<User[]>;
+  getUserHierarchy(userId: number): Promise<User[]>;
+  getDirectReports(managerId: number): Promise<User[]>;
   createUser(insertUser: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
 
@@ -57,12 +66,14 @@ export interface IStorage {
   getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined>;
   getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]>;
   getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]>;
+  getDailyVisitReportsByCompanyDateRange(companyId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]>;
   createDailyVisitReport(insertReport: InsertDailyVisitReport): Promise<DailyVisitReport>;
   updateDailyVisitReport(id: string, updates: Partial<InsertDailyVisitReport>): Promise<DailyVisitReport>;
 
   // Technical Visit Report operations
   getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined>;
   getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]>;
+  getTechnicalVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<TechnicalVisitReport[]>;
   createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport>;
   updateTechnicalVisitReport(id: string, updates: Partial<InsertTechnicalVisitReport>): Promise<TechnicalVisitReport>;
 
@@ -75,6 +86,9 @@ export interface IStorage {
   // Dealer operations
   getDealer(id: string): Promise<Dealer | undefined>;
   getDealersByUserId(userId: number): Promise<Dealer[]>;
+  getDealersByRegion(region: string): Promise<Dealer[]>;
+  getDealersByArea(area: string): Promise<Dealer[]>;
+  getSubDealers(parentDealerId: string): Promise<Dealer[]>;
   createDealer(insertDealer: InsertDealer): Promise<Dealer>;
   updateDealer(id: string, updates: Partial<InsertDealer>): Promise<Dealer>;
 
@@ -88,6 +102,7 @@ export interface IStorage {
   // Salesman Leave Application operations
   getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined>;
   getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]>;
+  getSalesmanLeaveApplicationsByStatus(status: string): Promise<SalesmanLeaveApplication[]>;
   createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication>;
   updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication>;
 
@@ -100,6 +115,7 @@ export interface IStorage {
   // Competition Report operations
   getCompetitionReport(id: string): Promise<CompetitionReport | undefined>;
   getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]>;
+  getCompetitionReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<CompetitionReport[]>;
   createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport>;
   updateCompetitionReport(id: string, updates: Partial<InsertCompetitionReport>): Promise<CompetitionReport>;
 
@@ -112,19 +128,33 @@ export interface IStorage {
   getDailyTask(id: string): Promise<DailyTask | undefined>;
   getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]>;
   getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]>;
+  getDailyTasksByStatus(status: string, companyId: number): Promise<DailyTask[]>;
   createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask>;
   updateDailyTask(id: string, updates: Partial<InsertDailyTask>): Promise<DailyTask>;
+  updateTaskStatus(taskId: string, status: string): Promise<DailyTask>;
+
+  // Dealer Reports and Scores operations
+  getDealerReportsAndScores(id: string): Promise<DealerReportsAndScores | undefined>;
+  getDealerReportsAndScoresByDealerId(dealerId: string): Promise<DealerReportsAndScores | undefined>;
+  createDealerReportsAndScores(insertScores: InsertDealerReportsAndScores): Promise<DealerReportsAndScores>;
+  updateDealerReportsAndScores(id: string, updates: Partial<InsertDealerReportsAndScores>): Promise<DealerReportsAndScores>;
 
   // Enhanced business methods
   authenticateUser(salesmanLoginId: string, password: string): Promise<User | null>;
-  getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | null>;
   trackLocation(userId: number, latitude: number, longitude: number): Promise<GeoTracking>;
   getLocationAnalytics(userId: number, period: string): Promise<any>;
   calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number;
+  punchIn(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance>;
+  punchOut(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance>;
+  getBusinessMetrics(companyId: number): Promise<any>;
+  assignTaskToUser(taskData: InsertDailyTask): Promise<DailyTask>;
 }
 
 export class DatabaseStorage implements IStorage {
-  // Company operations
+  // ========================================
+  // COMPANY OPERATIONS
+  // ========================================
+  
   async getCompany(id: number): Promise<Company | undefined> {
     const [company] = await db.select().from(companies).where(eq(companies.id, id));
     return company || undefined;
@@ -135,17 +165,27 @@ export class DatabaseStorage implements IStorage {
     return company || undefined;
   }
 
+  async getCompaniesByRegion(region: string): Promise<Company[]> {
+    return await db.select().from(companies).where(eq(companies.region, region));
+  }
+
   async createCompany(insertCompany: InsertCompany): Promise<Company> {
     const [company] = await db.insert(companies).values(insertCompany).returning();
     return company;
   }
 
   async updateCompany(id: number, updates: Partial<InsertCompany>): Promise<Company> {
-    const [company] = await db.update(companies).set(updates).where(eq(companies.id, id)).returning();
+    const [company] = await db.update(companies).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(companies.id, id)).returning();
     return company;
   }
 
-  // User operations
+  // ========================================
+  // USER OPERATIONS
+  // ========================================
+
   async getUser(id: number): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user || undefined;
@@ -156,8 +196,34 @@ export class DatabaseStorage implements IStorage {
     return user || undefined;
   }
 
+  async getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.salesmanLoginId, salesmanLoginId));
+    return user || undefined;
+  }
+
   async getUsersByCompanyId(companyId: number): Promise<User[]> {
     return await db.select().from(users).where(eq(users.companyId, companyId));
+  }
+
+  async getUsersByRegion(region: string): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.region, region));
+  }
+
+  async getUsersByArea(area: string): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.area, area));
+  }
+
+  async getUserHierarchy(userId: number): Promise<User[]> {
+    // Get all users who report to this user (recursively)
+    const hierarchy = await db
+      .select()
+      .from(users)
+      .where(eq(users.reportsToId, userId));
+    return hierarchy;
+  }
+
+  async getDirectReports(managerId: number): Promise<User[]> {
+    return await db.select().from(users).where(eq(users.reportsToId, managerId));
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -166,18 +232,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateUser(id: number, updates: Partial<InsertUser>): Promise<User> {
-    const [user] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    const [user] = await db.update(users).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(users.id, id)).returning();
     return user;
   }
 
-  // Daily Visit Report operations
+  // ========================================
+  // DAILY VISIT REPORT OPERATIONS
+  // ========================================
+
   async getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined> {
     const [report] = await db.select().from(dailyVisitReports).where(eq(dailyVisitReports.id, id));
     return report || undefined;
   }
 
   async getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]> {
-    return await db.select().from(dailyVisitReports).where(eq(dailyVisitReports.userId, userId)).orderBy(desc(dailyVisitReports.reportDate));
+    return await db.select().from(dailyVisitReports)
+      .where(eq(dailyVisitReports.userId, userId))
+      .orderBy(desc(dailyVisitReports.reportDate));
+  }
+
+  async getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
+    return await db.select().from(dailyVisitReports)
+      .where(and(
+        eq(dailyVisitReports.userId, userId),
+        gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
+        lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
+      ))
+      .orderBy(desc(dailyVisitReports.reportDate));
   }
 
   async getDailyVisitReportsByCompanyDateRange(companyId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
@@ -197,18 +281,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateDailyVisitReport(id: string, updates: Partial<InsertDailyVisitReport>): Promise<DailyVisitReport> {
-    const [report] = await db.update(dailyVisitReports).set(updates).where(eq(dailyVisitReports.id, id)).returning();
+    const [report] = await db.update(dailyVisitReports).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(dailyVisitReports.id, id)).returning();
     return report;
   }
 
-  // Technical Visit Report operations
+  // ========================================
+  // TECHNICAL VISIT REPORT OPERATIONS
+  // ========================================
+
   async getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined> {
     const [report] = await db.select().from(technicalVisitReports).where(eq(technicalVisitReports.id, id));
     return report || undefined;
   }
 
   async getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]> {
-    return await db.select().from(technicalVisitReports).where(eq(technicalVisitReports.userId, userId)).orderBy(desc(technicalVisitReports.reportDate));
+    return await db.select().from(technicalVisitReports)
+      .where(eq(technicalVisitReports.userId, userId))
+      .orderBy(desc(technicalVisitReports.reportDate));
+  }
+
+  async getTechnicalVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<TechnicalVisitReport[]> {
+    return await db.select().from(technicalVisitReports)
+      .where(and(
+        eq(technicalVisitReports.userId, userId),
+        gte(technicalVisitReports.reportDate, startDate.toISOString().split('T')[0]),
+        lte(technicalVisitReports.reportDate, endDate.toISOString().split('T')[0])
+      ))
+      .orderBy(desc(technicalVisitReports.reportDate));
   }
 
   async createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport> {
@@ -217,18 +319,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateTechnicalVisitReport(id: string, updates: Partial<InsertTechnicalVisitReport>): Promise<TechnicalVisitReport> {
-    const [report] = await db.update(technicalVisitReports).set(updates).where(eq(technicalVisitReports.id, id)).returning();
+    const [report] = await db.update(technicalVisitReports).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(technicalVisitReports.id, id)).returning();
     return report;
   }
 
-  // Permanent Journey Plan operations
+  // ========================================
+  // PERMANENT JOURNEY PLAN OPERATIONS
+  // ========================================
+
   async getPermanentJourneyPlan(id: string): Promise<PermanentJourneyPlan | undefined> {
     const [plan] = await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.id, id));
     return plan || undefined;
   }
 
   async getPermanentJourneyPlansByUserId(userId: number): Promise<PermanentJourneyPlan[]> {
-    return await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.userId, userId)).orderBy(desc(permanentJourneyPlans.planDate));
+    return await db.select().from(permanentJourneyPlans)
+      .where(eq(permanentJourneyPlans.userId, userId))
+      .orderBy(desc(permanentJourneyPlans.planDate));
   }
 
   async createPermanentJourneyPlan(insertPlan: InsertPermanentJourneyPlan): Promise<PermanentJourneyPlan> {
@@ -237,18 +347,44 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updatePermanentJourneyPlan(id: string, updates: Partial<InsertPermanentJourneyPlan>): Promise<PermanentJourneyPlan> {
-    const [plan] = await db.update(permanentJourneyPlans).set(updates).where(eq(permanentJourneyPlans.id, id)).returning();
+    const [plan] = await db.update(permanentJourneyPlans).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(permanentJourneyPlans.id, id)).returning();
     return plan;
   }
 
-  // Dealer operations
+  // ========================================
+  // DEALER OPERATIONS
+  // ========================================
+
   async getDealer(id: string): Promise<Dealer | undefined> {
     const [dealer] = await db.select().from(dealers).where(eq(dealers.id, id));
     return dealer || undefined;
   }
 
   async getDealersByUserId(userId: number): Promise<Dealer[]> {
-    return await db.select().from(dealers).where(eq(dealers.userId, userId)).orderBy(asc(dealers.name));
+    return await db.select().from(dealers)
+      .where(eq(dealers.userId, userId))
+      .orderBy(asc(dealers.name));
+  }
+
+  async getDealersByRegion(region: string): Promise<Dealer[]> {
+    return await db.select().from(dealers)
+      .where(eq(dealers.region, region))
+      .orderBy(asc(dealers.name));
+  }
+
+  async getDealersByArea(area: string): Promise<Dealer[]> {
+    return await db.select().from(dealers)
+      .where(eq(dealers.area, area))
+      .orderBy(asc(dealers.name));
+  }
+
+  async getSubDealers(parentDealerId: string): Promise<Dealer[]> {
+    return await db.select().from(dealers)
+      .where(eq(dealers.parentDealerId, parentDealerId))
+      .orderBy(asc(dealers.name));
   }
 
   async createDealer(insertDealer: InsertDealer): Promise<Dealer> {
@@ -257,18 +393,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateDealer(id: string, updates: Partial<InsertDealer>): Promise<Dealer> {
-    const [dealer] = await db.update(dealers).set(updates).where(eq(dealers.id, id)).returning();
+    const [dealer] = await db.update(dealers).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(dealers.id, id)).returning();
     return dealer;
   }
 
-  // Salesman Attendance operations
+  // ========================================
+  // SALESMAN ATTENDANCE OPERATIONS
+  // ========================================
+
   async getSalesmanAttendance(id: string): Promise<SalesmanAttendance | undefined> {
     const [attendance] = await db.select().from(salesmanAttendance).where(eq(salesmanAttendance.id, id));
     return attendance || undefined;
   }
 
   async getSalesmanAttendanceByUserId(userId: number): Promise<SalesmanAttendance[]> {
-    return await db.select().from(salesmanAttendance).where(eq(salesmanAttendance.userId, userId)).orderBy(desc(salesmanAttendance.attendanceDate));
+    return await db.select().from(salesmanAttendance)
+      .where(eq(salesmanAttendance.userId, userId))
+      .orderBy(desc(salesmanAttendance.attendanceDate));
   }
 
   async getSalesmanAttendanceByDate(userId: number, date: Date): Promise<SalesmanAttendance | undefined> {
@@ -286,18 +430,32 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSalesmanAttendance(id: string, updates: Partial<InsertSalesmanAttendance>): Promise<SalesmanAttendance> {
-    const [attendance] = await db.update(salesmanAttendance).set(updates).where(eq(salesmanAttendance.id, id)).returning();
+    const [attendance] = await db.update(salesmanAttendance).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(salesmanAttendance.id, id)).returning();
     return attendance;
   }
 
-  // Salesman Leave Application operations
+  // ========================================
+  // SALESMAN LEAVE APPLICATION OPERATIONS
+  // ========================================
+
   async getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined> {
     const [application] = await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.id, id));
     return application || undefined;
   }
 
   async getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]> {
-    return await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.userId, userId)).orderBy(desc(salesmanLeaveApplications.createdAt));
+    return await db.select().from(salesmanLeaveApplications)
+      .where(eq(salesmanLeaveApplications.userId, userId))
+      .orderBy(desc(salesmanLeaveApplications.createdAt));
+  }
+
+  async getSalesmanLeaveApplicationsByStatus(status: string): Promise<SalesmanLeaveApplication[]> {
+    return await db.select().from(salesmanLeaveApplications)
+      .where(eq(salesmanLeaveApplications.status, status))
+      .orderBy(desc(salesmanLeaveApplications.createdAt));
   }
 
   async createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication> {
@@ -306,18 +464,26 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication> {
-    const [application] = await db.update(salesmanLeaveApplications).set(updates).where(eq(salesmanLeaveApplications.id, id)).returning();
+    const [application] = await db.update(salesmanLeaveApplications).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(salesmanLeaveApplications.id, id)).returning();
     return application;
   }
 
-  // Client Report operations
+  // ========================================
+  // CLIENT REPORT OPERATIONS
+  // ========================================
+
   async getClientReport(id: string): Promise<ClientReport | undefined> {
     const [report] = await db.select().from(clientReports).where(eq(clientReports.id, id));
     return report || undefined;
   }
 
   async getClientReportsByUserId(userId: number): Promise<ClientReport[]> {
-    return await db.select().from(clientReports).where(eq(clientReports.userId, userId)).orderBy(desc(clientReports.createdAt));
+    return await db.select().from(clientReports)
+      .where(eq(clientReports.userId, userId))
+      .orderBy(desc(clientReports.createdAt));
   }
 
   async createClientReport(insertReport: InsertClientReport): Promise<ClientReport> {
@@ -326,18 +492,36 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateClientReport(id: string, updates: Partial<InsertClientReport>): Promise<ClientReport> {
-    const [report] = await db.update(clientReports).set(updates).where(eq(clientReports.id, id)).returning();
+    const [report] = await db.update(clientReports).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(clientReports.id, id)).returning();
     return report;
   }
 
-  // Competition Report operations
+  // ========================================
+  // COMPETITION REPORT OPERATIONS
+  // ========================================
+
   async getCompetitionReport(id: string): Promise<CompetitionReport | undefined> {
     const [report] = await db.select().from(competitionReports).where(eq(competitionReports.id, id));
     return report || undefined;
   }
 
   async getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]> {
-    return await db.select().from(competitionReports).where(eq(competitionReports.userId, userId)).orderBy(desc(competitionReports.reportDate));
+    return await db.select().from(competitionReports)
+      .where(eq(competitionReports.userId, userId))
+      .orderBy(desc(competitionReports.reportDate));
+  }
+
+  async getCompetitionReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<CompetitionReport[]> {
+    return await db.select().from(competitionReports)
+      .where(and(
+        eq(competitionReports.userId, userId),
+        gte(competitionReports.reportDate, startDate.toISOString().split('T')[0]),
+        lte(competitionReports.reportDate, endDate.toISOString().split('T')[0])
+      ))
+      .orderBy(desc(competitionReports.reportDate));
   }
 
   async createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport> {
@@ -346,11 +530,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateCompetitionReport(id: string, updates: Partial<InsertCompetitionReport>): Promise<CompetitionReport> {
-    const [report] = await db.update(competitionReports).set(updates).where(eq(competitionReports.id, id)).returning();
+    const [report] = await db.update(competitionReports).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(competitionReports.id, id)).returning();
     return report;
   }
 
-  // Geo Tracking operations
+  // ========================================
+  // GEO TRACKING OPERATIONS
+  // ========================================
+
   async getGeoTrackingRecords(userId: number, limit: number = 100): Promise<GeoTracking[]> {
     return await db.select().from(geoTracking)
       .where(eq(geoTracking.userId, userId))
@@ -373,18 +563,59 @@ export class DatabaseStorage implements IStorage {
     return record;
   }
 
-  // Daily Task operations
+  // ========================================
+  // DAILY TASK OPERATIONS
+  // ========================================
+
   async getDailyTask(id: string): Promise<DailyTask | undefined> {
     const [task] = await db.select().from(dailyTasks).where(eq(dailyTasks.id, id));
     return task || undefined;
   }
 
   async getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]> {
-    return await db.select().from(dailyTasks).where(eq(dailyTasks.userId, userId)).orderBy(desc(dailyTasks.taskDate));
+    return await db.select().from(dailyTasks)
+      .where(eq(dailyTasks.userId, userId))
+      .orderBy(desc(dailyTasks.taskDate));
   }
 
   async getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]> {
-    return await db.select().from(dailyTasks).where(eq(dailyTasks.assignedByUserId, userId)).orderBy(desc(dailyTasks.taskDate));
+    return await db.select().from(dailyTasks)
+      .where(eq(dailyTasks.assignedByUserId, userId))
+      .orderBy(desc(dailyTasks.taskDate));
+  }
+
+  async getDailyTasksByStatus(status: string, companyId: number): Promise<DailyTask[]> {
+    try {
+      const results = await db
+        .select({
+          id: dailyTasks.id,
+          createdAt: dailyTasks.createdAt,
+          updatedAt: dailyTasks.updatedAt,
+          status: dailyTasks.status,
+          userId: dailyTasks.userId,
+          visitType: dailyTasks.visitType,
+          description: dailyTasks.description,
+          siteName: dailyTasks.siteName,
+          assignedByUserId: dailyTasks.assignedByUserId,
+          taskDate: dailyTasks.taskDate,
+          relatedDealerId: dailyTasks.relatedDealerId,
+          pjpId: dailyTasks.pjpId
+        })
+        .from(dailyTasks)
+        .innerJoin(users, eq(dailyTasks.userId, users.id))
+        .where(
+          and(
+            eq(dailyTasks.status, status),
+            eq(users.companyId, companyId)
+          )
+        )
+        .orderBy(desc(dailyTasks.taskDate));
+
+      return results;
+    } catch (error) {
+      console.error('Error getting tasks by status:', error);
+      throw error;
+    }
   }
 
   async createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask> {
@@ -393,8 +624,56 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateDailyTask(id: string, updates: Partial<InsertDailyTask>): Promise<DailyTask> {
-    const [task] = await db.update(dailyTasks).set(updates).where(eq(dailyTasks.id, id)).returning();
+    const [task] = await db.update(dailyTasks).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(dailyTasks.id, id)).returning();
     return task;
+  }
+
+  async updateTaskStatus(taskId: string, status: string): Promise<DailyTask> {
+    try {
+      const [task] = await db
+        .update(dailyTasks)
+        .set({ 
+          status,
+          updatedAt: new Date()
+        })
+        .where(eq(dailyTasks.id, taskId))
+        .returning();
+      
+      return task;
+    } catch (error) {
+      console.error('Error updating task status:', error);
+      throw error;
+    }
+  }
+
+  // ========================================
+  // DEALER REPORTS AND SCORES OPERATIONS
+  // ========================================
+
+  async getDealerReportsAndScores(id: string): Promise<DealerReportsAndScores | undefined> {
+    const [scores] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.id, id));
+    return scores || undefined;
+  }
+
+  async getDealerReportsAndScoresByDealerId(dealerId: string): Promise<DealerReportsAndScores | undefined> {
+    const [scores] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.dealerId, dealerId));
+    return scores || undefined;
+  }
+
+  async createDealerReportsAndScores(insertScores: InsertDealerReportsAndScores): Promise<DealerReportsAndScores> {
+    const [scores] = await db.insert(dealerReportsAndScores).values(insertScores).returning();
+    return scores;
+  }
+
+  async updateDealerReportsAndScores(id: string, updates: Partial<InsertDealerReportsAndScores>): Promise<DealerReportsAndScores> {
+    const [scores] = await db.update(dealerReportsAndScores).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(dealerReportsAndScores.id, id)).returning();
+    return scores;
   }
 
   // ========================================
@@ -418,20 +697,6 @@ export class DatabaseStorage implements IStorage {
       return user || null;
     } catch (error) {
       console.error('Error authenticating user:', error);
-      throw error;
-    }
-  }
-
-  async getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | null> {
-    try {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.salesmanLoginId, salesmanLoginId))
-        .limit(1);
-      return user || null;
-    } catch (error) {
-      console.error('Error fetching user by salesman login ID:', error);
       throw error;
     }
   }
@@ -516,6 +781,7 @@ export class DatabaseStorage implements IStorage {
           outTimeLongitude: longitude.toString(),
           outTimeImageCaptured: !!photoUrl,
           outTimeImageUrl: photoUrl,
+          updatedAt: new Date()
         })
         .where(eq(salesmanAttendance.id, attendanceRecord.id))
         .returning();
@@ -640,21 +906,6 @@ export class DatabaseStorage implements IStorage {
   // ENHANCED REPORTING METHODS
   // ========================================
 
-  async getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
-    try {
-      return await db.select().from(dailyVisitReports)
-        .where(and(
-          eq(dailyVisitReports.userId, userId),
-          gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
-          lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
-        ))
-        .orderBy(desc(dailyVisitReports.reportDate));
-    } catch (error) {
-      console.error('Error getting daily visit reports by date range:', error);
-      throw error;
-    }
-  }
-
   async getBusinessMetrics(companyId: number): Promise<any> {
     try {
       // Get total users
@@ -718,58 +969,6 @@ export class DatabaseStorage implements IStorage {
       return task;
     } catch (error) {
       console.error('Error assigning task to user:', error);
-      throw error;
-    }
-  }
-
-  async getTasksByStatus(status: string, companyId: number): Promise<DailyTask[]> {
-    try {
-      const results = await db
-        .select({
-          id: dailyTasks.id,
-          createdAt: dailyTasks.createdAt,
-          updatedAt: dailyTasks.updatedAt,
-          status: dailyTasks.status,
-          userId: dailyTasks.userId,
-          visitType: dailyTasks.visitType,
-          description: dailyTasks.description,
-          siteName: dailyTasks.siteName,
-          assignedByUserId: dailyTasks.assignedByUserId,
-          taskDate: dailyTasks.taskDate,
-          relatedDealerId: dailyTasks.relatedDealerId,
-          pjpId: dailyTasks.pjpId
-        })
-        .from(dailyTasks)
-        .innerJoin(users, eq(dailyTasks.userId, users.id))
-        .where(
-          and(
-            eq(dailyTasks.status, status),
-            eq(users.companyId, companyId)
-          )
-        )
-        .orderBy(desc(dailyTasks.taskDate));
-      
-      return results;
-    } catch (error) {
-      console.error('Error getting tasks by status:', error);
-      throw error;
-    }
-  }
-
-  async updateTaskStatus(taskId: string, status: string): Promise<DailyTask> {
-    try {
-      const [task] = await db
-        .update(dailyTasks)
-        .set({ 
-          status,
-          updatedAt: new Date()
-        })
-        .where(eq(dailyTasks.id, taskId))
-        .returning();
-      
-      return task;
-    } catch (error) {
-      console.error('Error updating task status:', error);
       throw error;
     }
   }

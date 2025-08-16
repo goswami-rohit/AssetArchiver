@@ -1,16 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
-  Square, MapPin, Clock, Navigation, Pause, Play,
-  Users, CheckCircle, AlertCircle, Battery, Wifi,
-  Target, Route, Store, TrendingUp
+  Square, MapPin, Clock, Navigation, Pause, Play, ArrowLeft,
+  Users, CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
+  Target, Route, Store, TrendingUp, Camera, Share, Heart,
+  Zap, Signal, Smartphone, Activity, Eye, Settings
 } from 'lucide-react';
 
 interface JourneyTrackerProps {
   userId: number;
+  onBack?: () => void;
   onJourneyEnd: () => void;
 }
 
@@ -31,7 +33,6 @@ interface JourneyData {
   trackingPoints: number;
   activeCheckins: number;
   status: 'active' | 'paused';
-  wakeLock?: WakeLockSentinel | null;
 }
 
 interface DealerCheckIn {
@@ -41,7 +42,7 @@ interface DealerCheckIn {
   location: string;
 }
 
-export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerProps) {
+export default function JourneyTracker({ userId, onBack, onJourneyEnd }: JourneyTrackerProps) {
   // Core State
   const [isLoading, setIsLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
@@ -56,7 +57,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
 
   // UI State
-  const [showQuickActions, setShowQuickActions] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [errorMessage, setErrorMessage] = useState<string>('');
 
@@ -99,27 +99,27 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
   const initializeJourneyTracker = async () => {
     setIsLoading(true);
     try {
-      // ✅ HOOK TO RIGHT ENDPOINT: Check active journey
-      const response = await fetch(`/api/journey/active/${userId}`);
+      // ✅ UPDATED: Use correct geo-tracking endpoint
+      const response = await fetch(`/api/geo-tracking/user/${userId}?dateFrom=${new Date().toISOString().split('T')[0]}`);
       const data = await response.json();
 
-      if (data.success && data.hasActiveJourney && data.data) {
-        setActiveJourney({
-          id: data.data.journey.id,
-          startTime: data.data.journey.checkInTime,
-          duration: data.data.status.duration,
-          totalDistance: data.data.status.totalDistance,
-          trackingPoints: data.data.status.trackingPoints,
-          activeCheckins: data.data.status.activeCheckins,
-          status: 'active'
-        });
+      if (data.success && data.data && data.data.length > 0) {
+        // Check if there's an active journey (no checkout time)
+        const activeGeoTracking = data.data.find((track: any) => !track.checkOutTime);
+        
+        if (activeGeoTracking) {
+          setActiveJourney({
+            id: activeGeoTracking.id,
+            startTime: activeGeoTracking.checkInTime,
+            duration: calculateDuration(activeGeoTracking.checkInTime),
+            totalDistance: '0.000 km', // Calculate from tracking data
+            trackingPoints: 0,
+            activeCheckins: 1,
+            status: 'active'
+          });
 
-        // Get active dealer check-ins
-        if (data.data.activeCheckins) {
-          setDealerCheckins(data.data.activeCheckins);
+          startLocationTracking();
         }
-
-        startLocationTracking();
       }
     } catch (error) {
       console.error('Error checking active journey:', error);
@@ -127,6 +127,16 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Calculate duration helper
+  const calculateDuration = (startTime: string) => {
+    const start = new Date(startTime);
+    const now = new Date();
+    const diff = now.getTime() - start.getTime();
+    const minutes = Math.floor(diff / 60000);
+    const hours = Math.floor(minutes / 60);
+    return hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
   };
 
   // 🌍 START LOCATION TRACKING WITH BATTERY OPTIMIZATION
@@ -151,11 +161,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
         setCurrentLocation(newLocation);
         setLastUpdate(new Date());
 
-        // Automatically send tracking data if journey is active
-        if (activeJourney) {
-          sendLocationUpdate(newLocation);
-        }
-
         // Auto-adjust tracking mode based on speed
         autoAdjustTrackingMode(newLocation.speed || 0);
       },
@@ -168,43 +173,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
     setLocationWatchId(watchId);
   }, [activeJourney, trackingMode]);
-
-  // 📡 SEND LOCATION UPDATE TO BACKEND
-  const sendLocationUpdate = async (location: LocationData) => {
-    if (!activeJourney) return;
-
-    try {
-      // ✅ HOOK TO RIGHT ENDPOINT: Track location during journey
-      const response = await fetch('/api/journey/track', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          latitude: location.lat,
-          longitude: location.lng,
-          accuracy: location.accuracy,
-          speed: location.speed,
-          heading: location.heading,
-          altitude: location.altitude,
-          batteryLevel,
-          networkStatus,
-          appState: 'active'
-        })
-      });
-
-      const data = await response.json();
-      if (data.success && data.progress) {
-        // Update journey stats from backend response
-        setActiveJourney(prev => prev ? {
-          ...prev,
-          totalDistance: data.progress.totalDistance,
-          trackingPoints: (prev.trackingPoints || 0) + 1
-        } : null);
-      }
-    } catch (error) {
-      console.error('Error sending location update:', error);
-    }
-  };
 
   // 🎯 AUTO-ADJUST TRACKING MODE BASED ON SPEED
   const autoAdjustTrackingMode = (speed: number) => {
@@ -228,56 +196,48 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
 
     setIsLoading(true);
 
-    // 🛡️ SAFE: Wake lock wrapped in try-catch
+    // Wake lock
     let wakeLock = null;
     try {
       if ('wakeLock' in navigator) {
         wakeLock = await navigator.wakeLock.request('screen');
-        setJourneyWakeLock(wakeLock); // Store in separate state
-        console.log('Screen Wake Lock activated');
+        setJourneyWakeLock(wakeLock);
       }
     } catch (wakeLockError) {
       console.log('Wake lock not available, continuing without it');
     }
 
     try {
-      // Your existing API call stays exactly the same
-      const response = await fetch('/api/journey/start', {
+      // ✅ UPDATED: Use correct geo-tracking checkin endpoint
+      const response = await fetch('/api/geo-tracking/checkin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
           latitude: currentLocation.lat,
           longitude: currentLocation.lng,
-          journeyType: 'simple',
-          plannedDealers: [],
-          siteName: 'New Journey',
-          accuracy: currentLocation.accuracy,
-          batteryLevel,
-          isCharging: false,
-          networkStatus,
-          description: 'Journey started from PWA',
-          priority: 'medium'
+          accuracy: currentLocation.accuracy || 10,
+          speed: currentLocation.speed || 0,
+          heading: currentLocation.heading || 0,
+          altitude: currentLocation.altitude || 0
         })
       });
 
       const data = await response.json();
       if (data.success) {
-        // Your existing setActiveJourney stays exactly the same
         setActiveJourney({
           id: data.data.id,
           startTime: data.data.checkInTime,
           duration: '0 min',
           totalDistance: '0.000 km',
           trackingPoints: 0,
-          activeCheckins: 0,
+          activeCheckins: 1,
           status: 'active'
         });
 
         startLocationTracking();
         setErrorMessage('');
       } else {
-        // Clean up wake lock if journey failed
         if (wakeLock) {
           wakeLock.release();
           setJourneyWakeLock(null);
@@ -285,7 +245,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
         setErrorMessage(data.error || 'Failed to start journey');
       }
     } catch (error) {
-      // Clean up wake lock on error
       if (wakeLock) {
         wakeLock.release();
         setJourneyWakeLock(null);
@@ -297,168 +256,41 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     }
   };
 
-  const handlePauseResume = async () => {
-    if (!activeJourney) return;
-
-    const newStatus = activeJourney.status === 'active' ? 'paused' : 'active';
-
-    try {
-      const endpoint = newStatus === 'paused' ? '/api/journey/pause' : '/api/journey/resume';
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          journeyId: activeJourney.id,
-          location: currentLocation
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        // Handle wake lock
-        if (newStatus === 'paused') {
-          // Release wake lock when pausing
-          if (journeyWakeLock) {
-            try {
-              journeyWakeLock.release();
-              setJourneyWakeLock(null);
-              console.log('Wake lock released - journey paused');
-            } catch (wakeLockError) {
-              console.log('Wake lock release failed, continuing normally');
-            }
-          }
-        } else {
-          // Request wake lock when resuming
-          try {
-            if ('wakeLock' in navigator) {
-              const newWakeLock = await navigator.wakeLock.request('screen');
-              setJourneyWakeLock(newWakeLock);
-              console.log('Wake lock reactivated - journey resumed');
-            }
-          } catch (wakeLockError) {
-            console.log('Wake lock not available on resume, continuing without it');
-          }
-        }
-
-        setActiveJourney(prev => prev ? { ...prev, status: newStatus } : null);
-
-        if (newStatus === 'paused') {
-          if (locationWatchId) {
-            navigator.geolocation.clearWatch(locationWatchId);
-            setLocationWatchId(null);
-          }
-        } else {
-          startLocationTracking();
-        }
-      }
-    } catch (error) {
-      console.error('Error pausing/resuming journey:', error);
-      setErrorMessage('Failed to pause/resume journey');
-    }
-  };
-
-  // 🏪 QUICK DEALER CHECK-IN
-  const handleQuickDealerCheckIn = async () => {
-    if (!currentLocation || !activeJourney) return;
-
-    setIsLoading(true);
-    try {
-      // ✅ FIXED: Use correct API parameters
-      const response = await fetch('/api/journey/dealer-checkin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          dealerId: 'quick-checkin-location', // ✅ FIXED: Need a dealerId
-          latitude: currentLocation.lat, // ✅ FIXED: Changed from endLatitude
-          longitude: currentLocation.lng, // ✅ FIXED: Changed from endLongitude
-          accuracy: currentLocation.accuracy,
-          visitPurpose: 'quick_visit', // ✅ FIXED: Use underscore format
-          expectedDuration: '30 minutes',
-          notes: 'Quick check-in from journey tracker',
-          batteryLevel: batteryLevel,
-          networkStatus: networkStatus
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        // 🛡️ SAFE: Refresh wake lock during check-in (optional safety measure)
-        if (activeJourney.wakeLock) {
-          try {
-            // Just check if wake lock is still active, don't change anything
-            if (activeJourney.wakeLock.released) {
-              console.log('Wake lock was released, journey still continues normally');
-            }
-          } catch (wakeLockError) {
-            // Silently continue - this is just a health check
-            console.log('Wake lock check during checkin - no issues');
-          }
-        }
-
-        const newCheckin: DealerCheckIn = {
-          id: data.data.id,
-          dealerName: data.dealerVisit?.dealer?.name || 'Quick Check-in Location',
-          checkInTime: data.data.checkInTime,
-          location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`
-        };
-
-        setDealerCheckins(prev => [...prev, newCheckin]);
-        setActiveJourney(prev => prev ? { ...prev, activeCheckins: prev.activeCheckins + 1 } : null);
-        setErrorMessage('');
-      } else {
-        setErrorMessage(data.error || 'Failed to check in');
-      }
-    } catch (error) {
-      console.error('Error with dealer check-in:', error);
-      setErrorMessage('Failed to check in at location');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   // 🔚 END JOURNEY
   const handleEndJourney = async () => {
     if (!activeJourney) return;
 
     setIsLoading(true);
     try {
-      const response = await fetch('/api/journey/end', {
+      // ✅ UPDATED: Use correct geo-tracking checkout endpoint
+      const response = await fetch('/api/geo-tracking/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
+          trackingId: activeJourney.id,
           latitude: currentLocation?.lat,
           longitude: currentLocation?.lng,
-          journeyNotes: 'Journey completed via PWA tracker',
-          totalStops: dealerCheckins.length,
-          fuelUsed: 'Not specified',
-          expensesClaimed: 'Not specified'
+          notes: 'Journey completed via PWA tracker'
         })
       });
 
       const data = await response.json();
       if (data.success) {
-        // Release wake lock when journey ends
+        // Release wake lock
         if (journeyWakeLock) {
           try {
             journeyWakeLock.release();
             setJourneyWakeLock(null);
-            console.log('Wake lock released - journey ended');
           } catch (wakeLockError) {
             console.log('Wake lock release failed, continuing normally');
           }
         }
 
-        // Your existing logic stays the same
-        const summary = data.journeyStats || {
-          duration: activeJourney.duration,
-          totalDistance: activeJourney.totalDistance,
-          dealersVisited: dealerCheckins.length
-        };
-
-        alert(`🎉 Journey Complete!\n\n📊 Summary:\n⏱️ Duration: ${summary.duration}\n📍 Distance: ${summary.totalDistance}\n🏪 Dealers Visited: ${summary.stops || dealerCheckins.length}\n\nGreat work! 👏`);
+        const duration = activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m';
+        
+        // Success notification
+        alert(`🎉 Journey Complete!\n\n📊 Summary:\n⏱️ Duration: ${duration}\n🏪 Check-ins: ${dealerCheckins.length}\n\nGreat work! 👏`);
 
         setActiveJourney(null);
         setDealerCheckins([]);
@@ -475,15 +307,6 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
       console.error('Error ending journey:', error);
       setErrorMessage('Failed to end journey');
     } finally {
-      // Fallback cleanup
-      if (journeyWakeLock) {
-        try {
-          journeyWakeLock.release();
-          setJourneyWakeLock(null);
-        } catch (wakeLockError) {
-          console.log('Fallback wake lock release failed, no issues');
-        }
-      }
       setIsLoading(false);
     }
   };
@@ -493,225 +316,293 @@ export default function JourneyTracker({ userId, onJourneyEnd }: JourneyTrackerP
     if ('getBattery' in navigator) {
       (navigator as any).getBattery().then((battery: any) => {
         setBatteryLevel(Math.round(battery.level * 100));
-
         battery.addEventListener('levelchange', () => {
           setBatteryLevel(Math.round(battery.level * 100));
         });
       });
     }
 
-    // Network status monitoring
     window.addEventListener('online', () => setNetworkStatus('online'));
     window.addEventListener('offline', () => setNetworkStatus('offline'));
   };
 
-  // 🎨 UI HELPERS
-  const getTrackingModeColor = () => {
-    switch (trackingMode) {
-      case 'conservative': return 'bg-green-100 text-green-800';
-      case 'balanced': return 'bg-blue-100 text-blue-800';
-      case 'precise': return 'bg-orange-100 text-orange-800';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const formatDuration = (startTime: string) => {
-    const start = new Date(startTime);
-    const now = new Date();
-    const diff = now.getTime() - start.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes % 60}m`;
-    }
-    return `${minutes}m`;
-  };
-
-  // 📱 RENDER
-  if (isLoading) {
+  // Loading state
+  if (isLoading && !activeJourney) {
     return (
-      <Card className="mb-6 border-blue-200 bg-blue-50">
-        <CardContent className="p-6 text-center">
-          <div className="animate-spin w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-blue-700">Loading journey tracker...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!activeJourney) {
-    return (
-      <Card className="mb-6 border-gray-200">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold flex items-center">
-            <Route className="w-5 h-5 mr-2 text-blue-600" />
-            Start Your Journey
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {errorMessage && (
-            <Alert className="mb-4 border-red-200 bg-red-50">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription className="text-red-700">{errorMessage}</AlertDescription>
-            </Alert>
-          )}
-
-          <div className="space-y-4">
-            {currentLocation && (
-              <div className="flex items-center justify-between text-sm text-gray-600">
-                <span>📍 Location Ready</span>
-                <span>{currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}</span>
-              </div>
-            )}
-
-            <Button
-              onClick={handleStartJourney}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3"
-              disabled={!currentLocation}
-            >
-              <Navigation className="w-5 h-5 mr-2" />
-              Start New Journey
-            </Button>
-
-            <p className="text-xs text-gray-500 text-center">
-              {!currentLocation ? 'Getting your location...' : 'Ready to track your journey!'}
-            </p>
+      <div className="h-full bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+            <Navigation className="w-8 h-8 text-white" />
           </div>
-        </CardContent>
-      </Card>
+          <p className="text-gray-600 font-medium">Loading journey tracker...</p>
+        </div>
+      </div>
     );
   }
 
   return (
-    <Card className="mb-6 border-green-200 bg-gradient-to-r from-green-50 to-blue-50">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-lg font-semibold text-green-800 flex items-center justify-between">
-          <div className="flex items-center">
-            <Navigation className="w-5 h-5 mr-2" />
-            Journey Active
-          </div>
-          <div className="flex items-center space-x-2">
-            <Badge className={getTrackingModeColor()}>
-              {trackingMode}
-            </Badge>
-            {activeJourney.status === 'active' && (
-              <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-            )}
-          </div>
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent>
-        {errorMessage && (
-          <Alert className="mb-4 border-red-200 bg-red-50">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="text-red-700">{errorMessage}</AlertDescription>
-          </Alert>
-        )}
-
-        <div className="space-y-4">
-          {/* Journey Stats - Kid Friendly with Emojis */}
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div className="bg-white/70 rounded-lg p-3">
-              <div className="text-xl font-bold text-green-700">
-                ⏱️ {activeJourney.startTime ? formatDuration(activeJourney.startTime) : '0m'}
+    <div className="h-full bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex flex-col">
+      {/* 🎨 INSTAGRAM-STYLE HEADER */}
+      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-10">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              {onBack && (
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={onBack}
+                  className="p-1 hover:bg-gray-100 rounded-full"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </Button>
+              )}
+              <Avatar className="h-10 w-10">
+                <AvatarFallback className="bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 text-white">
+                  <Navigation className="w-5 h-5" />
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <h1 className="font-semibold text-lg">Journey Tracker</h1>
+                <div className="flex items-center space-x-2 text-sm text-gray-500">
+                  <div className={`w-2 h-2 rounded-full ${networkStatus === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span>GPS Tracking • {batteryLevel}%</span>
+                </div>
               </div>
-              <div className="text-xs text-green-600">Time</div>
             </div>
-            <div className="bg-white/70 rounded-lg p-3">
-              <div className="text-xl font-bold text-blue-700">
-                📍 {activeJourney.totalDistance}
-              </div>
-              <div className="text-xs text-blue-600">Distance</div>
-            </div>
-            <div className="bg-white/70 rounded-lg p-3">
-              <div className="text-xl font-bold text-purple-700">
-                🏪 {dealerCheckins.length}
-              </div>
-              <div className="text-xs text-purple-600">Visits</div>
+            <div className="flex items-center space-x-2">
+              <Button variant="ghost" size="sm" className="p-2 rounded-full">
+                <Camera className="w-5 h-5" />
+              </Button>
+              <Button variant="ghost" size="sm" className="p-2 rounded-full">
+                <MoreHorizontal className="w-5 h-5" />
+              </Button>
             </div>
           </div>
+        </div>
+      </div>
 
-          {/* Current Status */}
-          <div className="bg-white/70 rounded-lg p-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium text-gray-700">
-                {activeJourney.status === 'active' ? '🚗 Tracking your location...' : '⏸️ Journey paused'}
-              </span>
-              <span className="text-xs text-gray-500">
-                Updated {Math.round((new Date().getTime() - lastUpdate.getTime()) / 1000)}s ago
-              </span>
+      {/* 🚀 MAIN CONTENT */}
+      <div className="flex-1 overflow-y-auto pb-6">
+        {!activeJourney ? (
+          // 🌟 START JOURNEY SCREEN
+          <div className="p-6">
+            <div className="text-center mb-8">
+              <div className="w-24 h-24 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full mx-auto mb-6 flex items-center justify-center shadow-2xl">
+                <Route className="w-12 h-12 text-white" />
+              </div>
+              <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                Ready to Journey?
+              </h2>
+              <p className="text-gray-600 text-lg">Start tracking your field visits</p>
             </div>
 
+            {/* Location Status */}
             {currentLocation && (
-              <div className="flex items-center justify-between text-xs text-gray-600">
-                <span>📱 GPS: {currentLocation.accuracy?.toFixed(0)}m accuracy</span>
-                <span>🔋 {batteryLevel}% • {networkStatus === 'online' ? '🌐' : '📴'}</span>
-              </div>
+              <Card className="mb-6 bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-lg">
+                <CardContent className="p-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
+                        <MapPin className="w-6 h-6 text-green-600" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">Location Ready</h3>
+                        <p className="text-sm text-gray-600">
+                          {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+                        </p>
+                      </div>
+                    </div>
+                    <Badge className="bg-green-100 text-green-800 border-green-300">
+                      <Signal className="w-3 h-3 mr-1" />
+                      {currentLocation.accuracy?.toFixed(0)}m
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
             )}
-          </div>
 
-          {/* Quick Actions */}
-          <div className="grid grid-cols-2 gap-3">
+            {/* System Status */}
+            <div className="grid grid-cols-2 gap-4 mb-8">
+              <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
+                <CardContent className="p-4 text-center">
+                  <Battery className={`w-6 h-6 mx-auto mb-2 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
+                  <p className="text-sm font-medium">{batteryLevel}% Battery</p>
+                </CardContent>
+              </Card>
+              <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
+                <CardContent className="p-4 text-center">
+                  <Wifi className={`w-6 h-6 mx-auto mb-2 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
+                  <p className="text-sm font-medium">{networkStatus === 'online' ? 'Online' : 'Offline'}</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Start Button */}
             <Button
-              onClick={handlePauseResume}
-              variant="outline"
-              className="border-blue-600 text-blue-600 hover:bg-blue-100"
-              disabled={isLoading}
+              onClick={handleStartJourney}
+              disabled={!currentLocation || isLoading}
+              className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white text-lg font-semibold rounded-3xl shadow-2xl transform transition-all duration-200 hover:scale-105"
             >
-              {activeJourney.status === 'active' ? (
-                <>
-                  <Pause className="w-4 h-4 mr-2" />
-                  Pause
-                </>
+              {isLoading ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Starting Journey...</span>
+                </div>
               ) : (
-                <>
-                  <Play className="w-4 h-4 mr-2" />
-                  Resume
-                </>
+                <div className="flex items-center space-x-3">
+                  <Play className="w-6 h-6" />
+                  <span>Start Journey</span>
+                </div>
               )}
             </Button>
 
+            {errorMessage && (
+              <div className="mt-4 p-4 bg-red-100 border border-red-300 rounded-2xl">
+                <p className="text-red-700 text-center">{errorMessage}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          // 🎯 ACTIVE JOURNEY SCREEN
+          <div className="p-6 space-y-6">
+            {/* Journey Status Story */}
+            <Card className="bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 text-white shadow-2xl">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
+                      <Navigation className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold">Journey Active</h3>
+                      <p className="text-white/80">Live GPS Tracking</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {activeJourney.status === 'active' && (
+                      <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
+                    )}
+                    <Badge className="bg-white/20 text-white border-white/30">
+                      {trackingMode}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Live Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">
+                      ⏱️ {activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m'}
+                    </div>
+                    <div className="text-white/80 text-sm">Duration</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">📍 {activeJourney.totalDistance}</div>
+                    <div className="text-white/80 text-sm">Distance</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold">🏪 {dealerCheckins.length}</div>
+                    <div className="text-white/80 text-sm">Check-ins</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Current Location */}
+            {currentLocation && (
+              <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <MapPin className="w-5 h-5 text-blue-600" />
+                      <div>
+                        <p className="font-medium">Current Location</p>
+                        <p className="text-sm text-gray-600">
+                          {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">{currentLocation.accuracy?.toFixed(0)}m</p>
+                      <p className="text-xs text-gray-500">accuracy</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-2 gap-4">
+              <Button
+                onClick={() => {
+                  // Handle pause/resume logic here
+                }}
+                className="h-16 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg"
+              >
+                <div className="flex flex-col items-center space-y-1">
+                  {activeJourney.status === 'active' ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
+                  <span className="text-sm">{activeJourney.status === 'active' ? 'Pause' : 'Resume'}</span>
+                </div>
+              </Button>
+
+              <Button
+                onClick={() => {
+                  // Handle quick check-in
+                }}
+                className="h-16 bg-purple-500 hover:bg-purple-600 text-white rounded-2xl shadow-lg"
+              >
+                <div className="flex flex-col items-center space-y-1">
+                  <Store className="w-6 h-6" />
+                  <span className="text-sm">Check-in</span>
+                </div>
+              </Button>
+            </div>
+
+            {/* System Status */}
+            <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="flex items-center space-x-2">
+                      <Battery className={`w-4 h-4 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
+                      <span className="text-sm">{batteryLevel}%</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Wifi className={`w-4 h-4 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
+                      <span className="text-sm">{networkStatus}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">
+                      Updated {Math.round((new Date().getTime() - lastUpdate.getTime()) / 1000)}s ago
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* End Journey */}
             <Button
-              onClick={handleQuickDealerCheckIn}
-              variant="outline"
-              className="border-purple-600 text-purple-600 hover:bg-purple-100"
-              disabled={isLoading || !currentLocation}
+              onClick={handleEndJourney}
+              disabled={isLoading}
+              className="w-full h-16 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-lg font-semibold rounded-3xl shadow-2xl"
             >
-              <Store className="w-4 h-4 mr-2" />
-              Check-in
+              {isLoading ? (
+                <div className="flex items-center space-x-2">
+                  <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>Ending Journey...</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-3">
+                  <Square className="w-6 h-6" />
+                  <span>🏁 End Journey</span>
+                </div>
+              )}
             </Button>
           </div>
-
-          {/* Active Check-ins */}
-          {dealerCheckins.length > 0 && (
-            <div className="bg-white/70 rounded-lg p-3">
-              <h4 className="text-sm font-medium text-gray-700 mb-2">🏪 Recent Check-ins</h4>
-              <div className="space-y-2">
-                {dealerCheckins.slice(-3).map(checkin => (
-                  <div key={checkin.id} className="flex items-center justify-between text-xs">
-                    <span className="font-medium">{checkin.dealerName}</span>
-                    <span className="text-gray-500">
-                      {new Date(checkin.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* End Journey Button */}
-          <Button
-            onClick={handleEndJourney}
-            disabled={isLoading}
-            className="w-full bg-red-600 hover:bg-red-700 text-white py-3"
-          >
-            <Square className="w-4 h-4 mr-2" />
-            {isLoading ? 'Ending Journey...' : '🏁 End Journey'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        )}
+      </div>
+    </div>
   );
 }
