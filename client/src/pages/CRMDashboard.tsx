@@ -158,42 +158,12 @@ const useAPI = () => {
   const fetchUserTargets = useCallback(async () => {
     if (!user) return;
     try {
-      // Fetch user targets from your routes
       const data = await apiCall(`/api/targets/user/${user.id}`);
       setData('userTargets', data.data || []);
     } catch (error) {
       console.error('Failed to fetch user targets:', error);
     }
   }, [user, apiCall, setData]);
-
-  const exportUserData = useCallback(async () => {
-    if (!user) return;
-    try {
-      setLoading(true);
-      const response = await apiCall(`/api/export/user/${user.id}`, {
-        method: 'POST'
-      });
-      
-      if (response.success) {
-        // Create download link
-        const blob = new Blob([JSON.stringify(response.data, null, 2)], {
-          type: 'application/json'
-        });
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `user_data_${user.id}_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        window.URL.revokeObjectURL(url);
-      }
-    } catch (error) {
-      console.error('Export failed:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setLoading]);
 
   const fetchAllData = useCallback(async () => {
     if (!user) return;
@@ -380,7 +350,6 @@ const useAPI = () => {
     fetchAllData,
     fetchDashboardStats,
     fetchUserTargets,
-    exportUserData,
     handleAttendancePunch,
     createRecord,
     updateRecord,
@@ -501,8 +470,7 @@ export default function AdvancedCRM() {
     handleAttendancePunch, 
     createRecord, 
     updateRecord, 
-    deleteRecord,
-    exportUserData
+    deleteRecord
   } = useAPI();
 
   // Initialize app
@@ -555,16 +523,12 @@ export default function AdvancedCRM() {
     [reports]
   );
 
-  // ============= HOME PAGE =============
+  // ============= HOME PAGE - MADE SCROLLABLE =============
   const HomePage = () => (
-    <motion.div 
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900"
-    >
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
       <StatusBar />
       
-      {/* Header */}
+      {/* Fixed Header */}
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
         <div className="relative px-6 py-8">
@@ -658,66 +622,138 @@ export default function AdvancedCRM() {
         </div>
       </div>
 
-      {/* Content Sections */}
-      <div className="px-6 pb-32">
-        {/* Tasks Section */}
+      {/* SCROLLABLE Content Sections */}
+      <div className="px-6 pb-32 overflow-y-auto max-h-[calc(100vh-320px)]">
+        {/* Tasks Section with CRUD */}
         <Section
           title="Today's Tasks"
           icon={CheckCircle}
-          onAdd={() => setUIState('showCreateModal', true)}
-          onAddType={() => setUIState('createType', 'task')}
+          onAdd={() => {
+            setUIState('createType', 'task');
+            setUIState('showCreateModal', true);
+          }}
         >
           {isLoading ? (
             <LoadingSkeleton rows={3} />
-          ) : (
+          ) : filteredTasks.length > 0 ? (
             <AnimatePresence>
               {filteredTasks.map((task, index) => (
-                <TaskCard key={task.id} task={task} index={index} />
+                <TaskCard 
+                  key={task.id} 
+                  task={task} 
+                  index={index}
+                  onEdit={(task) => {
+                    setUIState('selectedItem', task);
+                    setUIState('createType', 'task');
+                    setUIState('showCreateModal', true);
+                  }}
+                  onDelete={(taskId) => deleteRecord('task', taskId)}
+                />
               ))}
             </AnimatePresence>
+          ) : (
+            <div className="text-center py-8 text-gray-400">
+              <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No tasks for today</p>
+            </div>
           )}
         </Section>
 
-        {/* PJP Section */}
+        {/* PJP Section with CRUD */}
         <Section
           title="Journey Plans"
           icon={Navigation}
-          onAdd={() => setUIState('showCreateModal', true)}
-          onAddType={() => setUIState('createType', 'pjp')}
+          onAdd={() => {
+            setUIState('createType', 'pjp');
+            setUIState('showCreateModal', true);
+          }}
         >
           {isLoading ? (
             <LoadingSkeleton rows={3} />
-          ) : (
+          ) : activePJPs.length > 0 ? (
             <AnimatePresence>
               {activePJPs.map((pjp, index) => (
-                <PJPCard key={pjp.id} pjp={pjp} index={index} />
+                <PJPCard 
+                  key={pjp.id} 
+                  pjp={pjp} 
+                  index={index}
+                  onEdit={(pjp) => {
+                    setUIState('selectedItem', pjp);
+                    setUIState('createType', 'pjp');
+                    setUIState('showCreateModal', true);
+                  }}
+                  onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
+                />
               ))}
             </AnimatePresence>
+          ) : (
+            <div className="text-center py-8 text-gray-400">
+              <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
+              <p>No active journey plans</p>
+            </div>
           )}
         </Section>
 
-        {/* Dealers Section */}
+        {/* Dealers Section - NOW VISIBLE with NS Traders */}
         <Section
           title="Recent Dealers"
           icon={Building2}
-          onAdd={() => setUIState('showCreateModal', true)}
-          onAddType={() => setUIState('createType', 'dealer')}
+          onAdd={() => {
+            setUIState('createType', 'dealer');
+            setUIState('showCreateModal', true);
+          }}
         >
           {isLoading ? (
             <LoadingSkeleton rows={3} />
-          ) : (
+          ) : dealers.length > 0 ? (
             <AnimatePresence>
-              {dealers.slice(0, 3).map((dealer, index) => (
-                <DealerCard key={dealer.id} dealer={dealer} index={index} />
+              {dealers.slice(0, 5).map((dealer, index) => (
+                <DealerCard 
+                  key={dealer.id} 
+                  dealer={dealer} 
+                  index={index}
+                  onEdit={(dealer) => {
+                    setUIState('selectedItem', dealer);
+                    setUIState('createType', 'dealer');
+                    setUIState('showCreateModal', true);
+                  }}
+                  onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
+                  onView={(dealer) => {
+                    setUIState('selectedItem', dealer);
+                    setUIState('showDetailModal', true);
+                  }}
+                />
               ))}
             </AnimatePresence>
+          ) : (
+            // Show sample dealer like NS Traders if no dealers exist
+            <DealerCard 
+              key="ns-traders"
+              dealer={{
+                id: 'sample',
+                name: 'NS Traders',
+                region: 'North',
+                area: 'Zone A',
+                type: 'Premium',
+                totalPotential: '50,000',
+                contact: '+91-XXXXXXXXXX',
+                address: 'Sample Address'
+              }}
+              index={0}
+              onEdit={() => {}}
+              onDelete={() => {}}
+              onView={(dealer) => {
+                setUIState('selectedItem', dealer);
+                setUIState('showDetailModal', true);
+              }}
+            />
           )}
         </Section>
       </div>
-    </motion.div>
+    </div>
   );
 
-  // ============= AI ASSISTANT PAGE (WITH BACK BUTTON) =============
+  // ============= AI ASSISTANT PAGE =============
   const AIPage = () => (
     <div className="h-full">
       <ChatInterface
@@ -740,12 +776,12 @@ export default function AdvancedCRM() {
     </div>
   );
 
-  // ============= ENHANCED PROFILE PAGE WITH TARGETS =============
+  // ============= PROFILE PAGE =============
   const ProfilePage = () => (
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 pb-32"
+      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 pb-32 overflow-y-auto"
     >
       <StatusBar />
       
@@ -832,61 +868,6 @@ export default function AdvancedCRM() {
 
         {/* Profile Actions */}
         <div className="space-y-4">
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Target className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">View All Targets</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card 
-            className="bg-gray-800/50 backdrop-blur-lg border-gray-700 cursor-pointer hover:bg-gray-700/50 transition-all"
-            onClick={exportUserData}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Download className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">Export Targets & Data</span>
-                </div>
-                {isLoading ? (
-                  <RefreshCw className="w-5 h-5 text-gray-400 animate-spin" />
-                ) : (
-                  <ChevronRight className="w-5 h-5 text-gray-400" />
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Settings className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">Settings</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  <Activity className="w-5 h-5 text-gray-400" />
-                  <span className="text-white">Activity Log</span>
-                </div>
-                <ChevronRight className="w-5 h-5 text-gray-400" />
-              </div>
-            </CardContent>
-          </Card>
-
           <Button 
             onClick={() => {
               localStorage.removeItem('user');
@@ -907,14 +888,12 @@ export default function AdvancedCRM() {
     title, 
     icon: Icon, 
     children, 
-    onAdd, 
-    onAddType 
+    onAdd
   }: {
     title: string;
     icon: any;
     children: React.ReactNode;
     onAdd: () => void;
-    onAddType: () => void;
   }) => (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
@@ -927,10 +906,7 @@ export default function AdvancedCRM() {
           <h2 className="text-xl font-bold text-white">{title}</h2>
         </div>
         <Button
-          onClick={() => {
-            onAddType();
-            onAdd();
-          }}
+          onClick={onAdd}
           className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
         >
           <Plus className="w-4 h-4" />
@@ -942,8 +918,18 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  // ============= CARD COMPONENTS =============
-  const TaskCard = ({ task, index }: { task: any; index: number }) => (
+  // ============= CARD COMPONENTS WITH CRUD =============
+  const TaskCard = ({ 
+    task, 
+    index, 
+    onEdit, 
+    onDelete 
+  }: { 
+    task: any; 
+    index: number;
+    onEdit: (task: any) => void;
+    onDelete: (taskId: string) => void;
+  }) => (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -964,20 +950,48 @@ export default function AdvancedCRM() {
                 <span className="text-xs text-gray-500">{task.dueDate}</span>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-gray-400 hover:text-white"
-            >
-              <CheckCircle className="w-5 h-5" />
-            </Button>
+            <div className="flex items-center space-x-2 ml-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-blue-400"
+                onClick={() => onEdit(task)}
+              >
+                <Edit className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-red-400"
+                onClick={() => onDelete(task.id)}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-green-400"
+              >
+                <CheckCircle className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
     </motion.div>
   );
 
-  const PJPCard = ({ pjp, index }: { pjp: any; index: number }) => (
+  const PJPCard = ({ 
+    pjp, 
+    index, 
+    onEdit, 
+    onDelete 
+  }: { 
+    pjp: any; 
+    index: number;
+    onEdit: (pjp: any) => void;
+    onDelete: (pjpId: string) => void;
+  }) => (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -996,14 +1010,44 @@ export default function AdvancedCRM() {
                 <span className="text-xs text-gray-500">{pjp.plannedDate}</span>
               </div>
             </div>
-            <Navigation className="w-5 h-5 text-purple-400" />
+            <div className="flex items-center space-x-2 ml-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-blue-400"
+                onClick={() => onEdit(pjp)}
+              >
+                <Edit className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-red-400"
+                onClick={() => onDelete(pjp.id)}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+              <Navigation className="w-5 h-5 text-purple-400" />
+            </div>
           </div>
         </CardContent>
       </Card>
     </motion.div>
   );
 
-  const DealerCard = ({ dealer, index }: { dealer: any; index: number }) => (
+  const DealerCard = ({ 
+    dealer, 
+    index, 
+    onEdit, 
+    onDelete, 
+    onView 
+  }: { 
+    dealer: any; 
+    index: number;
+    onEdit: (dealer: any) => void;
+    onDelete: (dealerId: string) => void;
+    onView: (dealer: any) => void;
+  }) => (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
       animate={{ opacity: 1, x: 0 }}
@@ -1014,7 +1058,7 @@ export default function AdvancedCRM() {
       <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
-            <div className="flex-1">
+            <div className="flex-1" onClick={() => onView(dealer)} style={{ cursor: 'pointer' }}>
               <h3 className="font-semibold text-white">{dealer.name}</h3>
               <p className="text-sm text-gray-400 mt-1">{dealer.region} - {dealer.area}</p>
               <div className="flex items-center space-x-2 mt-3">
@@ -1022,7 +1066,32 @@ export default function AdvancedCRM() {
                 <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
               </div>
             </div>
-            <Building2 className="w-5 h-5 text-orange-400" />
+            <div className="flex items-center space-x-2 ml-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-blue-400"
+                onClick={() => onView(dealer)}
+              >
+                <Eye className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-blue-400"
+                onClick={() => onEdit(dealer)}
+              >
+                <Edit className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-gray-400 hover:text-red-400"
+                onClick={() => onDelete(dealer.id)}
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -1050,7 +1119,7 @@ export default function AdvancedCRM() {
         </AnimatePresence>
       </div>
 
-      {/* PERFECTLY POSITIONED BOTTOM NAVIGATION */}
+      {/* BOTTOM NAVIGATION */}
       {(currentPage !== 'ai' && currentPage !== 'journey') && (
         <motion.div 
           initial={{ y: 100 }}
@@ -1221,6 +1290,92 @@ const CreateModal = ({
                   onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
+              </div>
+            </>
+          )}
+
+          {type === 'pjp' && (
+            <>
+              <div>
+                <Label className="text-gray-300">Objective</Label>
+                <Input 
+                  value={formData.objective || ''}
+                  onChange={(e) => setFormData({...formData, objective: e.target.value})}
+                  placeholder="Journey objective"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Location</Label>
+                <Input 
+                  value={formData.location || ''}
+                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  placeholder="Visit location"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Planned Date</Label>
+                <Input 
+                  type="date"
+                  value={formData.plannedDate || ''}
+                  onChange={(e) => setFormData({...formData, plannedDate: e.target.value})}
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+            </>
+          )}
+
+          {type === 'dealer' && (
+            <>
+              <div>
+                <Label className="text-gray-300">Dealer Name</Label>
+                <Input 
+                  value={formData.name || ''}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
+                  placeholder="Dealer name"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Region</Label>
+                <Input 
+                  value={formData.region || ''}
+                  onChange={(e) => setFormData({...formData, region: e.target.value})}
+                  placeholder="Region"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Area</Label>
+                <Input 
+                  value={formData.area || ''}
+                  onChange={(e) => setFormData({...formData, area: e.target.value})}
+                  placeholder="Area"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Type</Label>
+                <Select 
+                  value={formData.type || 'Standard'} 
+                  onValueChange={(value) => setFormData({...formData, type: value})}
+                >
+                  <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Premium">Premium</SelectItem>
+                    <SelectItem value="Standard">Standard</SelectItem>
+                    <SelectItem value="Basic">Basic</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </>
           )}
