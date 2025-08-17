@@ -523,231 +523,279 @@ export default function AdvancedCRM() {
     [reports]
   );
 
-  // ============= HOME PAGE - FIXED FULL PAGE SCROLLABLE =============
+  // ============= HOME PAGE - PROPERLY SCROLLABLE NOW =============
   const HomePage = () => (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 overflow-y-auto pb-32">
+    <div className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
       <StatusBar />
       
-      {/* Fixed Header */}
-      <div className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
-        <div className="relative px-6 py-8">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center space-x-4">
-              <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
-                <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
-                  {user?.firstName?.[0]}{user?.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <motion.h1 
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="text-2xl font-bold text-white"
+      {/* SCROLLABLE CONTENT CONTAINER */}
+      <div className="flex-1 overflow-y-auto">
+        {/* Header Section */}
+        <div className="relative overflow-hidden">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
+          <div className="relative px-6 py-8">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center space-x-4">
+                <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
+                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
+                    {user?.firstName?.[0]}{user?.lastName?.[0]}
+                  </AvatarFallback>
+                </Avatar>
+                <div>
+                  <motion.h1 
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="text-2xl font-bold text-white"
+                  >
+                    {user?.firstName} {user?.lastName}
+                  </motion.h1>
+                  <p className="text-blue-200">{user?.company?.companyName}</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center space-x-3">
+                <ActionButton
+                  icon={attendanceStatus === 'in' ? LogOut : LogIn}
+                  label={attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                  variant={attendanceStatus === 'in' ? 'danger' : 'success'}
+                  onClick={handleAttendancePunch}
+                  loading={isLoading}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="text-white hover:bg-white/10"
                 >
-                  {user?.firstName} {user?.lastName}
-                </motion.h1>
-                <p className="text-blue-200">{user?.company?.companyName}</p>
+                  <Bell className="w-5 h-5" />
+                </Button>
               </div>
             </div>
-            
-            <div className="flex items-center space-x-3">
-              <ActionButton
-                icon={attendanceStatus === 'in' ? LogOut : LogIn}
-                label={attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
-                variant={attendanceStatus === 'in' ? 'danger' : 'success'}
-                onClick={handleAttendancePunch}
-                loading={isLoading}
-              />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-white hover:bg-white/10"
-              >
-                <Bell className="w-5 h-5" />
-              </Button>
-            </div>
-          </div>
 
-          {/* Quick Stats */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {[
-              { 
-                label: "Today's Tasks", 
-                value: filteredTasks.length, 
-                icon: CheckCircle, 
-                color: "from-blue-500 to-blue-600" 
-              },
-              { 
-                label: "Active PJPs", 
-                value: activePJPs.length, 
-                icon: Calendar, 
-                color: "from-purple-500 to-purple-600" 
-              },
-              { 
-                label: "Total Dealers", 
-                value: dealers.length, 
-                icon: Building2, 
-                color: "from-orange-500 to-orange-600" 
-              },
-              { 
-                label: "This Month", 
-                value: reports.length, 
-                icon: BarChart3, 
-                color: "from-green-500 to-green-600" 
-              }
-            ].map((stat, index) => (
-              <motion.div
-                key={stat.label}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-gray-400 text-sm">{stat.label}</p>
-                        <p className="text-2xl font-bold text-white">{stat.value}</p>
+            {/* Quick Stats */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { 
+                  label: "Today's Tasks", 
+                  value: filteredTasks.length, 
+                  icon: CheckCircle, 
+                  color: "from-blue-500 to-blue-600" 
+                },
+                { 
+                  label: "Active PJPs", 
+                  value: activePJPs.length, 
+                  icon: Calendar, 
+                  color: "from-purple-500 to-purple-600" 
+                },
+                { 
+                  label: "Total Dealers", 
+                  value: dealers.length, 
+                  icon: Building2, 
+                  color: "from-orange-500 to-orange-600" 
+                },
+                { 
+                  label: "This Month", 
+                  value: reports.length, 
+                  icon: BarChart3, 
+                  color: "from-green-500 to-green-600" 
+                }
+              ].map((stat, index) => (
+                <motion.div
+                  key={stat.label}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.1 }}
+                >
+                  <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-gray-400 text-sm">{stat.label}</p>
+                          <p className="text-2xl font-bold text-white">{stat.value}</p>
+                        </div>
+                        <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
+                          <stat.icon className="w-6 h-6 text-white" />
+                        </div>
                       </div>
-                      <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
-                        <stat.icon className="w-6 h-6 text-white" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            ))}
+                    </CardContent>
+                  </Card>
+                </motion.div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* FULL PAGE SCROLLABLE Content - NO MORE CONSTRAINED SCROLLING! */}
-      <div className="px-6 space-y-8">
-        {/* Tasks Section */}
-        <Section
-          title="Today's Tasks"
-          icon={CheckCircle}
-          onAdd={() => {
-            setUIState('createType', 'task');
-            setUIState('showCreateModal', true);
-          }}
-        >
-          {isLoading ? (
-            <LoadingSkeleton rows={3} />
-          ) : filteredTasks.length > 0 ? (
-            <AnimatePresence>
-              {filteredTasks.map((task, index) => (
-                <TaskCard 
-                  key={task.id} 
-                  task={task} 
-                  index={index}
-                  onEdit={(task) => {
-                    setUIState('selectedItem', task);
-                    setUIState('createType', 'task');
-                    setUIState('showCreateModal', true);
-                  }}
-                  onDelete={(taskId) => deleteRecord('task', taskId)}
-                />
-              ))}
-            </AnimatePresence>
-          ) : (
-            <div className="text-center py-8 text-gray-400">
-              <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No tasks for today</p>
-            </div>
-          )}
-        </Section>
+        {/* SCROLLABLE Content Sections */}
+        <div className="px-6 pb-32 space-y-8">
+          {/* Tasks Section */}
+          <Section
+            title="Today's Tasks"
+            icon={CheckCircle}
+            onAdd={() => {
+              setUIState('createType', 'task');
+              setUIState('showCreateModal', true);
+            }}
+          >
+            {isLoading ? (
+              <LoadingSkeleton rows={3} />
+            ) : filteredTasks.length > 0 ? (
+              <AnimatePresence>
+                {filteredTasks.map((task, index) => (
+                  <TaskCard 
+                    key={task.id} 
+                    task={task} 
+                    index={index}
+                    onEdit={(task) => {
+                      setUIState('selectedItem', task);
+                      setUIState('createType', 'task');
+                      setUIState('showCreateModal', true);
+                    }}
+                    onDelete={(taskId) => deleteRecord('task', taskId)}
+                  />
+                ))}
+              </AnimatePresence>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No tasks for today</p>
+              </div>
+            )}
+          </Section>
 
-        {/* PJP Section */}
-        <Section
-          title="Journey Plans"
-          icon={Navigation}
-          onAdd={() => {
-            setUIState('createType', 'pjp');
-            setUIState('showCreateModal', true);
-          }}
-        >
-          {isLoading ? (
-            <LoadingSkeleton rows={3} />
-          ) : activePJPs.length > 0 ? (
-            <AnimatePresence>
-              {activePJPs.map((pjp, index) => (
-                <PJPCard 
-                  key={pjp.id} 
-                  pjp={pjp} 
-                  index={index}
-                  onEdit={(pjp) => {
-                    setUIState('selectedItem', pjp);
-                    setUIState('createType', 'pjp');
-                    setUIState('showCreateModal', true);
-                  }}
-                  onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
-                />
-              ))}
-            </AnimatePresence>
-          ) : (
-            <div className="text-center py-8 text-gray-400">
-              <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No active journey plans</p>
-            </div>
-          )}
-        </Section>
+          {/* PJP Section */}
+          <Section
+            title="Journey Plans"
+            icon={Navigation}
+            onAdd={() => {
+              setUIState('createType', 'pjp');
+              setUIState('showCreateModal', true);
+            }}
+          >
+            {isLoading ? (
+              <LoadingSkeleton rows={3} />
+            ) : activePJPs.length > 0 ? (
+              <AnimatePresence>
+                {activePJPs.map((pjp, index) => (
+                  <PJPCard 
+                    key={pjp.id} 
+                    pjp={pjp} 
+                    index={index}
+                    onEdit={(pjp) => {
+                      setUIState('selectedItem', pjp);
+                      setUIState('createType', 'pjp');
+                      setUIState('showCreateModal', true);
+                    }}
+                    onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
+                  />
+                ))}
+              </AnimatePresence>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No active journey plans</p>
+              </div>
+            )}
+          </Section>
 
-        {/* Dealers Section */}
-        <Section
-          title="Recent Dealers"
-          icon={Building2}
-          onAdd={() => {
-            setUIState('createType', 'dealer');
-            setUIState('showCreateModal', true);
-          }}
-        >
-          {isLoading ? (
-            <LoadingSkeleton rows={3} />
-          ) : dealers.length > 0 ? (
-            <AnimatePresence>
-              {dealers.slice(0, 5).map((dealer, index) => (
-                <DealerCard 
-                  key={dealer.id} 
-                  dealer={dealer} 
-                  index={index}
-                  onEdit={(dealer) => {
-                    setUIState('selectedItem', dealer);
-                    setUIState('createType', 'dealer');
-                    setUIState('showCreateModal', true);
-                  }}
-                  onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
-                  onView={(dealer) => {
-                    setUIState('selectedItem', dealer);
-                    setUIState('showDetailModal', true);
-                  }}
-                />
-              ))}
-            </AnimatePresence>
-          ) : (
-            <DealerCard 
-              key="ns-traders"
-              dealer={{
-                id: 'sample',
-                name: 'NS Traders',
-                region: 'North',
-                area: 'Zone A',
-                type: 'Premium',
-                totalPotential: '50,000',
-                contact: '+91-XXXXXXXXXX',
-                address: 'Sample Address'
-              }}
-              index={0}
-              onEdit={() => {}}
-              onDelete={() => {}}
-              onView={(dealer) => {
-                setUIState('selectedItem', dealer);
-                setUIState('showDetailModal', true);
-              }}
-            />
-          )}
-        </Section>
+          {/* Dealers Section */}
+          <Section
+            title="Recent Dealers"
+            icon={Building2}
+            onAdd={() => {
+              setUIState('createType', 'dealer');
+              setUIState('showCreateModal', true);
+            }}
+          >
+            {isLoading ? (
+              <LoadingSkeleton rows={3} />
+            ) : dealers.length > 0 ? (
+              <AnimatePresence>
+                {dealers.slice(0, 5).map((dealer, index) => (
+                  <DealerCard 
+                    key={dealer.id} 
+                    dealer={dealer} 
+                    index={index}
+                    onEdit={(dealer) => {
+                      setUIState('selectedItem', dealer);
+                      setUIState('createType', 'dealer');
+                      setUIState('showCreateModal', true);
+                    }}
+                    onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
+                    onView={(dealer) => {
+                      setUIState('selectedItem', dealer);
+                      setUIState('showDetailModal', true);
+                    }}
+                  />
+                ))}
+              </AnimatePresence>
+            ) : (
+              <DealerCard 
+                key="ns-traders"
+                dealer={{
+                  id: 'sample',
+                  name: 'NS Traders',
+                  region: 'North',
+                  area: 'Zone A',
+                  type: 'Premium',
+                  totalPotential: '50,000',
+                  contact: '+91-XXXXXXXXXX',
+                  address: 'Sample Address'
+                }}
+                index={0}
+                onEdit={() => {}}
+                onDelete={() => {}}
+                onView={(dealer) => {
+                  setUIState('selectedItem', dealer);
+                  setUIState('showDetailModal', true);
+                }}
+              />
+            )}
+          </Section>
+
+          {/* Add more content to test scrolling */}
+          <Section
+            title="Recent Reports"
+            icon={FileText}
+            onAdd={() => {
+              setUIState('createType', 'dvr');
+              setUIState('showCreateModal', true);
+            }}
+          >
+            {recentReports.length > 0 ? (
+              <AnimatePresence>
+                {recentReports.map((report, index) => (
+                  <Card key={report.id} className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-white">{report.title || 'Daily Report'}</h3>
+                          <p className="text-sm text-gray-400 mt-1">{report.location || 'Field Visit'}</p>
+                          <div className="flex items-center space-x-2 mt-3">
+                            <Badge variant="outline">{report.type || 'DVR'}</Badge>
+                            <span className="text-xs text-gray-500">{report.date}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2 ml-4">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-gray-400 hover:text-blue-400"
+                          >
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </AnimatePresence>
+            ) : (
+              <div className="text-center py-8 text-gray-400">
+                <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No reports yet</p>
+              </div>
+            )}
+          </Section>
+        </div>
       </div>
     </div>
   );
@@ -780,11 +828,11 @@ export default function AdvancedCRM() {
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 pb-32 overflow-y-auto"
+      className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col"
     >
       <StatusBar />
       
-      <div className="px-6 py-8">
+      <div className="flex-1 overflow-y-auto px-6 py-8 pb-32">
         {/* Profile Header */}
         <div className="text-center mb-8">
           <Avatar className="h-24 w-24 mx-auto mb-4 ring-4 ring-blue-500/30">
@@ -906,7 +954,7 @@ export default function AdvancedCRM() {
         </div>
         <Button
           onClick={onAdd}
-          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-full p-2"
+          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
         >
           <Plus className="w-4 h-4" />
         </Button>
@@ -944,9 +992,9 @@ export default function AdvancedCRM() {
               <p className="text-sm text-gray-400 mt-1">{task.description}</p>
               <div className="flex items-center space-x-2 mt-3">
                 <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
-                  {task.status || 'Pending'}
+                  {task.priority || 'Medium'}
                 </Badge>
-                <span className="text-xs text-gray-500">{task.taskDate}</span>
+                <span className="text-xs text-gray-500">{task.taskDate || task.dueDate}</span>
               </div>
             </div>
             <div className="flex items-center space-x-2 ml-4">
@@ -1005,8 +1053,8 @@ export default function AdvancedCRM() {
               <h3 className="font-semibold text-white">{pjp.objective}</h3>
               <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
               <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{pjp.status || 'planned'}</Badge>
-                <span className="text-xs text-gray-500">{pjp.planDate}</span>
+                <Badge variant="outline">{pjp.status}</Badge>
+                <span className="text-xs text-gray-500">{pjp.planDate || pjp.plannedDate}</span>
               </div>
             </div>
             <div className="flex items-center space-x-2 ml-4">
@@ -1178,7 +1226,7 @@ export default function AdvancedCRM() {
   );
 }
 
-// ============= FIXED CREATE MODAL WITH PROPER DATA MAPPING =============
+// ============= CREATE MODAL WITH FIXED DATA MAPPING =============
 const CreateModal = ({ 
   type, 
   onClose, 
