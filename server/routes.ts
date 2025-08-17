@@ -65,7 +65,6 @@ const OFFICE_LOCATIONS = [
     polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
   }
 ];
-
 export function setupWebRoutes(app: Express) {
   // PWA route
   app.get('/pwa', (req: Request, res: Response) => {
@@ -483,7 +482,20 @@ export function setupWebRoutes(app: Express) {
   // ==================== 3. PERMANENT JOURNEY PLANS - CRUD ====================
   app.post('/api/pjp', async (req: Request, res: Response) => {
     try {
-      const validatedData = insertPermanentJourneyPlanSchema.parse(req.body);
+      console.log('Received PJP data:', req.body);
+
+      // Transform frontend data to match schema before validation
+      const transformedData = {
+        userId: req.body.userId,
+        planDate: req.body.planDate || req.body.plannedDate || new Date().toISOString().split('T')[0],
+        areaToBeVisited: req.body.areaToBeVisited || req.body.location || req.body.area || req.body.objective || '',
+        description: req.body.description || req.body.details || '',
+        status: req.body.status || 'planned'
+      };
+
+      // NOW use schema validation
+      const validatedData = insertPermanentJourneyPlanSchema.parse(transformedData);
+
       const newPlan = await db.insert(permanentJourneyPlans)
         .values({
           ...validatedData,
@@ -494,10 +506,66 @@ export function setupWebRoutes(app: Express) {
 
       res.json({ success: true, data: newPlan[0], message: 'PJP created successfully' });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to create PJP' });
+      console.error('PJP creation error:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: error.message || 'Failed to create PJP'
+        });
+      }
     }
   });
 
+  app.put('/api/pjp/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // Transform data before validation
+      const transformedData = {};
+      if (req.body.planDate) transformedData.planDate = req.body.planDate;
+      if (req.body.areaToBeVisited || req.body.location || req.body.area) {
+        transformedData.areaToBeVisited = req.body.areaToBeVisited || req.body.location || req.body.area;
+      }
+      if (req.body.description !== undefined) transformedData.description = req.body.description;
+      if (req.body.status) transformedData.status = req.body.status;
+
+      // Use partial schema validation for updates
+      const validatedData = insertPermanentJourneyPlanSchema.partial().parse(transformedData);
+
+      const updatedPlan = await db.update(permanentJourneyPlans)
+        .set({ ...validatedData, updatedAt: new Date() })
+        .where(eq(permanentJourneyPlans.id, id))
+        .returning();
+
+      if (!updatedPlan || updatedPlan.length === 0) {
+        return res.status(404).json({ success: false, error: 'PJP not found' });
+      }
+
+      res.json({ success: true, data: updatedPlan[0], message: 'PJP updated successfully' });
+    } catch (error) {
+      console.error('PJP update error:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: error.message || 'Failed to update PJP'
+        });
+      }
+    }
+  });
+
+  // Keep the other endpoints as they were (GET, DELETE)
   app.get('/api/pjp/user/:userId', async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
@@ -544,26 +612,6 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  app.put('/api/pjp/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertPermanentJourneyPlanSchema.partial().parse(req.body);
-
-      const updatedPlan = await db.update(permanentJourneyPlans)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(permanentJourneyPlans.id, id))
-        .returning();
-
-      if (!updatedPlan || updatedPlan.length === 0) {
-        return res.status(404).json({ success: false, error: 'PJP not found' });
-      }
-
-      res.json({ success: true, data: updatedPlan[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update PJP' });
-    }
-  });
-
   app.delete('/api/pjp/:id', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -580,7 +628,6 @@ export function setupWebRoutes(app: Express) {
       res.status(400).json({ success: false, error: 'Failed to delete PJP' });
     }
   });
-
   // ==================== 4. DEALERS - FULL CRUD WITH SUB-DEALERS ====================
   app.post('/api/dealers', async (req: Request, res: Response) => {
     try {
@@ -1311,7 +1358,23 @@ export function setupWebRoutes(app: Express) {
   // ==================== 9. DAILY TASKS - ASSIGNMENT & ACCEPTANCE ====================
   app.post('/api/daily-tasks', async (req: Request, res: Response) => {
     try {
-      const validatedData = insertDailyTaskSchema.parse(req.body);
+      console.log('Received task data:', req.body);
+
+      // Transform frontend data to match your existing schema
+      const transformedData = {
+        userId: req.body.userId,
+        assignedByUserId: req.body.assignedByUserId || req.body.userId,
+        taskDate: req.body.taskDate || new Date().toISOString().split('T')[0],
+        visitType: req.body.visitType || req.body.title || 'General Task',
+        relatedDealerId: req.body.relatedDealerId || null,
+        siteName: req.body.siteName || req.body.title || '',
+        description: req.body.description || '',
+        pjpId: req.body.pjpId || null
+      };
+
+      // Use your existing schema
+      const validatedData = insertDailyTaskSchema.parse(transformedData);
+
       const newTask = await db.insert(dailyTasks)
         .values({
           ...validatedData,
@@ -1321,88 +1384,42 @@ export function setupWebRoutes(app: Express) {
         })
         .returning();
 
-      res.json({ success: true, data: newTask[0], message: 'Task assigned successfully' });
+      res.json({ success: true, data: newTask[0], message: 'Task created successfully' });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to assign task' });
-    }
-  });
-
-  // Get tasks for user (receiving endpoint)
-  app.get('/api/daily-tasks/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { status, date, assignedBy } = req.query;
-
-      let whereCondition = eq(dailyTasks.userId, parseInt(userId));
-
-      if (status) {
-        whereCondition = and(whereCondition, eq(dailyTasks.status, status as string));
+      console.error('Task creation error:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: error.message || 'Failed to create task'
+        });
       }
-
-      if (date) {
-        whereCondition = and(whereCondition, eq(dailyTasks.taskDate, date as string));
-      }
-
-      if (assignedBy) {
-        whereCondition = and(whereCondition, eq(dailyTasks.assignedByUserId, parseInt(assignedBy as string)));
-      }
-
-      const tasks = await db.select().from(dailyTasks)
-        .where(whereCondition)
-        .orderBy(desc(dailyTasks.taskDate));
-
-      res.json({ success: true, data: tasks });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch tasks' });
-    }
-  });
-
-  // Accept/Update task status
-  app.put('/api/daily-tasks/:id/status', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { status } = req.body;
-
-      if (!['Assigned', 'Accepted', 'In Progress', 'Completed', 'Cancelled'].includes(status)) {
-        return res.status(400).json({ success: false, error: 'Invalid status' });
-      }
-
-      const updatedTask = await db.update(dailyTasks)
-        .set({ status, updatedAt: new Date() })
-        .where(eq(dailyTasks.id, id))
-        .returning();
-
-      if (!updatedTask || updatedTask.length === 0) {
-        return res.status(404).json({ success: false, error: 'Task not found' });
-      }
-
-      res.json({ success: true, data: updatedTask[0], message: `Task ${status.toLowerCase()}` });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update task status' });
-    }
-  });
-
-  app.get('/api/daily-tasks/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const task = await db.select().from(dailyTasks)
-        .where(eq(dailyTasks.id, id))
-        .limit(1);
-
-      if (!task || task.length === 0) {
-        return res.status(404).json({ success: false, error: 'Task not found' });
-      }
-
-      res.json({ success: true, data: task[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch task' });
     }
   });
 
   app.put('/api/daily-tasks/:id', async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-      const validatedData = insertDailyTaskSchema.partial().parse(req.body);
+
+      // Transform data before validation
+      const transformedData = {};
+      if (req.body.taskDate) transformedData.taskDate = req.body.taskDate;
+      if (req.body.visitType || req.body.title) {
+        transformedData.visitType = req.body.visitType || req.body.title;
+      }
+      if (req.body.siteName !== undefined) transformedData.siteName = req.body.siteName;
+      if (req.body.description !== undefined) transformedData.description = req.body.description;
+      if (req.body.relatedDealerId !== undefined) transformedData.relatedDealerId = req.body.relatedDealerId;
+      if (req.body.pjpId !== undefined) transformedData.pjpId = req.body.pjpId;
+      if (req.body.assignedByUserId) transformedData.assignedByUserId = req.body.assignedByUserId;
+
+      // Use your existing schema with partial
+      const validatedData = insertDailyTaskSchema.partial().parse(transformedData);
 
       const updated = await db.update(dailyTasks)
         .set({ ...validatedData, updatedAt: new Date() })
@@ -1413,29 +1430,23 @@ export function setupWebRoutes(app: Express) {
         return res.status(404).json({ success: false, error: 'Task not found' });
       }
 
-      res.json({ success: true, data: updated[0] });
+      res.json({ success: true, data: updated[0], message: 'Task updated successfully' });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update task' });
-    }
-  });
-
-  app.delete('/api/daily-tasks/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deleted = await db.delete(dailyTasks)
-        .where(eq(dailyTasks.id, id))
-        .returning();
-
-      if (!deleted || deleted.length === 0) {
-        return res.status(404).json({ success: false, error: 'Task not found' });
+      console.error('Task update error:', error);
+      if (error.name === 'ZodError') {
+        res.status(400).json({
+          success: false,
+          error: 'Validation failed',
+          details: error.errors
+        });
+      } else {
+        res.status(400).json({
+          success: false,
+          error: error.message || 'Failed to update task'
+        });
       }
-
-      res.json({ success: true, message: 'Task deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete task' });
     }
   });
-
   // ==================== 10. DEALER REPORTS AND SCORES - CRUD ====================
   app.post('/api/dealer-reports-scores', async (req: Request, res: Response) => {
     try {

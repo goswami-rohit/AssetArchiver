@@ -523,9 +523,9 @@ export default function AdvancedCRM() {
     [reports]
   );
 
-  // ============= HOME PAGE - MADE SCROLLABLE =============
+  // ============= HOME PAGE - FIXED FULL PAGE SCROLLABLE =============
   const HomePage = () => (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 overflow-y-auto pb-32">
       <StatusBar />
       
       {/* Fixed Header */}
@@ -622,9 +622,9 @@ export default function AdvancedCRM() {
         </div>
       </div>
 
-      {/* SCROLLABLE Content Sections */}
-      <div className="px-6 pb-32 overflow-y-auto max-h-[calc(100vh-320px)]">
-        {/* Tasks Section with CRUD */}
+      {/* FULL PAGE SCROLLABLE Content - NO MORE CONSTRAINED SCROLLING! */}
+      <div className="px-6 space-y-8">
+        {/* Tasks Section */}
         <Section
           title="Today's Tasks"
           icon={CheckCircle}
@@ -659,7 +659,7 @@ export default function AdvancedCRM() {
           )}
         </Section>
 
-        {/* PJP Section with CRUD */}
+        {/* PJP Section */}
         <Section
           title="Journey Plans"
           icon={Navigation}
@@ -694,7 +694,7 @@ export default function AdvancedCRM() {
           )}
         </Section>
 
-        {/* Dealers Section - NOW VISIBLE with NS Traders */}
+        {/* Dealers Section */}
         <Section
           title="Recent Dealers"
           icon={Building2}
@@ -726,7 +726,6 @@ export default function AdvancedCRM() {
               ))}
             </AnimatePresence>
           ) : (
-            // Show sample dealer like NS Traders if no dealers exist
             <DealerCard 
               key="ns-traders"
               dealer={{
@@ -907,7 +906,7 @@ export default function AdvancedCRM() {
         </div>
         <Button
           onClick={onAdd}
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
+          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-full p-2"
         >
           <Plus className="w-4 h-4" />
         </Button>
@@ -941,13 +940,13 @@ export default function AdvancedCRM() {
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex-1">
-              <h3 className="font-semibold text-white">{task.title}</h3>
+              <h3 className="font-semibold text-white">{task.visitType || task.title}</h3>
               <p className="text-sm text-gray-400 mt-1">{task.description}</p>
               <div className="flex items-center space-x-2 mt-3">
                 <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
-                  {task.priority}
+                  {task.status || 'Pending'}
                 </Badge>
-                <span className="text-xs text-gray-500">{task.dueDate}</span>
+                <span className="text-xs text-gray-500">{task.taskDate}</span>
               </div>
             </div>
             <div className="flex items-center space-x-2 ml-4">
@@ -1004,10 +1003,10 @@ export default function AdvancedCRM() {
           <div className="flex items-center justify-between">
             <div className="flex-1">
               <h3 className="font-semibold text-white">{pjp.objective}</h3>
-              <p className="text-sm text-gray-400 mt-1">{pjp.location}</p>
+              <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
               <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{pjp.status}</Badge>
-                <span className="text-xs text-gray-500">{pjp.plannedDate}</span>
+                <Badge variant="outline">{pjp.status || 'planned'}</Badge>
+                <span className="text-xs text-gray-500">{pjp.planDate}</span>
               </div>
             </div>
             <div className="flex items-center space-x-2 ml-4">
@@ -1179,7 +1178,7 @@ export default function AdvancedCRM() {
   );
 }
 
-// ============= CREATE MODAL =============
+// ============= FIXED CREATE MODAL WITH PROPER DATA MAPPING =============
 const CreateModal = ({ 
   type, 
   onClose, 
@@ -1191,13 +1190,43 @@ const CreateModal = ({
 }) => {
   const [formData, setFormData] = useState<any>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { user } = useAppStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
     
     try {
-      await onCreate(type, formData);
+      // PROPER DATA MAPPING FOR BACKEND SCHEMA
+      let transformedData = { ...formData };
+      
+      if (type === 'task') {
+        transformedData = {
+          userId: user?.id || 1,
+          assignedByUserId: user?.id || 1,
+          taskDate: formData.taskDate || new Date().toISOString().split('T')[0],
+          visitType: formData.title || formData.visitType || 'General Task', // MAPS title → visitType
+          relatedDealerId: formData.relatedDealerId || null,
+          siteName: formData.siteName || formData.title || '',
+          description: formData.description || '',
+          pjpId: formData.pjpId || null
+        };
+      }
+      
+      if (type === 'pjp') {
+        transformedData = {
+          userId: user?.id || 1,
+          planDate: formData.plannedDate || formData.planDate, // MAPS plannedDate → planDate
+          visitType: formData.visitType || 'Field Visit',
+          siteName: formData.location || formData.siteName, // MAPS location → siteName  
+          areaToBeVisited: formData.area || formData.areaToBeVisited || formData.location,
+          objective: formData.objective || '',
+          expectedOutcome: formData.expectedOutcome || '',
+          status: 'planned'
+        };
+      }
+
+      await onCreate(type, transformedData);
       onClose();
     } catch (error) {
       console.error('Failed to create record:', error);
@@ -1228,7 +1257,7 @@ const CreateModal = ({
         initial={{ scale: 0.9, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gray-800 rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto"
+        className="bg-gray-800/90 backdrop-blur-xl rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto border border-gray-700/50"
       >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xl font-bold text-white">
@@ -1248,7 +1277,7 @@ const CreateModal = ({
           {type === 'task' && (
             <>
               <div>
-                <Label className="text-gray-300">Title</Label>
+                <Label className="text-gray-300">Task Title</Label>
                 <Input 
                   value={formData.title || ''}
                   onChange={(e) => setFormData({...formData, title: e.target.value})}
@@ -1267,27 +1296,20 @@ const CreateModal = ({
                 />
               </div>
               <div>
-                <Label className="text-gray-300">Priority</Label>
-                <Select 
-                  value={formData.priority || 'medium'} 
-                  onValueChange={(value) => setFormData({...formData, priority: value})}
-                >
-                  <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-gray-300">Due Date</Label>
+                <Label className="text-gray-300">Task Date</Label>
                 <Input 
                   type="date"
-                  value={formData.dueDate || ''}
-                  onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
+                  value={formData.taskDate || ''}
+                  onChange={(e) => setFormData({...formData, taskDate: e.target.value})}
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Site Name</Label>
+                <Input 
+                  value={formData.siteName || ''}
+                  onChange={(e) => setFormData({...formData, siteName: e.target.value})}
+                  placeholder="Site or location name"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
@@ -1317,6 +1339,15 @@ const CreateModal = ({
                 />
               </div>
               <div>
+                <Label className="text-gray-300">Area to Visit</Label>
+                <Input 
+                  value={formData.area || ''}
+                  onChange={(e) => setFormData({...formData, area: e.target.value})}
+                  placeholder="Specific area"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                />
+              </div>
+              <div>
                 <Label className="text-gray-300">Planned Date</Label>
                 <Input 
                   type="date"
@@ -1324,6 +1355,15 @@ const CreateModal = ({
                   onChange={(e) => setFormData({...formData, plannedDate: e.target.value})}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
+                />
+              </div>
+              <div>
+                <Label className="text-gray-300">Expected Outcome</Label>
+                <Textarea 
+                  value={formData.expectedOutcome || ''}
+                  onChange={(e) => setFormData({...formData, expectedOutcome: e.target.value})}
+                  placeholder="What do you expect to achieve?"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
             </>
@@ -1370,12 +1410,21 @@ const CreateModal = ({
                   <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-gray-800 border-gray-600">
                     <SelectItem value="Premium">Premium</SelectItem>
                     <SelectItem value="Standard">Standard</SelectItem>
                     <SelectItem value="Basic">Basic</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <Label className="text-gray-300">Contact</Label>
+                <Input 
+                  value={formData.contact || ''}
+                  onChange={(e) => setFormData({...formData, contact: e.target.value})}
+                  placeholder="Phone number"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                />
               </div>
             </>
           )}
@@ -1384,7 +1433,7 @@ const CreateModal = ({
             <Button 
               type="submit" 
               disabled={isSubmitting} 
-              className="flex-1 bg-blue-600 hover:bg-blue-700"
+              className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
             >
               {isSubmitting ? (
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
