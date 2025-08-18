@@ -1,6 +1,6 @@
-// aiService.ts - ENHANCED RAG with Qdrant Vector Search
+// aiService.ts - ENHANCED RAG with AI-Powered Intelligence
 import OpenAI from 'openai';
-import { qdrantClient, searchSimilarEndpoints } from 'server/qdrant';
+import { qdrantClient, searchSimilarEndpoints } from './qdrant';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -35,8 +35,7 @@ class EnhancedRAGService {
   }
 
   private async initialize() {
-    console.log("🚀 Initializing Enhanced RAG Service with Qdrant...");
-    // Test Qdrant connection
+    console.log("🚀 Initializing Enhanced RAG Service with AI Intelligence...");
     await this.testQdrantConnection();
   }
 
@@ -50,55 +49,138 @@ class EnhancedRAGService {
     }
   }
 
-  // 🎯 VECTOR-POWERED ENDPOINT DISCOVERY
+  // 🤖 AI-POWERED ENDPOINT DISCOVERY (No embeddings needed!)
   private async findRelevantEndpoints(userMessage: string): Promise<EndpointResult[]> {
-    console.log("🔍 Vector search for relevant endpoints...");
+    console.log("🤖 AI-powered endpoint discovery...");
     
     try {
-      // Generate embedding for user query
-      const embedding = await this.generateEmbedding(userMessage);
+      // Let AI analyze the user intent and match to endpoints
+      const aiAnalysis = await this.analyzeUserIntent(userMessage);
       
-      // Search similar endpoints using Qdrant
-      const similarEndpoints = await searchSimilarEndpoints(embedding, 5);
+      if (aiAnalysis.endpoints && aiAnalysis.endpoints.length > 0) {
+        console.log(`✅ AI found ${aiAnalysis.endpoints.length} relevant endpoints`);
+        return aiAnalysis.endpoints;
+      }
       
-      console.log(`✅ Found ${similarEndpoints.length} relevant endpoints via vector search`);
-      return similarEndpoints;
+      // Fallback to simple matching if AI fails
+      return this.simpleKeywordMatch(userMessage);
+      
     } catch (error) {
-      console.error("❌ Vector search failed:", error);
-      return [];
+      console.error("❌ AI endpoint discovery failed:", error);
+      return this.simpleKeywordMatch(userMessage);
     }
   }
 
-  // 🧠 GENERATE EMBEDDINGS
-  private async generateEmbedding(text: string): Promise<number[]> {
+  // 🧠 AI INTENT ANALYSIS (Pure LLM reasoning!)
+  private async analyzeUserIntent(userMessage: string): Promise<any> {
     try {
-      const response = await this.openai.embeddings.create({
-        model: "Xenova/all-MiniLM-L6-v2",
-        input: text,
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [
+          {
+            role: "system",
+            content: `You are an API endpoint classifier for a field service system.
+
+AVAILABLE ENDPOINTS:
+- /api/dvr - Dealer Visit Reports (creating/viewing dealer visits, field visits)
+- /api/tvr - Territory Visit Reports (territory planning, travel reports)
+- /api/tasks - Task Management (pending tasks, assignments, work items)
+- /api/dealers - Dealer Management (dealer info, creating dealers, store details)
+- /api/attendance - Attendance Tracking (check in/out, presence, work hours)
+- /api/pjp - Journey Planning (route planning, schedules, itineraries)
+
+ANALYZE the user message and return JSON with:
+{
+  "intent": "primary user intent",
+  "confidence": 0.0-1.0,
+  "endpoints": [
+    {
+      "name": "API Name",
+      "endpoint": "/api/xxx",
+      "description": "why this matches",
+      "similarity": 0.0-1.0,
+      "action": "fetch|create|update",
+      "fields": {},
+      "requiredFields": {}
+    }
+  ]
+}
+
+Focus on understanding WHAT the user wants to do, not just keywords.`
+          },
+          {
+            role: "user", 
+            content: `User message: "${userMessage}"`
+          }
+        ],
+        max_tokens: 400,
+        temperature: 0.1,
       });
-      return response.data[0].embedding;
+
+      const response = completion.choices[0]?.message?.content;
+      const analysis = JSON.parse(response || '{"endpoints": []}');
+      
+      console.log(`🎯 AI identified ${analysis.endpoints?.length || 0} relevant endpoints`);
+      return analysis;
+      
     } catch (error) {
-      console.error("❌ Embedding generation failed:", error);
-      // Fallback to simple vector for testing
-      return new Array(1536).fill(0).map(() => Math.random());
+      console.error("❌ AI intent analysis failed:", error);
+      return { endpoints: [] };
     }
   }
 
-  // 💬 ENHANCED RAG CHAT with Vector Search
+  // 🔄 SIMPLE BACKUP (when AI fails)
+  private simpleKeywordMatch(userMessage: string): EndpointResult[] {
+    const message = userMessage.toLowerCase();
+    
+    if (message.includes('task') || message.includes('pending') || message.includes('work')) {
+      return [{
+        name: 'Tasks',
+        endpoint: '/api/tasks',
+        description: 'Task management system',
+        similarity: 0.7,
+        fields: {},
+        requiredFields: {}
+      }];
+    }
+    
+    if (message.includes('visit') || message.includes('dvr') || message.includes('dealer')) {
+      return [{
+        name: 'DVR',
+        endpoint: '/api/dvr',
+        description: 'Dealer visit reports',
+        similarity: 0.7,
+        fields: {},
+        requiredFields: {}
+      }];
+    }
+    
+    console.log("🔄 Using fallback: Tasks endpoint");
+    return [{
+      name: 'Tasks',
+      endpoint: '/api/tasks',
+      description: 'Default task endpoint',
+      similarity: 0.5,
+      fields: {},
+      requiredFields: {}
+    }];
+  }
+
+  // 💬 ENHANCED RAG CHAT with AI Intelligence
   async chat(messages: ChatMessage[], userId?: number): Promise<string> {
     await this.ready;
-    console.log("💬 Enhanced RAG processing with vector search...");
+    console.log("💬 Enhanced RAG processing with AI intelligence...");
 
     try {
       const userMessage = messages[messages.length - 1]?.content || '';
       
-      // 1. RETRIEVE: Vector search for relevant endpoints
+      // 1. RETRIEVE: AI-powered endpoint discovery
       const relevantEndpoints = await this.findRelevantEndpoints(userMessage);
       
       // 2. AUGMENT: Build enhanced context
       const endpointContext = relevantEndpoints.length > 0 
         ? relevantEndpoints.map(ep => 
-            `- ${ep.name}: ${ep.description} (${ep.endpoint}) [Similarity: ${ep.similarity.toFixed(2)}]`
+            `- ${ep.name}: ${ep.description} (${ep.endpoint}) [Confidence: ${ep.similarity.toFixed(2)}]`
           ).join('\n')
         : 'Available services: DVR, TVR, PJP, Dealers, Attendance, Tasks';
       
@@ -112,14 +194,14 @@ class EnhancedRAGService {
             role: "system",
             content: `You are an intelligent field service assistant with API consciousness.
 
-AVAILABLE ENDPOINTS (Vector Search Results):
+AVAILABLE ENDPOINTS (AI Discovery Results):
 ${endpointContext}
 
 CONVERSATION HISTORY:
 ${conversationHistory}
 
 GUIDELINES:
-- You have semantic awareness of all API endpoints through vector search
+- You have AI-powered awareness of all API endpoints
 - For data collection, guide users step-by-step with specific field requirements
 - Provide UI-aware responses with button/form suggestions
 - Be precise about which endpoint to use based on user intent
@@ -183,71 +265,174 @@ GUIDELINES:
     }
   }
 
-  // 🤖 INTELLIGENT RAG CHAT (Complete Flow)
+  // 🤖 INTELLIGENT RAG CHAT (Complete AI-Powered Flow)
   async ragChat(userInput: string, userId?: number): Promise<any> {
-    console.log("🤖 Starting intelligent RAG flow...");
+    console.log("🤖 Starting AI-powered RAG flow...");
     
     try {
-      // 1. Find best endpoint using vector search
-      const bestEndpoint = await this.findBestEndpoint(userInput);
+      // 1. AI analyzes user intent and finds endpoints
+      const relevantEndpoints = await this.findRelevantEndpoints(userInput);
       
-      if (!bestEndpoint) {
+      if (!relevantEndpoints || relevantEndpoints.length === 0) {
         return {
           success: false,
-          message: "I couldn't find a relevant endpoint for your request. Could you be more specific?",
-          suggestion: "Try asking about visits, reports, dealers, or attendance."
+          message: "I couldn't understand your request. Could you be more specific about what you'd like to do?",
+          suggestion: "Try asking about tasks, visits, dealers, or attendance."
         };
       }
 
-      // 2. Extract structured data if this looks like a submission
-      const messages: ChatMessage[] = [{ role: 'user', content: userInput }];
-      const extractedData = await this.extractStructuredData(messages, userId);
+      const bestEndpoint = relevantEndpoints[0];
+      console.log(`🎯 AI selected: ${bestEndpoint.name} (${bestEndpoint.similarity})`);
 
-      if (extractedData && !extractedData.error && extractedData.data) {
-        // 3. Execute the endpoint directly
-        const executionResult = await this.executeEndpoint(bestEndpoint.endpoint, extractedData.data, userId);
-        
-        if (executionResult.success) {
-          return {
-            success: true,
-            message: `✅ Successfully processed using ${bestEndpoint.name}!`,
-            endpoint: bestEndpoint.endpoint,
-            data: executionResult.data,
-            similarity: bestEndpoint.similarity
-          };
-        } else {
-          return {
-            success: false,
-            message: `Found relevant endpoint (${bestEndpoint.name}) but execution failed: ${executionResult.error}`,
-            endpoint: bestEndpoint.endpoint,
-            error: executionResult.error,
-            suggestion: "Please check your data format and try again."
-          };
-        }
-      } else {
-        // 4. Just provide guidance without execution
+      // 2. Check if user wants to fetch data or create something
+      const actionIntent = await this.determineUserAction(userInput, bestEndpoint);
+      
+      if (actionIntent.action === 'fetch') {
+        // Fetch existing data
+        const data = await this.fetchData(bestEndpoint.endpoint, userId);
         return {
           success: true,
-          message: await this.chat(messages, userId),
+          message: await this.formatDataResponse(data, bestEndpoint.name, userInput),
+          data: data,
           endpoint: bestEndpoint.endpoint,
-          similarity: bestEndpoint.similarity,
-          guidance: true
+          action: 'fetch'
         };
+      } else if (actionIntent.action === 'create') {
+        // Try to extract data for creation
+        const extractedData = await this.extractStructuredData([{ role: 'user', content: userInput }], userId);
+        
+        if (extractedData && !extractedData.error) {
+          const result = await this.executeEndpoint(bestEndpoint.endpoint, extractedData.data, userId);
+          return {
+            success: result.success,
+            message: result.success ? 
+              `✅ Successfully created ${bestEndpoint.name.toLowerCase()}!` : 
+              `❌ Failed to create ${bestEndpoint.name.toLowerCase()}: ${result.error}`,
+            data: result.data,
+            endpoint: bestEndpoint.endpoint,
+            action: 'create'
+          };
+        }
       }
+      
+      // 3. Provide guidance
+      return {
+        success: true,
+        message: await this.generateGuidanceResponse(userInput, bestEndpoint),
+        endpoint: bestEndpoint.endpoint,
+        action: 'guidance'
+      };
+      
     } catch (error) {
-      console.error("❌ Intelligent RAG flow failed:", error);
+      console.error("❌ AI-powered RAG flow failed:", error);
       return {
         success: false,
-        message: "I encountered an error processing your request. Please try again.",
+        message: "I encountered an error. Please try rephrasing your request.",
         error: error instanceof Error ? error.message : 'Unknown error'
       };
+    }
+  }
+
+  // 🤔 AI DETERMINES USER ACTION
+  private async determineUserAction(userInput: string, endpoint: any): Promise<{ action: string; confidence: number }> {
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [
+          {
+            role: "system",
+            content: `Determine if user wants to FETCH existing data or CREATE new data.
+
+FETCH indicators: "show me", "get my", "list", "view", "see", "check", "find"
+CREATE indicators: "add", "create", "new", "submit", "record", "make"
+
+Return JSON: {"action": "fetch|create|guidance", "confidence": 0.0-1.0}`
+          },
+          {
+            role: "user",
+            content: `User: "${userInput}" | Endpoint: ${endpoint.name}`
+          }
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+      });
+
+      const response = completion.choices[0]?.message?.content;
+      return JSON.parse(response || '{"action": "guidance", "confidence": 0.5}');
+    } catch (error) {
+      console.error("❌ Action determination failed:", error);
+      return { action: 'guidance', confidence: 0.5 };
+    }
+  }
+
+  // 💬 AI GENERATES GUIDANCE
+  private async generateGuidanceResponse(userInput: string, endpoint: any): Promise<string> {
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [
+          {
+            role: "system",
+            content: `You're a helpful field service assistant. Guide the user on how to use the ${endpoint.name} system.
+
+Be conversational, helpful, and specific about what they can do. Mention buttons they can click or forms they can fill.
+
+Keep responses under 100 words.`
+          },
+          {
+            role: "user",
+            content: `User asked: "${userInput}" | Best match: ${endpoint.name} - ${endpoint.description}`
+          }
+        ],
+        max_tokens: 150,
+        temperature: 0.7,
+      });
+
+      return completion.choices[0]?.message?.content || "I'm here to help! What would you like to do?";
+    } catch (error) {
+      console.error("❌ Guidance generation failed:", error);
+      return `I can help you with ${endpoint.name.toLowerCase()}. What would you like to do?`;
+    }
+  }
+
+  // 📄 AI FORMATS DATA RESPONSES
+  private async formatDataResponse(data: any[], endpointName: string, userInput: string): Promise<string> {
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: [
+          {
+            role: "system",
+            content: `Format the data response in a user-friendly way. Be conversational and helpful.
+
+If data is empty, suggest what the user can do next.
+If data exists, summarize it clearly and mention key details.
+
+Keep it under 150 words and be encouraging.`
+          },
+          {
+            role: "user",
+            content: `User asked: "${userInput}"
+Endpoint: ${endpointName}
+Data found: ${data.length} items
+Sample: ${JSON.stringify(data.slice(0, 2))}`
+          }
+        ],
+        max_tokens: 200,
+        temperature: 0.7,
+      });
+
+      return completion.choices[0]?.message?.content || `Found ${data.length} ${endpointName.toLowerCase()} items.`;
+    } catch (error) {
+      console.error("❌ Data formatting failed:", error);
+      return `Found ${data.length} ${endpointName.toLowerCase()} items.`;
     }
   }
 
   // 📋 Enhanced Structured Data Extraction
   async extractStructuredData(messages: ChatMessage[], userId?: number): Promise<any> {
     await this.ready;
-    console.log("📋 Enhanced data extraction with vector context...");
+    console.log("📋 AI-powered data extraction...");
 
     try {
       const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
@@ -267,7 +452,7 @@ GUIDELINES:
             role: "system",
             content: `Extract structured data from conversation for API submission.
 
-RELEVANT ENDPOINTS (Vector Search Results):
+RELEVANT ENDPOINTS (AI Discovery Results):
 ${endpointDetails}
 
 RESPONSE FORMAT:
@@ -285,10 +470,10 @@ Only return structured data if you can identify the endpoint and have required f
       const response = completion.choices[0]?.message?.content;
       const extracted = JSON.parse(response || '{"error": "Failed to extract data"}');
       
-      console.log("✅ Enhanced data extraction completed:", extracted.endpoint || extracted.error);
+      console.log("✅ AI data extraction completed:", extracted.endpoint || extracted.error);
       return extracted;
     } catch (error) {
-      console.error("❌ Enhanced data extraction failed:", error);
+      console.error("❌ AI data extraction failed:", error);
       return { error: "Failed to extract structured data from conversation" };
     }
   }
