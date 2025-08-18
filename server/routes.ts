@@ -33,8 +33,8 @@ import multer from 'multer';
 import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
-import PureRAGService from 'server/bot/aiService';
-import { telegramBot } from './bot/telegram';
+// ✅ Correct - import default export
+import EnhancedRAGService from './bot/aiService';
 
 // Fix multer typing
 interface MulterRequest extends Request {
@@ -345,9 +345,6 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== ENHANCED AI/RAG ROUTES ====================
-  // Import the enhanced service
-  import EnhancedRAGService from 'server/bot/aiService';
-
   // 🚀 ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {

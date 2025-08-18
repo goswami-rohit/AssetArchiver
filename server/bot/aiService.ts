@@ -1,6 +1,6 @@
 // aiService.ts - ENHANCED RAG with Qdrant Vector Search
 import OpenAI from 'openai';
-import { qdrantClient, searchSimilarEndpoints } from './qdrant';
+import { qdrantClient, searchSimilarEndpoints } from 'server/qdrant';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
