@@ -40,7 +40,7 @@ export class TelegramBotService {
     };
 
     // 🚀 INITIALIZE RAG SERVICE
-    this.ragService = new PureRAGService();
+    this.ragService = new EnhancedRAGService();
     console.log('🧠 RAG Service initialized for Telegram bot');
 
     this.setupCleanupInterval();
