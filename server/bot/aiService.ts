@@ -1,26 +1,33 @@
-// aiService.ts - PURE RAG with FREE OpenAI model ONLY
+// aiService.ts - ENHANCED RAG with Qdrant Vector Search
 import OpenAI from 'openai';
-import fs from 'fs';
-import path from 'path';
+import { qdrantClient, searchSimilarEndpoints } from './qdrant';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
-class PureRAGService {
+interface EndpointResult {
+  name: string;
+  endpoint: string;
+  description: string;
+  similarity: number;
+  fields: any;
+  requiredFields: any;
+}
+
+class EnhancedRAGService {
   private openai: OpenAI;
-  private endpointContext: any[] = [];
   private ready: Promise<void>;
 
   constructor() {
-    // OpenRouter with FREE model ONLY
+    // OpenRouter with FREE model
     this.openai = new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: process.env.OPENROUTER_API_KEY!,
       defaultHeaders: {
         "HTTP-Referer": process.env.NGROK_URL || "https://telesalesside.onrender.com",
-        "X-Title": "Field Service RAG Assistant",
+        "X-Title": "Enhanced Field Service RAG Assistant",
       },
     });
 
@@ -28,191 +35,280 @@ class PureRAGService {
   }
 
   private async initialize() {
-    console.log("🚀 Initializing PURE RAG Service with FREE model...");
-    await this.loadRAGContext();
+    console.log("🚀 Initializing Enhanced RAG Service with Qdrant...");
+    // Test Qdrant connection
+    await this.testQdrantConnection();
   }
 
-  private async loadRAGContext() {
-    console.log("📥 Loading static RAG context...");
-
+  private async testQdrantConnection() {
     try {
-      // Load from local embeddings file
-      const embeddingsPath = path.join(process.cwd(), 'data', 'endpoint-embeddings.json');
-      const fileContent = fs.readFileSync(embeddingsPath, 'utf8');
-      this.endpointContext = JSON.parse(fileContent);
-      console.log(`✅ RAG context loaded (${this.endpointContext.length} endpoints)`);
+      console.log("🔌 Testing Qdrant connection...");
+      const collections = await qdrantClient.getCollections();
+      console.log("✅ Qdrant connected! Collections:", collections.collections.length);
     } catch (error) {
-      console.error("❌ Failed to load RAG context:", error);
-      this.endpointContext = [];
+      console.error("❌ Qdrant connection failed:", error);
     }
   }
 
-  // 🔍 Static keyword matching for relevant endpoints
-  private findRelevantEndpoints(userMessage: string): any[] {
-    console.log("🔍 Finding relevant endpoints...");
+  // 🎯 VECTOR-POWERED ENDPOINT DISCOVERY
+  private async findRelevantEndpoints(userMessage: string): Promise<EndpointResult[]> {
+    console.log("🔍 Vector search for relevant endpoints...");
     
-    const query = userMessage.toLowerCase();
-    const relevantEndpoints = [];
-
-    for (const endpoint of this.endpointContext) {
-      const searchText = `${endpoint.name} ${endpoint.description} ${endpoint.searchTerms}`.toLowerCase();
+    try {
+      // Generate embedding for user query
+      const embedding = await this.generateEmbedding(userMessage);
       
-      // Simple keyword matching
-      let score = 0;
-      const keywords = query.split(' ').filter(word => word.length > 2);
+      // Search similar endpoints using Qdrant
+      const similarEndpoints = await searchSimilarEndpoints(embedding, 5);
       
-      for (const keyword of keywords) {
-        if (searchText.includes(keyword)) {
-          score++;
-        }
-      }
-      
-      if (score > 0) {
-        relevantEndpoints.push({ ...endpoint, score });
-      }
+      console.log(`✅ Found ${similarEndpoints.length} relevant endpoints via vector search`);
+      return similarEndpoints;
+    } catch (error) {
+      console.error("❌ Vector search failed:", error);
+      return [];
     }
-
-    // Sort by relevance score and return top 5
-    return relevantEndpoints
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
   }
 
-  // 💬 Pure RAG Chat using FREE model
+  // 🧠 GENERATE EMBEDDINGS
+  private async generateEmbedding(text: string): Promise<number[]> {
+    try {
+      const response = await this.openai.embeddings.create({
+        model: "text-embedding-3-small",
+        input: text,
+      });
+      return response.data[0].embedding;
+    } catch (error) {
+      console.error("❌ Embedding generation failed:", error);
+      // Fallback to simple vector for testing
+      return new Array(1536).fill(0).map(() => Math.random());
+    }
+  }
+
+  // 💬 ENHANCED RAG CHAT with Vector Search
   async chat(messages: ChatMessage[], userId?: number): Promise<string> {
     await this.ready;
-    console.log("💬 Pure RAG processing...");
+    console.log("💬 Enhanced RAG processing with vector search...");
 
     try {
       const userMessage = messages[messages.length - 1]?.content || '';
       
-      // 1. RETRIEVE: Find relevant endpoints
-      const relevantEndpoints = this.findRelevantEndpoints(userMessage);
+      // 1. RETRIEVE: Vector search for relevant endpoints
+      const relevantEndpoints = await this.findRelevantEndpoints(userMessage);
       
-      // 2. AUGMENT: Build context
+      // 2. AUGMENT: Build enhanced context
       const endpointContext = relevantEndpoints.length > 0 
-        ? relevantEndpoints.map(ep => `- ${ep.name}: ${ep.description} (${ep.method} ${ep.endpoint})`).join('\n')
-        : 'Available services: Daily Visit Reports, Technical Visit Reports, Journey Plans, Dealer Management, Attendance';
+        ? relevantEndpoints.map(ep => 
+            `- ${ep.name}: ${ep.description} (${ep.endpoint}) [Similarity: ${ep.similarity.toFixed(2)}]`
+          ).join('\n')
+        : 'Available services: DVR, TVR, PJP, Dealers, Attendance, Tasks';
       
       const conversationHistory = messages.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
       
-      // 3. GENERATE: Use FREE model for response
+      // 3. GENERATE: Enhanced response with UI awareness
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
         messages: [
           {
             role: "system",
-            content: `You are a helpful field service assistant. Help users with their tasks.
+            content: `You are an intelligent field service assistant with API consciousness.
 
-AVAILABLE SERVICES:
+AVAILABLE ENDPOINTS (Vector Search Results):
 ${endpointContext}
 
-RECENT CONVERSATION:
+CONVERSATION HISTORY:
 ${conversationHistory}
 
-Guidelines:
-- For data collection (DVR/TVR), ask questions step by step to gather required information
-- For data queries, guide them to the right endpoints
-- Be conversational and helpful
-- If collecting data for submission, ask for one field at a time
-- Keep responses concise and actionable`
+GUIDELINES:
+- You have semantic awareness of all API endpoints through vector search
+- For data collection, guide users step-by-step with specific field requirements
+- Provide UI-aware responses with button/form suggestions
+- Be precise about which endpoint to use based on user intent
+- If user wants to submit data, extract structured information for API calls
+- Keep responses actionable and conversational`
           },
           { role: "user", content: userMessage }
         ],
-        max_tokens: 400,
+        max_tokens: 500,
         temperature: 0.7,
       });
 
-      const response = completion.choices[0]?.message?.content || "I'm here to help with your field service tasks!";
-      console.log("✅ RAG response generated with FREE model");
+      const response = completion.choices[0]?.message?.content || "I'm here to help with intelligent API routing!";
+      console.log("✅ Enhanced RAG response generated");
       return response;
     } catch (error) {
-      console.error("❌ RAG Chat failed:", error);
+      console.error("❌ Enhanced RAG Chat failed:", error);
       return "I'm experiencing some technical difficulties. Please try again.";
     }
   }
 
-  // 📋 Extract Structured Data using FREE model
+  // 🎯 SMART ENDPOINT FINDER
+  async findBestEndpoint(userInput: string): Promise<EndpointResult | null> {
+    try {
+      const endpoints = await this.findRelevantEndpoints(userInput);
+      return endpoints.length > 0 ? endpoints[0] : null;
+    } catch (error) {
+      console.error("❌ Best endpoint finding failed:", error);
+      return null;
+    }
+  }
+
+  // ⚡ DIRECT API EXECUTOR
+  async executeEndpoint(endpoint: string, data: any, userId?: number): Promise<any> {
+    try {
+      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
+      
+      console.log(`🎯 Executing ${endpoint} with data:`, data);
+      
+      const response = await fetch(`${baseUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Enhanced-RAG-Service/2.0'
+        },
+        body: JSON.stringify({ userId, ...data })
+      });
+
+      const result = await response.json();
+      
+      if (!response.ok) {
+        console.error(`❌ API execution failed for ${endpoint}:`, result);
+        return { success: false, error: result.error || 'API execution failed', details: result.details };
+      }
+
+      console.log(`✅ Successfully executed ${endpoint}`);
+      return { success: true, data: result.data, endpoint };
+    } catch (error) {
+      console.error(`❌ Direct execution failed for ${endpoint}:`, error);
+      return { success: false, error: 'Network or execution error' };
+    }
+  }
+
+  // 🤖 INTELLIGENT RAG CHAT (Complete Flow)
+  async ragChat(userInput: string, userId?: number): Promise<any> {
+    console.log("🤖 Starting intelligent RAG flow...");
+    
+    try {
+      // 1. Find best endpoint using vector search
+      const bestEndpoint = await this.findBestEndpoint(userInput);
+      
+      if (!bestEndpoint) {
+        return {
+          success: false,
+          message: "I couldn't find a relevant endpoint for your request. Could you be more specific?",
+          suggestion: "Try asking about visits, reports, dealers, or attendance."
+        };
+      }
+
+      // 2. Extract structured data if this looks like a submission
+      const messages: ChatMessage[] = [{ role: 'user', content: userInput }];
+      const extractedData = await this.extractStructuredData(messages, userId);
+
+      if (extractedData && !extractedData.error && extractedData.data) {
+        // 3. Execute the endpoint directly
+        const executionResult = await this.executeEndpoint(bestEndpoint.endpoint, extractedData.data, userId);
+        
+        if (executionResult.success) {
+          return {
+            success: true,
+            message: `✅ Successfully processed using ${bestEndpoint.name}!`,
+            endpoint: bestEndpoint.endpoint,
+            data: executionResult.data,
+            similarity: bestEndpoint.similarity
+          };
+        } else {
+          return {
+            success: false,
+            message: `Found relevant endpoint (${bestEndpoint.name}) but execution failed: ${executionResult.error}`,
+            endpoint: bestEndpoint.endpoint,
+            error: executionResult.error,
+            suggestion: "Please check your data format and try again."
+          };
+        }
+      } else {
+        // 4. Just provide guidance without execution
+        return {
+          success: true,
+          message: await this.chat(messages, userId),
+          endpoint: bestEndpoint.endpoint,
+          similarity: bestEndpoint.similarity,
+          guidance: true
+        };
+      }
+    } catch (error) {
+      console.error("❌ Intelligent RAG flow failed:", error);
+      return {
+        success: false,
+        message: "I encountered an error processing your request. Please try again.",
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  // 📋 Enhanced Structured Data Extraction
   async extractStructuredData(messages: ChatMessage[], userId?: number): Promise<any> {
     await this.ready;
-    console.log("📋 Extracting structured data with FREE model...");
+    console.log("📋 Enhanced data extraction with vector context...");
 
     try {
       const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+      
+      // Get relevant endpoints for context
+      const userMessage = messages[messages.length - 1]?.content || '';
+      const relevantEndpoints = await this.findRelevantEndpoints(userMessage);
+      
+      const endpointDetails = relevantEndpoints.slice(0, 3).map(ep => 
+        `${ep.endpoint}: ${ep.description}\nRequired: ${JSON.stringify(ep.requiredFields)}\nOptional: ${JSON.stringify(ep.fields)}`
+      ).join('\n\n');
 
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
         messages: [
           {
             role: "system",
-            content: `Extract structured data from this field service conversation for API submission.
+            content: `Extract structured data from conversation for API submission.
 
-SUPPORTED ENDPOINTS:
-1. /api/dvr - Daily Visit Reports
-   Required: dealerName, location, visitType
-   Optional: dealerType, todayOrderMt, todayCollectionRupees, feedbacks, contactPerson, contactPersonPhoneNo
-
-2. /api/tvr - Technical Visit Reports  
-   Required: siteNameConcernedPerson, phoneNo, visitType
-   Optional: emailId, clientsRemarks, salespersonRemarks
+RELEVANT ENDPOINTS (Vector Search Results):
+${endpointDetails}
 
 RESPONSE FORMAT:
-Success: {"endpoint": "/api/dvr", "data": {"dealerName": "ABC Corp", "location": "Mumbai", "visitType": "Regular", ...}}
-Error: {"error": "Missing required fields: dealerName, location"}
+Success: {"endpoint": "/api/dvr", "data": {"dealerName": "ABC Corp", "location": "Mumbai", ...}}
+Error: {"error": "Missing required fields"}
 
-Only return structured data if you can identify the report type and have the required fields.`
+Only return structured data if you can identify the endpoint and have required fields.`
           },
           { role: "user", content: conversation }
         ],
-        max_tokens: 500,
+        max_tokens: 600,
         temperature: 0.1,
       });
 
       const response = completion.choices[0]?.message?.content;
       const extracted = JSON.parse(response || '{"error": "Failed to extract data"}');
       
-      console.log("✅ Data extraction completed:", extracted.endpoint || extracted.error);
+      console.log("✅ Enhanced data extraction completed:", extracted.endpoint || extracted.error);
       return extracted;
     } catch (error) {
-      console.error("❌ Data extraction failed:", error);
+      console.error("❌ Enhanced data extraction failed:", error);
       return { error: "Failed to extract structured data from conversation" };
     }
   }
 
-  // Simple data fetchers
-  async fetchRecentDealers(userId?: number): Promise<any[]> {
+  // 📊 Fetch data with your auto-CRUD endpoints
+  async fetchData(endpoint: string, userId?: number, params: any = {}): Promise<any[]> {
     try {
       const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
-      const response = await fetch(`${baseUrl}/api/dealers/user/${userId}?limit=5`);
+      const queryParams = new URLSearchParams({ limit: '10', ...params }).toString();
+      const url = `${baseUrl}${endpoint}/user/${userId}?${queryParams}`;
+      
+      const response = await fetch(url);
       const result = await response.json();
       return response.ok ? (result.data || []) : [];
     } catch (error) {
-      return [];
-    }
-  }
-
-  async fetchRecentDVRs(userId?: number): Promise<any[]> {
-    try {
-      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
-      const response = await fetch(`${baseUrl}/api/dvr/user/${userId}?limit=5`);
-      const result = await response.json();
-      return response.ok ? (result.data || []) : [];
-    } catch (error) {
-      return [];
-    }
-  }
-
-  async fetchRecentTVRs(userId?: number): Promise<any[]> {
-    try {
-      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
-      const response = await fetch(`${baseUrl}/api/tvr/user/${userId}?limit=5`);
-      const result = await response.json();
-      return response.ok ? (result.data || []) : [];
-    } catch (error) {
+      console.error(`❌ Fetch failed for ${endpoint}:`, error);
       return [];
     }
   }
 }
 
-export default new PureRAGService();
-export { PureRAGService, ChatMessage };
+export default new EnhancedRAGService();
+export { EnhancedRAGService, ChatMessage };

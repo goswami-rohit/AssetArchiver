@@ -344,8 +344,11 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ==================== AI/RAG ROUTES (EXISTING) ====================
-  // ==================== IMPROVED RAG ENDPOINTS ====================
+  // ==================== ENHANCED AI/RAG ROUTES ====================
+  // Import the enhanced service
+  import EnhancedRAGService from 'server/bot/aiService';
+
+  // 🚀 ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
@@ -368,26 +371,144 @@ export function setupWebRoutes(app: Express) {
         }
       }
 
-      // Process with improved RAG service
-      const aiResponse = await PureRAGService.chat(messages, userId);
+      // Process with enhanced RAG service (vector search enabled)
+      const aiResponse = await EnhancedRAGService.chat(messages, userId);
 
       res.json({
         success: true,
         message: aiResponse,
         timestamp: new Date().toISOString(),
         userId: userId,
-        messageCount: messages.length
+        messageCount: messages.length,
+        enhanced: true // Flag to indicate vector search was used
       });
     } catch (error) {
-      console.error('RAG Chat error:', error);
+      console.error('Enhanced RAG Chat error:', error);
       res.status(500).json({
         success: false,
-        error: 'RAG chat processing failed. Please try again.',
+        error: 'Enhanced RAG chat processing failed. Please try again.',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
 
+  // 🤖 INTELLIGENT RAG CHAT (Complete Vector Flow)
+  app.post('/api/rag/vector-chat', async (req: Request, res: Response) => {
+    try {
+      const { message, userId }: { message: string, userId?: number } = req.body;
+
+      if (!message || typeof message !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Message is required and must be a string'
+        });
+      }
+
+      console.log(`🤖 Vector RAG request from user ${userId}: "${message.substring(0, 50)}..."`);
+
+      // Use intelligent RAG with vector search + direct execution
+      const result = await EnhancedRAGService.ragChat(message, userId);
+
+      res.json({
+        success: result.success,
+        message: result.message,
+        endpoint: result.endpoint,
+        similarity: result.similarity,
+        data: result.data,
+        guidance: result.guidance,
+        error: result.error,
+        suggestion: result.suggestion,
+        timestamp: new Date().toISOString(),
+        vectorSearch: true
+      });
+    } catch (error) {
+      console.error('Vector RAG Chat error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Vector RAG processing failed. Please try again.',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // 🔍 VECTOR-POWERED ENDPOINT DISCOVERY
+  app.post('/api/rag/find-endpoint', async (req: Request, res: Response) => {
+    try {
+      const { query }: { query: string } = req.body;
+
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Query is required and must be a string'
+        });
+      }
+
+      console.log(`🔍 Vector endpoint search: "${query}"`);
+
+      const bestEndpoint = await EnhancedRAGService.findBestEndpoint(query);
+
+      if (!bestEndpoint) {
+        return res.status(404).json({
+          success: false,
+          error: 'No relevant endpoint found via vector search',
+          suggestion: 'Try a more specific query about visits, reports, dealers, or attendance'
+        });
+      }
+
+      res.json({
+        success: true,
+        endpoint: bestEndpoint,
+        message: `✅ Found relevant endpoint: ${bestEndpoint.name}`,
+        similarity: bestEndpoint.similarity,
+        description: bestEndpoint.description,
+        requiredFields: bestEndpoint.requiredFields
+      });
+    } catch (error) {
+      console.error('Vector endpoint discovery error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Vector endpoint discovery failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // ⚡ DIRECT API EXECUTION
+  app.post('/api/rag/execute', async (req: Request, res: Response) => {
+    try {
+      const { endpoint, data, userId }: { endpoint: string, data: any, userId?: number } = req.body;
+
+      if (!endpoint || !data) {
+        return res.status(400).json({
+          success: false,
+          error: 'Endpoint and data are required for direct execution'
+        });
+      }
+
+      console.log(`⚡ Direct execution: ${endpoint} for user ${userId}`);
+
+      const result = await EnhancedRAGService.executeEndpoint(endpoint, data, userId);
+
+      res.json({
+        success: result.success,
+        data: result.data,
+        endpoint: result.endpoint,
+        error: result.error,
+        details: result.details,
+        timestamp: new Date().toISOString(),
+        directExecution: true
+      });
+    } catch (error) {
+      console.error('Direct API execution error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Direct API execution failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // 📋 ENHANCED DATA EXTRACTION & SUBMISSION
   app.post('/api/rag/submit', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
@@ -417,161 +538,140 @@ export function setupWebRoutes(app: Express) {
         }
       }
 
-      // Extract structured data using improved service
-      const extracted = await PureRAGService.extractStructuredData(messages, userId);
+      console.log(`📋 Enhanced data extraction for user ${userId}`);
+
+      // Enhanced structured data extraction with vector context
+      const extracted = await EnhancedRAGService.extractStructuredData(messages, userId);
 
       if (!extracted || extracted.error) {
         return res.status(400).json({
           success: false,
-          error: extracted?.error || 'Unable to extract sufficient data from conversation. Please provide more details.',
-          suggestion: 'Try providing specific information like dealer name, location, visit type, etc.'
+          error: extracted?.error || 'Unable to extract sufficient data from conversation.',
+          suggestion: 'Try providing specific information like dealer name, location, visit type, etc.',
+          vectorSearch: true
         });
       }
 
-      // Enhanced submission with proper endpoint routing
-      let submitResult;
-      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
+      // Direct execution using enhanced service
+      const executionResult = await EnhancedRAGService.executeEndpoint(
+        extracted.endpoint,
+        extracted.data,
+        userId
+      );
 
-      if (extracted.endpoint === '/api/dvr') {
-        console.log('🎯 Submitting to auto-CRUD DVR endpoint with data:', extracted.data);
-
-        const response = await fetch(`${baseUrl}/api/dvr`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'RAG-Service/1.0'
-          },
-          body: JSON.stringify({ userId: userId, ...extracted.data })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          return res.status(response.status).json({
-            success: false,
-            error: `Daily Visit Report submission failed: ${errorData.error || 'Validation error'}`,
-            details: errorData.details || {},
-            endpoint: extracted.endpoint,
-            validationErrors: errorData.details || []
-          });
-        }
-
-        submitResult = await response.json();
-
-      } else if (extracted.endpoint === '/api/tvr') {
-        console.log('🔧 Submitting to auto-CRUD TVR endpoint with data:', extracted.data);
-
-        const response = await fetch(`${baseUrl}/api/tvr`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': 'RAG-Service/1.0'
-          },
-          body: JSON.stringify({ userId: userId, ...extracted.data })
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          return res.status(response.status).json({
-            success: false,
-            error: `Technical Visit Report submission failed: ${errorData.error || 'Validation error'}`,
-            details: errorData.details || {},
-            endpoint: extracted.endpoint,
-            validationErrors: errorData.details || []
-          });
-        }
-
-        submitResult = await response.json();
-
-      } else {
+      if (!executionResult.success) {
         return res.status(400).json({
           success: false,
-          error: `Unsupported endpoint: ${extracted.endpoint}`,
-          supportedEndpoints: ['/api/dvr', '/api/tvr'],
-          suggestion: 'Please specify if this is a Daily Visit Report (DVR) or Technical Visit Report (TVR)'
+          error: `Submission failed: ${executionResult.error}`,
+          details: executionResult.details,
+          endpoint: extracted.endpoint,
+          validationErrors: executionResult.details
         });
       }
 
       // Enhanced success response
-      const reportType = extracted.endpoint === '/api/dvr' ? 'Daily Visit Report' : 'Technical Visit Report';
+      const endpointName = extracted.endpoint.replace('/api/', '').toUpperCase();
 
       res.json({
         success: true,
         endpoint: extracted.endpoint,
-        recordId: submitResult.data?.id,
-        data: submitResult.data,
-        message: `✅ Successfully submitted ${reportType}!`,
+        recordId: executionResult.data?.id,
+        data: executionResult.data,
+        message: `✅ Successfully submitted ${endpointName} via enhanced RAG!`,
         submissionDetails: {
-          reportType,
-          recordId: submitResult.data?.id,
+          endpointName,
+          recordId: executionResult.data?.id,
           submittedAt: new Date().toISOString(),
           userId: userId,
-          fieldsSubmitted: Object.keys(extracted.data || {}).length
+          fieldsSubmitted: Object.keys(extracted.data || {}).length,
+          vectorSearch: true,
+          directExecution: true
         }
       });
     } catch (error) {
-      console.error('RAG Submit error:', error);
+      console.error('Enhanced RAG Submit error:', error);
       res.status(500).json({
         success: false,
-        error: 'RAG submission processing failed. Please try again.',
+        error: 'Enhanced RAG submission processing failed. Please try again.',
         details: error instanceof Error ? error.message : 'Unknown error',
         suggestion: 'Check your data format and try submitting again'
       });
     }
   });
 
-  app.post('/api/ai/chat', async (req: Request, res: Response) => {
+  // 📊 SMART DATA FETCHING
+  app.get('/api/rag/fetch/:endpoint/user/:userId', async (req: Request, res: Response) => {
     try {
-      const { message, userId, context }: {
-        message: string,
-        userId: number,
-        context?: any
-      } = req.body;
+      const { endpoint, userId } = req.params;
+      const { limit = '10', ...filters } = req.query;
 
-      if (!message || typeof message !== 'string') {
+      if (!endpoint || !userId) {
         return res.status(400).json({
           success: false,
-          error: 'Message is required and must be a string'
+          error: 'Endpoint and userId are required'
         });
       }
 
-      if (!userId || typeof userId !== 'number') {
-        return res.status(400).json({
-          success: false,
-          error: 'UserId is required and must be a number'
-        });
-      }
+      console.log(`📊 Smart data fetch: ${endpoint} for user ${userId}`);
 
-      console.log(`🎭 AI Orchestration request from user ${userId}: "${message.substring(0, 50)}..."`);
-
-      const orchestrationResult = await PureRAGService.orchestrateAI(message, userId, context || {});
-
-      if (!orchestrationResult.success) {
-        return res.status(500).json({
-          success: false,
-          error: orchestrationResult.error || 'Orchestration failed',
-          executedSteps: orchestrationResult.executedSteps
-        });
-      }
+      const data = await EnhancedRAGService.fetchData(
+        `/api/${endpoint}`,
+        parseInt(userId),
+        { limit, ...filters }
+      );
 
       res.json({
         success: true,
-        message: orchestrationResult.finalResponse,
-        executedSteps: orchestrationResult.executedSteps,
-        orchestrationData: {
-          stepsCount: orchestrationResult.executedSteps.length,
-          toolsUsed: orchestrationResult.executedSteps.map(step => step.type)
-        }
+        endpoint: `/api/${endpoint}`,
+        data: data,
+        count: data.length,
+        userId: parseInt(userId),
+        filters: filters,
+        timestamp: new Date().toISOString()
       });
-
     } catch (error) {
-      console.error('❌ AI Orchestration error:', error);
+      console.error('Smart data fetch error:', error);
       res.status(500).json({
         success: false,
-        error: 'AI orchestration failed. Try again.'
+        error: 'Smart data fetching failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
 
+  // 🎯 RAG HEALTH CHECK with Vector Status
+  app.get('/api/rag/health', async (req: Request, res: Response) => {
+    try {
+      // Test Qdrant connection
+      const qdrantStatus = await qdrantClient.getCollections();
+
+      res.json({
+        success: true,
+        status: 'Enhanced RAG System Online',
+        features: {
+          vectorSearch: true,
+          directExecution: true,
+          autoCrudIntegration: true,
+          uiAwareness: true
+        },
+        qdrant: {
+          connected: true,
+          collections: qdrantStatus.collections.length
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        status: 'RAG System Degraded',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        qdrant: {
+          connected: false,
+          error: 'Connection failed'
+        }
+      });
+    }
+  });
   // ============================================
   // SCHEMA-PERFECT AUTO-GENERATED CRUD ROUTES
   // ============================================
