@@ -1,6 +1,6 @@
+// aiService.ts - PURE RAG with FREE OpenAI model ONLY
 import OpenAI from 'openai';
-import { QdrantClient } from '@qdrant/js-client-rest';
-import { pipeline } from '@xenova/transformers';
+import fs from 'fs';
 import path from 'path';
 
 interface ChatMessage {
@@ -8,45 +8,13 @@ interface ChatMessage {
   content: string;
 }
 
-interface OrchestrationStep {
-  type: string;
-  data?: any;
-  userId?: number;
-  id?: string;
-  dealerId?: string;
-  messages?: ChatMessage[];
-  output?: any;
-}
-
-interface OrchestrationPlan {
-  intent: string;
-  steps: OrchestrationStep[];
-  isMultiStep: boolean;
-}
-
-interface OrchestrationResult {
-  success: boolean;
-  finalResponse: string;
-  executedSteps: OrchestrationStep[];
-  error?: string;
-}
-
 class PureRAGService {
   private openai: OpenAI;
-  private qdrant: QdrantClient;
-  private embedder: any;
-  private endpointContext: string = '';
+  private endpointContext: any[] = [];
   private ready: Promise<void>;
 
   constructor() {
-    const requiredEnvVars = ["OPENROUTER_API_KEY", "QDRANT_API_KEY"];
-    requiredEnvVars.forEach((envVar) => {
-      if (!process.env[envVar]) {
-        throw new Error(`❌ Missing environment variable: ${envVar}`);
-      }
-    });
-
-    // OpenRouter with FREE models ONLY for orchestration
+    // OpenRouter with FREE model ONLY
     this.openai = new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: process.env.OPENROUTER_API_KEY!,
@@ -56,307 +24,166 @@ class PureRAGService {
       },
     });
 
-    // YOUR Qdrant instance
-    this.qdrant = new QdrantClient({
-      url: "https://159aa838-50db-435a-b6d7-46b432c554ba.eu-west-1-0.aws.cloud.qdrant.io:6333",
-      apiKey: process.env.QDRANT_API_KEY!,
-    });
-
     this.ready = this.initialize();
   }
 
   private async initialize() {
-    console.log("🚀 Initializing AI Service...");
-    
-    // Load embedding model EXACTLY like YOUR scripts/generate-embeddings.js
-    console.log("📦 Loading model: Xenova/all-MiniLM-L6-v2");
-    this.embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-    console.log("✅ Local embedding model loaded (FREE!)");
-
+    console.log("🚀 Initializing PURE RAG Service with FREE model...");
     await this.loadRAGContext();
   }
 
   private async loadRAGContext() {
-    console.log("📥 Loading RAG context from YOUR Qdrant...");
+    console.log("📥 Loading static RAG context...");
 
     try {
-      // Use YOUR collection name from scripts/upload-embeddings.js
-      const response = await this.qdrant.scroll("api_endpoints", {
-        limit: 100,
-        with_payload: true,
-        with_vector: false,
-      });
-
-      const endpoints = response.points.map((point) => point.payload);
-      this.endpointContext = `AVAILABLE ENDPOINTS: ${endpoints.length} tools loaded`;
-      console.log(`✅ RAG context loaded (${endpoints.length} endpoints)`);
+      // Load from local embeddings file
+      const embeddingsPath = path.join(process.cwd(), 'data', 'endpoint-embeddings.json');
+      const fileContent = fs.readFileSync(embeddingsPath, 'utf8');
+      this.endpointContext = JSON.parse(fileContent);
+      console.log(`✅ RAG context loaded (${this.endpointContext.length} endpoints)`);
     } catch (error) {
       console.error("❌ Failed to load RAG context:", error);
-      throw error;
+      this.endpointContext = [];
     }
   }
 
-  // 🤖 MAIN ORCHESTRATION FUNCTION - ONLY entry point
-  async orchestrateAI(userMessage: string, userId: number, context: any = {}): Promise<OrchestrationResult> {
-    await this.ready;
-    console.log("🎭 Starting AI orchestration...");
-
-    try {
-      // Step 1: Find relevant tools using YOUR local embeddings
-      const relevantTools = await this.findRelevantTools(userMessage);
-      
-      // Step 2: Create plan using FREE model
-      const plan = await this.createOrchestrationPlan(userMessage, relevantTools, userId, context);
-      
-      // Step 3: Execute using YOUR Orchestrator
-      const result = await this.executePlan(plan, userId, context);
-      
-      return result;
-    } catch (error) {
-      console.error("❌ Orchestration failed:", error);
-      throw error;
-    }
-  }
-
-  // 🔍 STEP 1: Find tools using YOUR embedding setup
-  private async findRelevantTools(userMessage: string): Promise<any[]> {
-    console.log("🔍 Finding relevant tools via LOCAL embeddings...");
+  // 🔍 Static keyword matching for relevant endpoints
+  private findRelevantEndpoints(userMessage: string): any[] {
+    console.log("🔍 Finding relevant endpoints...");
     
-    try {
-      // Generate embedding EXACTLY like YOUR scripts/generate-embeddings.js
-      const output = await this.embedder(userMessage, { pooling: 'mean', normalize: true });
-      const embedding = Array.from(output.data);
-      console.log(`✅ Generated ${embedding.length}-dimensional embedding (FREE!)`);
+    const query = userMessage.toLowerCase();
+    const relevantEndpoints = [];
+
+    for (const endpoint of this.endpointContext) {
+      const searchText = `${endpoint.name} ${endpoint.description} ${endpoint.searchTerms}`.toLowerCase();
       
-      // Search YOUR Qdrant collection
-      const searchResult = await this.qdrant.search("api_endpoints", {
-        vector: embedding,
-        limit: 5,
-        score_threshold: 0.7,
-        with_payload: true
-      });
+      // Simple keyword matching
+      let score = 0;
+      const keywords = query.split(' ').filter(word => word.length > 2);
       
-      const relevantTools = searchResult.map(point => point.payload);
-      console.log(`✅ Found ${relevantTools.length} relevant tools`);
-      
-      return relevantTools;
-    } catch (error) {
-      console.error("❌ Tool search failed:", error);
-      throw error;
-    }
-  }
-
-  // 📋 STEP 2: Create plan using FREE model ONLY
-  private async createOrchestrationPlan(
-    userMessage: string, 
-    relevantTools: any[], 
-    userId: number, 
-    context: any
-  ): Promise<OrchestrationPlan> {
-    console.log("📋 Creating orchestration plan...");
-    
-    try {
-      const planningPrompt = `
-Analyze this user request and create an execution plan:
-
-USER MESSAGE: "${userMessage}"
-USER ID: ${userId}
-
-AVAILABLE ACTION TYPES:
-DVR: create_dvr, get_dvrs, get_dvr, update_dvr, delete_dvr
-TVR: create_tvr, get_tvrs, get_tvr, update_tvr, delete_tvr  
-PJP: create_pjp, get_pjps, get_pjp, update_pjp, delete_pjp
-DEALERS: create_dealer, get_dealers, get_dealer, update_dealer, delete_dealer
-CLIENT REPORTS: create_client_report, get_client_reports, get_client_report, update_client_report, delete_client_report
-COMPETITION REPORTS: create_competition_report, get_competition_reports, get_competition_report, update_competition_report, delete_competition_report
-DEALER SCORES: create_dealer_score, get_dealer_scores, update_dealer_score
-ATTENDANCE: punch_in
-CHECKIN: check_in, check_out, create_tracking, get_tracking
-RAG: rag_chat, rag_extract, rag_submit
-
-RELEVANT TOOLS:
-${relevantTools.map(tool => `- ${tool.name}: ${tool.description}`).join('\n')}
-
-Respond with JSON:
-{
-  "intent": "what user wants",
-  "steps": [{"type": "action_type", "data": {...}, "userId": ${userId}}],
-  "isMultiStep": false
-}
-`;
-
-      const completion = await this.openai.chat.completions.create({
-        model: "openai/gpt-oss-20b:free",
-        messages: [
-          { role: "system", content: "You are a planning assistant. Always respond with valid JSON." },
-          { role: "user", content: planningPrompt }
-        ],
-        max_tokens: 800,
-        temperature: 0.1,
-      });
-
-      const planResponse = completion.choices[0]?.message?.content;
-      const plan = JSON.parse(planResponse || '{"intent": "unknown", "steps": [], "isMultiStep": false}');
-      
-      console.log(`✅ Plan created: ${plan.intent} (${plan.steps.length} steps)`);
-      return plan;
-    } catch (error) {
-      console.error("❌ Planning failed:", error);
-      throw error;
-    }
-  }
-
-  // ⚡ STEP 3: Execute using YOUR Orchestrator directory
-  private async executePlan(plan: OrchestrationPlan, userId: number, context: any): Promise<OrchestrationResult> {
-    console.log("⚡ Executing orchestration plan...");
-    
-    const executedSteps: OrchestrationStep[] = [];
-    
-    try {
-      // Load YOUR Orchestrator/index.js
-      const { orchestrate } = require(path.join(process.cwd(), 'Orchestrator', 'index.js'));
-      
-      if (plan.isMultiStep) {
-        let previousOutput = null;
-        
-        for (const step of plan.steps) {
-          console.log(`🔄 Executing step: ${step.type}`);
-          
-          const orchestratorInput = {
-            type: step.type,
-            userId: step.userId || userId,
-            data: step.data || {},
-            id: step.id,
-            dealerId: step.dealerId,
-            messages: step.messages,
-            previousOutput
-          };
-          
-          // Use YOUR orchestrator (calls YOUR decisionLogic.js + executor.js + tools)
-          const stepResult = await orchestrate(orchestratorInput);
-          
-          step.output = stepResult;
-          executedSteps.push(step);
-          previousOutput = stepResult;
-        }
-      } else {
-        if (plan.steps.length > 0) {
-          const step = plan.steps[0];
-          console.log(`🔄 Executing single step: ${step.type}`);
-          
-          const orchestratorInput = {
-            type: step.type,
-            userId: step.userId || userId,
-            data: step.data || {},
-            id: step.id,
-            dealerId: step.dealerId,
-            messages: step.messages
-          };
-          
-          // Use YOUR orchestrator
-          const stepResult = await orchestrate(orchestratorInput);
-          
-          step.output = stepResult;
-          executedSteps.push(step);
+      for (const keyword of keywords) {
+        if (searchText.includes(keyword)) {
+          score++;
         }
       }
       
-      // Generate final response
-      const finalResponse = await this.generateFinalResponse(plan, executedSteps);
-      
-      return {
-        success: true,
-        finalResponse,
-        executedSteps
-      };
-    } catch (error) {
-      console.error("❌ Execution failed:", error);
-      throw error;
+      if (score > 0) {
+        relevantEndpoints.push({ ...endpoint, score });
+      }
     }
+
+    // Sort by relevance score and return top 5
+    return relevantEndpoints
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
   }
 
-  // 📝 Generate final response using FREE model
-  private async generateFinalResponse(
-    plan: OrchestrationPlan, 
-    executedSteps: OrchestrationStep[]
-  ): Promise<string> {
-    console.log("📝 Generating final AI response...");
-    
+  // 💬 Pure RAG Chat using FREE model
+  async chat(messages: ChatMessage[], userId?: number): Promise<string> {
+    await this.ready;
+    console.log("💬 Pure RAG processing...");
+
     try {
-      const executionSummary = executedSteps.map(step => 
-        `${step.type}: ${JSON.stringify(step.output)}`
-      ).join('\n');
+      const userMessage = messages[messages.length - 1]?.content || '';
       
+      // 1. RETRIEVE: Find relevant endpoints
+      const relevantEndpoints = this.findRelevantEndpoints(userMessage);
+      
+      // 2. AUGMENT: Build context
+      const endpointContext = relevantEndpoints.length > 0 
+        ? relevantEndpoints.map(ep => `- ${ep.name}: ${ep.description} (${ep.method} ${ep.endpoint})`).join('\n')
+        : 'Available services: Daily Visit Reports, Technical Visit Reports, Journey Plans, Dealer Management, Attendance';
+      
+      const conversationHistory = messages.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
+      
+      // 3. GENERATE: Use FREE model for response
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
         messages: [
           {
             role: "system",
-            content: `You are a helpful field service assistant. Create a natural response.
-            
-INTENT: ${plan.intent}
-RESULTS: ${executionSummary}
+            content: `You are a helpful field service assistant. Help users with their tasks.
 
-Provide a conversational, helpful response.`
+AVAILABLE SERVICES:
+${endpointContext}
+
+RECENT CONVERSATION:
+${conversationHistory}
+
+Guidelines:
+- For data collection (DVR/TVR), ask questions step by step to gather required information
+- For data queries, guide them to the right endpoints
+- Be conversational and helpful
+- If collecting data for submission, ask for one field at a time
+- Keep responses concise and actionable`
           },
-          { role: "user", content: "Summarize what was accomplished." }
+          { role: "user", content: userMessage }
         ],
         max_tokens: 400,
         temperature: 0.7,
       });
 
-      return completion.choices[0]?.message?.content || "Task completed successfully.";
+      const response = completion.choices[0]?.message?.content || "I'm here to help with your field service tasks!";
+      console.log("✅ RAG response generated with FREE model");
+      return response;
     } catch (error) {
-      console.error("❌ Final response generation failed:", error);
-      throw error;
+      console.error("❌ RAG Chat failed:", error);
+      return "I'm experiencing some technical difficulties. Please try again.";
     }
   }
 
-  // 💬 ONLY orchestration - NO fallbacks
-  async chat(messages: ChatMessage[], userId?: number): Promise<string> {
-    await this.ready;
-    console.log("💬 Chat request received - routing to orchestration");
-
-    if (!userId) {
-      throw new Error("User ID required for orchestration");
-    }
-
-    const lastMessage = messages[messages.length - 1]?.content;
-    const result = await this.orchestrateAI(lastMessage, userId, { messages });
-    return result.finalResponse;
-  }
-
-  // Keep existing methods for backward compatibility
+  // 📋 Extract Structured Data using FREE model
   async extractStructuredData(messages: ChatMessage[], userId?: number): Promise<any> {
     await this.ready;
-    const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+    console.log("📋 Extracting structured data with FREE model...");
 
     try {
+      const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
+
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
         messages: [
           {
             role: "system",
-            content: `Extract structured data from this conversation.
-Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"error": "reason"}`
+            content: `Extract structured data from this field service conversation for API submission.
+
+SUPPORTED ENDPOINTS:
+1. /api/dvr - Daily Visit Reports
+   Required: dealerName, location, visitType
+   Optional: dealerType, todayOrderMt, todayCollectionRupees, feedbacks, contactPerson, contactPersonPhoneNo
+
+2. /api/tvr - Technical Visit Reports  
+   Required: siteNameConcernedPerson, phoneNo, visitType
+   Optional: emailId, clientsRemarks, salespersonRemarks
+
+RESPONSE FORMAT:
+Success: {"endpoint": "/api/dvr", "data": {"dealerName": "ABC Corp", "location": "Mumbai", "visitType": "Regular", ...}}
+Error: {"error": "Missing required fields: dealerName, location"}
+
+Only return structured data if you can identify the report type and have the required fields.`
           },
           { role: "user", content: conversation }
         ],
-        max_tokens: 400,
+        max_tokens: 500,
         temperature: 0.1,
       });
 
       const response = completion.choices[0]?.message?.content;
-      return JSON.parse(response || '{"error": "Failed to extract data"}');
+      const extracted = JSON.parse(response || '{"error": "Failed to extract data"}');
+      
+      console.log("✅ Data extraction completed:", extracted.endpoint || extracted.error);
+      return extracted;
     } catch (error) {
       console.error("❌ Data extraction failed:", error);
-      return { error: "Failed to extract structured data" };
+      return { error: "Failed to extract structured data from conversation" };
     }
   }
 
-  private async fetchRecentDealers(userId: number): Promise<any[]> {
+  // Simple data fetchers
+  async fetchRecentDealers(userId?: number): Promise<any[]> {
     try {
-      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dealers/recent?limit=5`);
+      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
+      const response = await fetch(`${baseUrl}/api/dealers/user/${userId}?limit=5`);
       const result = await response.json();
       return response.ok ? (result.data || []) : [];
     } catch (error) {
@@ -364,9 +191,10 @@ Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"e
     }
   }
 
-  private async fetchRecentDVRs(userId: number): Promise<any[]> {
+  async fetchRecentDVRs(userId?: number): Promise<any[]> {
     try {
-      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr/recent?userId=${userId}&limit=5`);
+      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
+      const response = await fetch(`${baseUrl}/api/dvr/user/${userId}?limit=5`);
       const result = await response.json();
       return response.ok ? (result.data || []) : [];
     } catch (error) {
@@ -374,9 +202,10 @@ Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"e
     }
   }
 
-  private async fetchRecentTVRs(userId: number): Promise<any[]> {
+  async fetchRecentTVRs(userId?: number): Promise<any[]> {
     try {
-      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr/recent?userId=${userId}&limit=5`);
+      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
+      const response = await fetch(`${baseUrl}/api/tvr/user/${userId}?limit=5`);
       const result = await response.json();
       return response.ok ? (result.data || []) : [];
     } catch (error) {
@@ -386,4 +215,4 @@ Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"e
 }
 
 export default new PureRAGService();
-export { PureRAGService, ChatMessage, OrchestrationResult, OrchestrationPlan };
+export { PureRAGService, ChatMessage };

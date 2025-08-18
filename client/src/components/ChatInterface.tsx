@@ -52,46 +52,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
     }));
   }, []);
 
-  // Primary API call to /api/ai/chat
-  const callPrimaryAI = async (userInput: string): Promise<string> => {
-    const response = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message: userInput,
-        userId: currentUserId,
-        context: {
-          conversationHistory: messages.slice(-5), // Last 5 messages for context
-          timestamp: new Date().toISOString()
-        }
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Primary AI failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    
-    if (!data.success) {
-      throw new Error(data.error || 'AI orchestration failed');
-    }
-
-    setConnectionStatus('connected');
-    
-    // If the AI executed steps, show them
-    if (data.executedSteps && data.executedSteps.length > 0) {
-      const stepsInfo = data.executedSteps.map((step: any) => step.type).join(', ');
-      return `${data.message}\n\n✅ Executed: ${stepsInfo}`;
-    }
-    
-    return data.message || 'Task completed successfully.';
-  };
-
-  // Fallback to RAG chat
-  const callRAGChat = async (userInput: string): Promise<string> => {
+  // RAG Chat API call
+  const callRAGChat = useCallback(async (userInput: string): Promise<string> => {
     const chatMessages = formatMessagesForAPI(messages);
     chatMessages.push({ role: 'user', content: userInput });
 
@@ -116,12 +78,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
       throw new Error(data.error || 'RAG chat failed');
     }
 
-    setConnectionStatus('fallback');
+    setConnectionStatus('connected');
     return data.message || 'I received your message but couldn\'t process it properly.';
-  };
+  }, [messages, formatMessagesForAPI, currentUserId]);
 
-  // Final fallback to RAG submit (for structured data)
-  const callRAGSubmit = async (userInput: string): Promise<string> => {
+  // RAG Submit API call
+  const callRAGSubmit = useCallback(async (userInput: string): Promise<string> => {
     const chatMessages = formatMessagesForAPI(messages);
     chatMessages.push({ role: 'user', content: userInput });
 
@@ -137,26 +99,30 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
     });
 
     if (!response.ok) {
-      throw new Error(`RAG Submit failed: ${response.status}`);
+      const errorData = await response.json().catch(() => ({}));
+      setConnectionStatus('error');
+      return errorData.suggestion || 'Please provide more specific information for data submission.';
     }
 
     const data = await response.json();
     
     if (!data.success) {
-      throw new Error(data.error || 'RAG submit failed');
+      setConnectionStatus('error');
+      return data.suggestion || data.error || 'Could not process your submission. Please provide more details.';
     }
 
-    setConnectionStatus('fallback');
+    setConnectionStatus('connected');
     
     if (data.endpoint && data.recordId) {
-      return `✅ Successfully created ${data.endpoint.replace('/api/', '').toUpperCase()} record #${data.recordId}!\n\n${data.message}`;
+      return `✅ Successfully created ${data.submissionDetails?.reportType || 'record'} #${data.recordId}!\n\n${data.message}`;
     }
     
     return data.message || 'Data submitted successfully.';
-  };
+  }, [messages, formatMessagesForAPI, currentUserId]);
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+  // Main message handler - FIXED AND CONNECTED
+  const handleSendMessage = useCallback(async (userInput: string) => {
+    if (!userInput.trim() || isLoading) return;
 
     if (!currentUserId) {
       const errorMessage: Message = {
@@ -170,71 +136,97 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
       return;
     }
 
+    // Add user message
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: input.trim(),
+      content: userInput.trim(),
       sender: 'user',
       timestamp: new Date()
     };
 
     setMessages(prev => [...prev, userMessage]);
-    const currentInput = input.trim();
-    setInput('');
     setIsLoading(true);
+    setConnectionStatus('connected');
 
     try {
       let aiResponse: string;
       
-      // Try primary AI first
       try {
-        console.log('🎯 Trying primary AI endpoint...');
-        aiResponse = await callPrimaryAI(currentInput);
-      } catch (primaryError) {
-        console.warn('Primary AI failed, trying RAG chat...', primaryError);
+        console.log('🎯 Trying RAG Chat...');
+        // 1. Try RAG Chat first (for conversations and guidance)
+        aiResponse = await callRAGChat(userInput);
         
-        // Fallback to RAG chat
-        try {
-          aiResponse = await callRAGChat(currentInput);
-        } catch (ragChatError) {
-          console.warn('RAG chat failed, trying RAG submit...', ragChatError);
+        // 2. If chat response suggests data submission, try RAG submit
+        if (aiResponse.toLowerCase().includes('submit') || 
+            aiResponse.toLowerCase().includes('create') ||
+            userInput.toLowerCase().includes('submit report') ||
+            userInput.toLowerCase().includes('save report')) {
           
-          // Final fallback to RAG submit
-          try {
-            aiResponse = await callRAGSubmit(currentInput);
-          } catch (ragSubmitError) {
-            console.error('All AI endpoints failed:', ragSubmitError);
-            setConnectionStatus('error');
-            throw new Error('All AI services are currently unavailable. Please try again later.');
+          console.log('🔄 Attempting data submission via RAG submit...');
+          const submitResponse = await callRAGSubmit(userInput);
+          
+          // If submission was successful, use that response
+          if (submitResponse.includes('✅ Successfully')) {
+            aiResponse = submitResponse;
+            setConnectionStatus('connected');
           }
+        }
+        
+      } catch (chatError) {
+        console.warn('RAG Chat failed, trying RAG Submit:', chatError);
+        
+        // If RAG chat fails, try RAG submit as fallback
+        try {
+          aiResponse = await callRAGSubmit(userInput);
+          setConnectionStatus('fallback');
+        } catch (submitError) {
+          console.error('Both RAG endpoints failed:', { chatError, submitError });
+          setConnectionStatus('error');
+          aiResponse = 'I apologize, but I\'m experiencing technical difficulties. Please try again or contact support.';
         }
       }
 
+      // Add AI response to messages
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: aiResponse,
         sender: 'ai',
         timestamp: new Date(),
-        type: connectionStatus === 'connected' ? 'action' : 'message'
+        type: connectionStatus === 'connected' ? 'action' : connectionStatus === 'fallback' ? 'message' : 'error'
       };
-
+      
       setMessages(prev => [...prev, aiMessage]);
       
     } catch (error) {
-      console.error('Error sending message:', error);
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: error instanceof Error ? error.message : 'Sorry, I encountered an error. Please try again.',
+      console.error('Message handling failed:', error);
+      setConnectionStatus('error');
+      
+      const errorMessage: Message = { 
+        id: (Date.now() + 2).toString(),
+        content: 'I apologize, but I encountered an error processing your message. Please try again.', 
         sender: 'ai',
         timestamp: new Date(),
         type: 'error'
       };
       setMessages(prev => [...prev, errorMessage]);
-      setConnectionStatus('error');
     } finally {
       setIsLoading(false);
-      inputRef.current?.focus();
     }
-  }, [input, isLoading, messages, currentUserId, connectionStatus]);
+  }, [isLoading, currentUserId, callRAGChat, callRAGSubmit, connectionStatus]);
+
+  // Send message wrapper - PROPERLY CONNECTED
+  const sendMessage = useCallback(async () => {
+    if (!input.trim() || isLoading) return;
+
+    const currentInput = input.trim();
+    setInput(''); // Clear input immediately
+    
+    // Call the main handler
+    await handleSendMessage(currentInput);
+    
+    // Focus input after processing
+    inputRef.current?.focus();
+  }, [input, isLoading, handleSendMessage]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -270,11 +262,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
     },
   ];
 
-  // Connection status indicator
+  // Connection status indicator - UPDATED for RAG
   const getStatusIndicator = () => {
     switch (connectionStatus) {
       case 'connected':
-        return { color: 'bg-green-400', text: 'AI Orchestration Active' };
+        return { color: 'bg-green-400', text: 'RAG System Active' };
       case 'fallback':
         return { color: 'bg-yellow-400', text: 'Using Fallback Mode' };
       case 'error':

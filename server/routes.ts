@@ -1,4 +1,4 @@
-// routes.ts - COMPLETE IMPLEMENTATION
+// routes.ts - COMPLETE IMPLEMENTATION WITH AUTO-CRUD
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
 import {
@@ -65,11 +65,237 @@ const OFFICE_LOCATIONS = [
     polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
   }
 ];
+
+// ============================================
+// SCHEMA-PERFECT AUTO-CRUD GENERATOR
+// ============================================
+function createAutoCRUD(app: Express, config: {
+  endpoint: string,
+  table: any,
+  schema: z.ZodSchema,
+  tableName: string,
+  autoFields?: { [key: string]: () => any },
+  dateField?: string // For date range filtering
+}) {
+  const { endpoint, table, schema, tableName, autoFields = {}, dateField } = config;
+
+  // CREATE - with perfect schema validation
+  app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
+    try {
+      // Parse and validate against exact schema
+      const parseResult = schema.safeParse(req.body);
+
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: `Validation failed for ${tableName}`,
+          details: parseResult.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.received
+          }))
+        });
+      }
+
+      const validatedData = parseResult.data;
+
+      // Apply auto-generated fields (only if not provided)
+      const finalData = { ...validatedData };
+      Object.entries(autoFields).forEach(([field, generator]) => {
+        if (finalData[field] === undefined || finalData[field] === null) {
+          finalData[field] = generator();
+        }
+      });
+
+      // Schema handles createdAt/updatedAt with defaultNow(), but ensure they're set
+      if (table.createdAt && !finalData.createdAt) {
+        finalData.createdAt = new Date();
+      }
+      if (table.updatedAt && !finalData.updatedAt) {
+        finalData.updatedAt = new Date();
+      }
+
+      const newRecord = await db.insert(table).values(finalData).returning();
+      res.json({
+        success: true,
+        data: newRecord[0],
+        message: `${tableName} created successfully`
+      });
+    } catch (error) {
+      console.error(`Create ${tableName} error:`, error);
+      res.status(500).json({
+        success: false,
+        error: `Failed to create ${tableName}`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // GET ALL by User ID - with proper date field handling
+  app.get(`/api/${endpoint}/user/:userId`, async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { startDate, endDate, limit = '50', completed, ...filters } = req.query;
+
+      // Base condition - userId is integer in schema
+      let whereCondition = eq(table.userId, parseInt(userId));
+
+      // Date range filtering using the correct date field for each table
+      if (startDate && endDate && dateField && table[dateField]) {
+        whereCondition = and(
+          whereCondition,
+          gte(table[dateField], startDate as string),
+          lte(table[dateField], endDate as string)
+        );
+      }
+
+      // Handle completed filter for PJPs
+      if (completed === 'true' && table.status) {
+        whereCondition = and(whereCondition, eq(table.status, 'completed'));
+      }
+
+      // Additional filters from query params
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value && table[key]) {
+          whereCondition = and(whereCondition, eq(table[key], value));
+        }
+      });
+
+      // Order by most relevant date field or createdAt
+      const orderField = table[dateField] || table.createdAt || table.updatedAt;
+
+      const records = await db.select().from(table)
+        .where(whereCondition)
+        .orderBy(desc(orderField))
+        .limit(parseInt(limit as string));
+
+      res.json({ success: true, data: records });
+    } catch (error) {
+      console.error(`Get ${tableName}s error:`, error);
+      res.status(500).json({
+        success: false,
+        error: `Failed to fetch ${tableName}s`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // GET BY ID - with proper UUID/varchar handling
+  app.get(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const [record] = await db.select().from(table).where(eq(table.id, id)).limit(1);
+
+      if (!record) {
+        return res.status(404).json({
+          success: false,
+          error: `${tableName} not found`
+        });
+      }
+
+      res.json({ success: true, data: record });
+    } catch (error) {
+      console.error(`Get ${tableName} error:`, error);
+      res.status(500).json({
+        success: false,
+        error: `Failed to fetch ${tableName}`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // UPDATE - with partial schema validation
+  app.put(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+
+      // Create partial schema for updates
+      const partialSchema = schema.partial();
+      const parseResult = partialSchema.safeParse(req.body);
+
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: `Validation failed for ${tableName} update`,
+          details: parseResult.error.errors.map(err => ({
+            field: err.path.join('.'),
+            message: err.message,
+            received: err.received
+          }))
+        });
+      }
+
+      const validatedData = parseResult.data;
+
+      // Always update the updatedAt field
+      const updateData = {
+        ...validatedData,
+        updatedAt: new Date()
+      };
+
+      const updatedRecord = await db.update(table)
+        .set(updateData)
+        .where(eq(table.id, id))
+        .returning();
+
+      if (!updatedRecord || updatedRecord.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: `${tableName} not found`
+        });
+      }
+
+      res.json({
+        success: true,
+        data: updatedRecord[0],
+        message: `${tableName} updated successfully`
+      });
+    } catch (error) {
+      console.error(`Update ${tableName} error:`, error);
+      res.status(500).json({
+        success: false,
+        error: `Failed to update ${tableName}`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // DELETE
+  app.delete(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const deletedRecord = await db.delete(table).where(eq(table.id, id)).returning();
+
+      if (!deletedRecord || deletedRecord.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: `${tableName} not found`
+        });
+      }
+
+      res.json({
+        success: true,
+        message: `${tableName} deleted successfully`,
+        data: deletedRecord[0]
+      });
+    } catch (error) {
+      console.error(`Delete ${tableName} error:`, error);
+      res.status(500).json({
+        success: false,
+        error: `Failed to delete ${tableName}`,
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+}
+
 export function setupWebRoutes(app: Express) {
   // PWA route
   app.get('/pwa', (req: Request, res: Response) => {
     res.redirect('/login');
   });
+
+  // ==================== AUTH ====================
   app.post('/api/auth/login', async (req: Request, res: Response) => {
     try {
       const { loginId, password } = req.body;
@@ -119,25 +345,46 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== AI/RAG ROUTES (EXISTING) ====================
+  // ==================== IMPROVED RAG ENDPOINTS ====================
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
 
-      if (!Array.isArray(messages)) {
-        return res.status(400).json({ success: false, error: 'Messages must be an array' });
+      // Enhanced validation
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Messages must be a non-empty array'
+        });
       }
 
+      // Validate message format
       for (const msg of messages) {
         if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
-          return res.status(400).json({ success: false, error: 'Invalid message format.' });
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid message format. Each message must have role (user/assistant/system) and content.'
+          });
         }
       }
 
+      // Process with improved RAG service
       const aiResponse = await PureRAGService.chat(messages, userId);
-      res.json({ success: true, message: aiResponse });
+
+      res.json({
+        success: true,
+        message: aiResponse,
+        timestamp: new Date().toISOString(),
+        userId: userId,
+        messageCount: messages.length
+      });
     } catch (error) {
       console.error('RAG Chat error:', error);
-      res.status(500).json({ success: false, error: 'Chat failed. Try again.' });
+      res.status(500).json({
+        success: false,
+        error: 'RAG chat processing failed. Please try again.',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -145,28 +392,55 @@ export function setupWebRoutes(app: Express) {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
 
-      if (!Array.isArray(messages) || !userId) {
-        return res.status(400).json({ success: false, error: 'Invalid request format' });
+      // Enhanced validation
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'Messages must be a non-empty array for data extraction'
+        });
       }
 
+      if (!userId || typeof userId !== 'number') {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid numeric userId is required for submission'
+        });
+      }
+
+      // Validate message format
       for (const msg of messages) {
         if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
-          return res.status(400).json({ success: false, error: 'Invalid message format.' });
+          return res.status(400).json({
+            success: false,
+            error: 'Invalid message format in conversation history'
+          });
         }
       }
 
+      // Extract structured data using improved service
       const extracted = await PureRAGService.extractStructuredData(messages, userId);
+
       if (!extracted || extracted.error) {
-        return res.status(400).json({ success: false, error: 'Not enough data collected.' });
+        return res.status(400).json({
+          success: false,
+          error: extracted?.error || 'Unable to extract sufficient data from conversation. Please provide more details.',
+          suggestion: 'Try providing specific information like dealer name, location, visit type, etc.'
+        });
       }
 
+      // Enhanced submission with proper endpoint routing
       let submitResult;
-      if (extracted.endpoint === '/api/dvr-manual') {
-        console.log('🎯 Submitting to DVR endpoint with data:', extracted.data);
+      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
 
-        const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr-manual`, {
+      if (extracted.endpoint === '/api/dvr') {
+        console.log('🎯 Submitting to auto-CRUD DVR endpoint with data:', extracted.data);
+
+        const response = await fetch(`${baseUrl}/api/dvr`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'RAG-Service/1.0'
+          },
           body: JSON.stringify({ userId: userId, ...extracted.data })
         });
 
@@ -174,19 +448,24 @@ export function setupWebRoutes(app: Express) {
           const errorData = await response.json();
           return res.status(response.status).json({
             success: false,
-            error: `Submission failed: ${errorData.error || 'Unknown error'}`,
-            details: errorData.details
+            error: `Daily Visit Report submission failed: ${errorData.error || 'Validation error'}`,
+            details: errorData.details || {},
+            endpoint: extracted.endpoint,
+            validationErrors: errorData.details || []
           });
         }
 
         submitResult = await response.json();
 
       } else if (extracted.endpoint === '/api/tvr') {
-        console.log('🔧 Submitting to TVR endpoint with data:', extracted.data);
+        console.log('🔧 Submitting to auto-CRUD TVR endpoint with data:', extracted.data);
 
-        const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr`, {
+        const response = await fetch(`${baseUrl}/api/tvr`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'RAG-Service/1.0'
+          },
           body: JSON.stringify({ userId: userId, ...extracted.data })
         });
 
@@ -194,27 +473,49 @@ export function setupWebRoutes(app: Express) {
           const errorData = await response.json();
           return res.status(response.status).json({
             success: false,
-            error: `Submission failed: ${errorData.error || 'Unknown error'}`,
-            details: errorData.details
+            error: `Technical Visit Report submission failed: ${errorData.error || 'Validation error'}`,
+            details: errorData.details || {},
+            endpoint: extracted.endpoint,
+            validationErrors: errorData.details || []
           });
         }
 
         submitResult = await response.json();
 
       } else {
-        return res.status(400).json({ success: false, error: `Unknown endpoint: ${extracted.endpoint}` });
+        return res.status(400).json({
+          success: false,
+          error: `Unsupported endpoint: ${extracted.endpoint}`,
+          supportedEndpoints: ['/api/dvr', '/api/tvr'],
+          suggestion: 'Please specify if this is a Daily Visit Report (DVR) or Technical Visit Report (TVR)'
+        });
       }
+
+      // Enhanced success response
+      const reportType = extracted.endpoint === '/api/dvr' ? 'Daily Visit Report' : 'Technical Visit Report';
 
       res.json({
         success: true,
         endpoint: extracted.endpoint,
-        recordId: submitResult.data?.id || submitResult.primaryDVR?.id,
-        data: submitResult,
-        message: `✅ Successfully submitted ${extracted.endpoint === '/api/dvr-manual' ? 'Daily Visit Report' : 'Technical Visit Report'}!`
+        recordId: submitResult.data?.id,
+        data: submitResult.data,
+        message: `✅ Successfully submitted ${reportType}!`,
+        submissionDetails: {
+          reportType,
+          recordId: submitResult.data?.id,
+          submittedAt: new Date().toISOString(),
+          userId: userId,
+          fieldsSubmitted: Object.keys(extracted.data || {}).length
+        }
       });
     } catch (error) {
       console.error('RAG Submit error:', error);
-      res.status(500).json({ success: false, error: 'Submission failed.' });
+      res.status(500).json({
+        success: false,
+        error: 'RAG submission processing failed. Please try again.',
+        details: error instanceof Error ? error.message : 'Unknown error',
+        suggestion: 'Check your data format and try submitting again'
+      });
     }
   });
 
@@ -271,679 +572,122 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ==================== 1. DAILY VISIT REPORTS - CRUD ====================
-  app.post('/api/dvr', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertDailyVisitReportSchema.parse(req.body);
-      const newReport = await db.insert(dailyVisitReports)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
+  // ============================================
+  // SCHEMA-PERFECT AUTO-GENERATED CRUD ROUTES
+  // ============================================
 
-      res.json({ success: true, data: newReport[0], message: 'DVR submitted successfully' });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        error: 'Failed to submit DVR',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+  // 1. Daily Visit Reports - date field, auto reportDate
+  createAutoCRUD(app, {
+    endpoint: 'dvr',
+    table: dailyVisitReports,
+    schema: insertDailyVisitReportSchema,
+    tableName: 'Daily Visit Report',
+    dateField: 'reportDate',
+    autoFields: {
+      reportDate: () => new Date().toISOString().split('T')[0], // date type
+      checkInTime: () => new Date() // timestamp type
     }
   });
 
-  app.get('/api/dvr/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, dealerType, limit = '50' } = req.query;
-
-      // Fix: Initialize base condition properly
-      let whereCondition = eq(dailyVisitReports.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(dailyVisitReports.reportDate, startDate as string),
-          lte(dailyVisitReports.reportDate, endDate as string)
-        );
-      }
-
-      if (dealerType) {
-        whereCondition = and(whereCondition, eq(dailyVisitReports.dealerType, dealerType as string));
-      }
-
-      const reports = await db.select().from(dailyVisitReports)
-        .where(whereCondition)
-        .orderBy(desc(dailyVisitReports.reportDate))
-        .limit(parseInt(limit as string));
-
-      res.json({ success: true, data: reports });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch DVRs' });
+  // 2. Technical Visit Reports - date field, auto reportDate
+  createAutoCRUD(app, {
+    endpoint: 'tvr',
+    table: technicalVisitReports,
+    schema: insertTechnicalVisitReportSchema,
+    tableName: 'Technical Visit Report',
+    dateField: 'reportDate',
+    autoFields: {
+      reportDate: () => new Date().toISOString().split('T')[0],
+      checkInTime: () => new Date()
     }
   });
 
-  app.get('/api/dvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const report = await db.select().from(dailyVisitReports)
-        .where(eq(dailyVisitReports.id, id))
-        .limit(1);
-
-      if (!report || report.length === 0) {
-        return res.status(404).json({ success: false, error: 'DVR not found' });
-      }
-
-      res.json({ success: true, data: report[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch DVR' });
+  // 3. Permanent Journey Plans - date field, auto planDate and status
+  createAutoCRUD(app, {
+    endpoint: 'pjp',
+    table: permanentJourneyPlans,
+    schema: insertPermanentJourneyPlanSchema,
+    tableName: 'Permanent Journey Plan',
+    dateField: 'planDate',
+    autoFields: {
+      planDate: () => new Date().toISOString().split('T')[0],
+      status: () => 'planned' // varchar type with default
     }
   });
 
-  app.put('/api/dvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertDailyVisitReportSchema.partial().parse(req.body);
+  // 4. Dealers - no date field for filtering
+  createAutoCRUD(app, {
+    endpoint: 'dealers',
+    table: dealers,
+    schema: insertDealerSchema,
+    tableName: 'Dealer'
+    // No auto fields needed - all required fields should be provided
+  });
 
-      const updatedReport = await db.update(dailyVisitReports)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(dailyVisitReports.id, id))
-        .returning();
-
-      if (!updatedReport || updatedReport.length === 0) {
-        return res.status(404).json({ success: false, error: 'DVR not found' });
-      }
-
-      res.json({ success: true, data: updatedReport[0], message: 'DVR updated successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update DVR' });
+  // 5. Daily Tasks - date field, auto taskDate and status
+  createAutoCRUD(app, {
+    endpoint: 'daily-tasks',
+    table: dailyTasks,
+    schema: insertDailyTaskSchema,
+    tableName: 'Daily Task',
+    dateField: 'taskDate',
+    autoFields: {
+      taskDate: () => new Date().toISOString().split('T')[0],
+      status: () => 'Assigned' // matches schema default
     }
   });
 
-  app.delete('/api/dvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deletedReport = await db.delete(dailyVisitReports)
-        .where(eq(dailyVisitReports.id, id))
-        .returning();
-
-      if (!deletedReport || deletedReport.length === 0) {
-        return res.status(404).json({ success: false, error: 'DVR not found' });
-      }
-
-      res.json({ success: true, message: 'DVR deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete DVR' });
+  // 6. Leave Applications - date field, auto status
+  createAutoCRUD(app, {
+    endpoint: 'leave-applications',
+    table: salesmanLeaveApplications,
+    schema: insertSalesmanLeaveApplicationSchema,
+    tableName: 'Leave Application',
+    dateField: 'startDate',
+    autoFields: {
+      status: () => 'Pending' // varchar type
     }
   });
 
-  // ==================== 2. TECHNICAL VISIT REPORTS - CRUD ====================
-  app.post('/api/tvr', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertTechnicalVisitReportSchema.parse(req.body);
-      const newReport = await db.insert(technicalVisitReports)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
+  // 7. Client Reports - no specific date field for range filtering
+  createAutoCRUD(app, {
+    endpoint: 'client-reports',
+    table: clientReports,
+    schema: insertClientReportSchema,
+    tableName: 'Client Report'
+    // checkOutTime is timestamp but not used for filtering
+  });
 
-      res.json({ success: true, data: newReport[0], message: 'TVR submitted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to submit TVR' });
+  // 8. Competition Reports - date field, auto reportDate
+  createAutoCRUD(app, {
+    endpoint: 'competition-reports',
+    table: competitionReports,
+    schema: insertCompetitionReportSchema,
+    tableName: 'Competition Report',
+    dateField: 'reportDate',
+    autoFields: {
+      reportDate: () => new Date().toISOString().split('T')[0]
     }
   });
 
-  app.get('/api/tvr/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, visitType } = req.query;
-
-      let whereCondition = eq(technicalVisitReports.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(technicalVisitReports.reportDate, startDate as string),
-          lte(technicalVisitReports.reportDate, endDate as string)
-        );
-      }
-
-      if (visitType) {
-        whereCondition = and(whereCondition, eq(technicalVisitReports.visitType, visitType as string));
-      }
-
-      const reports = await db.select().from(technicalVisitReports)
-        .where(whereCondition)
-        .orderBy(desc(technicalVisitReports.reportDate));
-
-      res.json({ success: true, data: reports });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch TVRs' });
+  // 9. Dealer Reports and Scores - no date field for filtering
+  createAutoCRUD(app, {
+    endpoint: 'dealer-reports-scores',
+    table: dealerReportsAndScores,
+    schema: insertDealerReportsAndScoresSchema,
+    tableName: 'Dealer Report and Score',
+    autoFields: {
+      lastUpdatedDate: () => new Date() // timestamp type
     }
   });
 
-  app.get('/api/tvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const report = await db.select().from(technicalVisitReports)
-        .where(eq(technicalVisitReports.id, id))
-        .limit(1);
-
-      if (!report || report.length === 0) {
-        return res.status(404).json({ success: false, error: 'TVR not found' });
-      }
-
-      res.json({ success: true, data: report[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch TVR' });
-    }
-  });
-
-  app.put('/api/tvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertTechnicalVisitReportSchema.partial().parse(req.body);
-
-      const updatedReport = await db.update(technicalVisitReports)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(technicalVisitReports.id, id))
-        .returning();
-
-      if (!updatedReport || updatedReport.length === 0) {
-        return res.status(404).json({ success: false, error: 'TVR not found' });
-      }
-
-      res.json({ success: true, data: updatedReport[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update TVR' });
-    }
-  });
-
-  app.delete('/api/tvr/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deletedReport = await db.delete(technicalVisitReports)
-        .where(eq(technicalVisitReports.id, id))
-        .returning();
-
-      if (!deletedReport || deletedReport.length === 0) {
-        return res.status(404).json({ success: false, error: 'TVR not found' });
-      }
-
-      res.json({ success: true, message: 'TVR deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete TVR' });
-    }
-  });
-
-  // ==================== 3. PERMANENT JOURNEY PLANS - CRUD ====================
-  app.post('/api/pjp', async (req: Request, res: Response) => {
-    try {
-      console.log('Received PJP data:', req.body);
-
-      // Transform frontend data to match schema before validation
-      const transformedData = {
-        userId: req.body.userId,
-        planDate: req.body.planDate || req.body.plannedDate || new Date().toISOString().split('T')[0],
-        areaToBeVisited: req.body.areaToBeVisited || req.body.location || req.body.area || req.body.objective || '',
-        description: req.body.description || req.body.details || '',
-        status: req.body.status || 'planned'
-      };
-
-      // NOW use schema validation
-      const validatedData = insertPermanentJourneyPlanSchema.parse(transformedData);
-
-      const newPlan = await db.insert(permanentJourneyPlans)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newPlan[0], message: 'PJP created successfully' });
-    } catch (error) {
-      console.error('PJP creation error:', error);
-      if (error.name === 'ZodError') {
-        res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: error.errors
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: error.message || 'Failed to create PJP'
-        });
-      }
-    }
-  });
-
-  app.put('/api/pjp/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-
-      // Transform data before validation
-      const transformedData = {};
-      if (req.body.planDate) transformedData.planDate = req.body.planDate;
-      if (req.body.areaToBeVisited || req.body.location || req.body.area) {
-        transformedData.areaToBeVisited = req.body.areaToBeVisited || req.body.location || req.body.area;
-      }
-      if (req.body.description !== undefined) transformedData.description = req.body.description;
-      if (req.body.status) transformedData.status = req.body.status;
-
-      // Use partial schema validation for updates
-      const validatedData = insertPermanentJourneyPlanSchema.partial().parse(transformedData);
-
-      const updatedPlan = await db.update(permanentJourneyPlans)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(permanentJourneyPlans.id, id))
-        .returning();
-
-      if (!updatedPlan || updatedPlan.length === 0) {
-        return res.status(404).json({ success: false, error: 'PJP not found' });
-      }
-
-      res.json({ success: true, data: updatedPlan[0], message: 'PJP updated successfully' });
-    } catch (error) {
-      console.error('PJP update error:', error);
-      if (error.name === 'ZodError') {
-        res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: error.errors
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: error.message || 'Failed to update PJP'
-        });
-      }
-    }
-  });
-
-  // Keep the other endpoints as they were (GET, DELETE)
-  app.get('/api/pjp/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { status, startDate, endDate } = req.query;
-
-      let whereCondition = eq(permanentJourneyPlans.userId, parseInt(userId));
-
-      if (status) {
-        whereCondition = and(whereCondition, eq(permanentJourneyPlans.status, status as string));
-      }
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(permanentJourneyPlans.planDate, startDate as string),
-          lte(permanentJourneyPlans.planDate, endDate as string)
-        );
-      }
-
-      const plans = await db.select().from(permanentJourneyPlans)
-        .where(whereCondition)
-        .orderBy(desc(permanentJourneyPlans.planDate));
-
-      res.json({ success: true, data: plans });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch PJPs' });
-    }
-  });
-
-  app.get('/api/pjp/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const plan = await db.select().from(permanentJourneyPlans)
-        .where(eq(permanentJourneyPlans.id, id))
-        .limit(1);
-
-      if (!plan || plan.length === 0) {
-        return res.status(404).json({ success: false, error: 'PJP not found' });
-      }
-
-      res.json({ success: true, data: plan[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch PJP' });
-    }
-  });
-
-  app.delete('/api/pjp/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deletedPlan = await db.delete(permanentJourneyPlans)
-        .where(eq(permanentJourneyPlans.id, id))
-        .returning();
-
-      if (!deletedPlan || deletedPlan.length === 0) {
-        return res.status(404).json({ success: false, error: 'PJP not found' });
-      }
-
-      res.json({ success: true, message: 'PJP deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete PJP' });
-    }
-  });
-  // ==================== 4. DEALERS - FULL CRUD WITH SUB-DEALERS ====================
-  app.post('/api/dealers', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertDealerSchema.parse(req.body);
-      const newDealer = await db.insert(dealers)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newDealer[0], message: 'Dealer created successfully' });
-    } catch (error) {
-      res.status(400).json({
-        success: false,
-        error: 'Failed to create dealer',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // Get dealers with sub-dealer hierarchy
-  app.get('/api/dealers/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { includeSubDealers = 'true', type, region, area } = req.query;
-
-      let whereCondition = eq(dealers.userId, parseInt(userId));
-
-      if (type) {
-        whereCondition = and(whereCondition, eq(dealers.type, type as string));
-      }
-      if (region) {
-        whereCondition = and(whereCondition, eq(dealers.region, region as string));
-      }
-      if (area) {
-        whereCondition = and(whereCondition, eq(dealers.area, area as string));
-      }
-
-      const dealerList = await db.select().from(dealers)
-        .where(whereCondition)
-        .orderBy(asc(dealers.name));
-
-      if (includeSubDealers === 'true') {
-        // Build hierarchy
-        const dealerMap = new Map();
-        const rootDealers: any[] = [];
-
-        dealerList.forEach(dealer => {
-          dealerMap.set(dealer.id, { ...dealer, subDealers: [] });
-        });
-
-        dealerList.forEach(dealer => {
-          if (dealer.parentDealerId) {
-            const parent = dealerMap.get(dealer.parentDealerId);
-            if (parent) {
-              parent.subDealers.push(dealerMap.get(dealer.id));
-            }
-          } else {
-            rootDealers.push(dealerMap.get(dealer.id));
-          }
-        });
-
-        res.json({ success: true, data: rootDealers });
-      } else {
-        res.json({ success: true, data: dealerList });
-      }
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch dealers' });
-    }
-  });
-
-  app.get('/api/dealers/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const dealer = await db.select().from(dealers).where(eq(dealers.id, id)).limit(1);
-
-      if (!dealer || dealer.length === 0) {
-        return res.status(404).json({ success: false, error: 'Dealer not found' });
-      }
-
-      res.json({ success: true, data: dealer[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch dealer' });
-    }
-  });
-
-  app.put('/api/dealers/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertDealerSchema.partial().parse(req.body);
-
-      const updatedDealer = await db.update(dealers)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(dealers.id, id))
-        .returning();
-
-      if (!updatedDealer || updatedDealer.length === 0) {
-        return res.status(404).json({ success: false, error: 'Dealer not found' });
-      }
-
-      res.json({ success: true, data: updatedDealer[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update dealer' });
-    }
-  });
-
-  app.delete('/api/dealers/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deletedDealer = await db.delete(dealers).where(eq(dealers.id, id)).returning();
-
-      if (!deletedDealer || deletedDealer.length === 0) {
-        return res.status(404).json({ success: false, error: 'Dealer not found' });
-      }
-
-      res.json({ success: true, message: 'Dealer deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete dealer' });
-    }
-  });
-
-  // ==================== 5. ATTENDANCE - GEO-FENCING WITH TURF.JS ====================
-
-  // Helper function using Turf.js for precise geo-fencing
-  function isWithinOfficeGeofence(userLat: number, userLng: number): { isValid: boolean, officeName?: string, distance?: number } {
-    const userPoint = turf.point([userLng, userLat]);
-
-    for (const office of OFFICE_LOCATIONS) {
-      const isInside = turf.booleanPointInPolygon(userPoint, office.polygon);
-
-      if (isInside) {
-        const distance = getDistance(
-          { latitude: userLat, longitude: userLng },
-          { latitude: office.lat, longitude: office.lng }
-        );
-        return { isValid: true, officeName: office.name, distance };
-      }
-    }
-    return { isValid: false };
-  }
-
-  app.post('/api/attendance/punch-in', upload.single('selfie'), async (req: MulterRequest, res: Response) => {
-    try {
-      const { userId, latitude, longitude, locationName, accuracy, speed, heading, altitude } = req.body;
-      const selfieFile = req.file;
-
-      console.log('🔍 Punch-in request:', { userId, latitude, longitude }); // DEBUG
-
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({ success: false, error: 'Missing required fields' });
-      }
-
-      // Geo-fencing validation with Turf.js
-      const geoCheck = isWithinOfficeGeofence(parseFloat(latitude), parseFloat(longitude));
-      if (!geoCheck.isValid) {
-        return res.status(400).json({
-          success: false,
-          error: 'You are not within office premises',
-          details: 'Geo-fencing validation failed'
-        });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-      const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
-
-      // ✅ ADD DEBUG: Check what's being parsed
-      const attendanceData = {
-        userId: parseInt(userId),
-        attendanceDate: today,
-        locationName: locationName || geoCheck.officeName || 'Office',
-        inTimeTimestamp: new Date(),
-        inTimeImageCaptured: !!selfieFile,
-        outTimeImageCaptured: false,
-        inTimeImageUrl: selfieUrl,
-        inTimeLatitude: latitude.toString(),
-        inTimeLongitude: longitude.toString(),
-        inTimeAccuracy: accuracy ? accuracy.toString() : null,
-        inTimeSpeed: speed ? speed.toString() : null,
-        inTimeHeading: heading ? heading.toString() : null,
-        inTimeAltitude: altitude ? altitude.toString() : null,
-      };
-
-      console.log('🔍 Attendance data to validate:', attendanceData); // DEBUG
-
-      // Use schema validation with better error handling
-      const validatedData = insertSalesmanAttendanceSchema.parse(attendanceData);
-      console.log('✅ Schema validation passed'); // DEBUG
-
-      const newAttendance = await db.insert(salesmanAttendance)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      console.log('✅ Database insert successful'); // DEBUG
-
-      res.json({
-        success: true,
-        data: newAttendance[0],
-        message: `Punched in at ${geoCheck.officeName}`,
-        geoInfo: { officeName: geoCheck.officeName, distance: geoCheck.distance }
-      });
-
-    } catch (error) {
-      console.error('❌ Punch-in error:', error); // DETAILED DEBUG
-      res.status(400).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to punch in', // Show actual error
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-  app.post('/api/attendance/punch-out', upload.single('selfie'), async (req: MulterRequest, res: Response) => {
-    try {
-      const { userId, latitude, longitude, locationName, accuracy, speed, heading, altitude } = req.body;
-      const selfieFile = req.file;
-
-      if (!userId) {
-        return res.status(400).json({ success: false, error: 'User ID is required' });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-      const selfieUrl = selfieFile ? `uploads/selfies/${Date.now()}_${selfieFile.originalname}` : null;
-
-      // Check if there's an unpunched record first (preferred behavior)
-      const unpunchedRecord = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp)
-        ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-        .limit(1);
-
-      let result;
-
-      if (unpunchedRecord && unpunchedRecord.length > 0) {
-        // Update existing unpunched record
-        result = await db.update(salesmanAttendance)
-          .set({
-            outTimeTimestamp: new Date(),
-            outTimeImageCaptured: !!selfieFile,
-            outTimeImageUrl: selfieUrl,
-            outTimeLatitude: latitude ? latitude.toString() : null,
-            outTimeLongitude: longitude ? longitude.toString() : null,
-            outTimeAccuracy: accuracy ? accuracy.toString() : null,
-            outTimeSpeed: speed ? speed.toString() : null,
-            outTimeHeading: heading ? heading.toString() : null,
-            outTimeAltitude: altitude ? altitude.toString() : null,
-            updatedAt: new Date()
-          })
-          .where(eq(salesmanAttendance.id, unpunchedRecord[0].id))
-          .returning();
-
-        res.json({
-          success: true,
-          data: result[0],
-          message: 'Punched out successfully',
-          type: 'updated_existing'
-        });
-      } else {
-        // Create new standalone punch-out record
-        const newPunchOut = await db.insert(salesmanAttendance)
-          .values({
-            userId: parseInt(userId),
-            attendanceDate: today,
-            locationName: locationName || 'Office',
-            inTimeTimestamp: new Date(), // Same as out time for standalone punch-out
-            outTimeTimestamp: new Date(),
-            inTimeImageCaptured: false,
-            outTimeImageCaptured: !!selfieFile,
-            inTimeImageUrl: null,
-            outTimeImageUrl: selfieUrl,
-            inTimeLatitude: latitude ? latitude.toString() : null,
-            inTimeLongitude: longitude ? longitude.toString() : null,
-            outTimeLatitude: latitude ? latitude.toString() : null,
-            outTimeLongitude: longitude ? longitude.toString() : null,
-            inTimeAccuracy: accuracy ? accuracy.toString() : null,
-            inTimeSpeed: speed ? speed.toString() : null,
-            inTimeHeading: heading ? heading.toString() : null,
-            inTimeAltitude: altitude ? altitude.toString() : null,
-            outTimeAccuracy: accuracy ? accuracy.toString() : null,
-            outTimeSpeed: speed ? speed.toString() : null,
-            outTimeHeading: heading ? heading.toString() : null,
-            outTimeAltitude: altitude ? altitude.toString() : null,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-          .returning();
-
-        res.json({
-          success: true,
-          data: newPunchOut[0],
-          message: 'Standalone punch-out created successfully',
-          type: 'new_standalone'
-        });
-      }
-
-    } catch (error) {
-      console.error('❌ Punch-out error:', error);
-      res.status(400).json({
-        success: false,
-        error: 'Failed to punch out',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
+  // ============================================
+  // SPECIAL ATTENDANCE ROUTES (with schema validation)
+  // ============================================
   app.get('/api/attendance/user/:userId', async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      const { startDate, endDate, month, year } = req.query;
+      const { startDate, endDate, limit = '50' } = req.query;
 
       let whereCondition = eq(salesmanAttendance.userId, parseInt(userId));
 
@@ -953,672 +697,163 @@ export function setupWebRoutes(app: Express) {
           gte(salesmanAttendance.attendanceDate, startDate as string),
           lte(salesmanAttendance.attendanceDate, endDate as string)
         );
-      } else if (month && year) {
-        const monthStart = `${year}-${month.toString().padStart(2, '0')}-01`;
-        const nextMonth = parseInt(month as string) === 12 ? 1 : parseInt(month as string) + 1;
-        const nextYear = parseInt(month as string) === 12 ? parseInt(year as string) + 1 : parseInt(year as string);
-        const monthEnd = `${nextYear}-${nextMonth.toString().padStart(2, '0')}-01`;
-
-        whereCondition = and(
-          whereCondition,
-          gte(salesmanAttendance.attendanceDate, monthStart),
-          sql`${salesmanAttendance.attendanceDate} < ${monthEnd}`
-        );
       }
 
-      const records = await db.select()
-        .from(salesmanAttendance)
+      const records = await db.select().from(salesmanAttendance)
         .where(whereCondition)
-        .orderBy(desc(salesmanAttendance.attendanceDate));
+        .orderBy(desc(salesmanAttendance.attendanceDate))
+        .limit(parseInt(limit as string));
 
       res.json({ success: true, data: records });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch attendance records' });
+      res.status(500).json({ success: false, error: 'Failed to fetch attendance' });
     }
   });
 
-  // ==================== 6. LEAVE APPLICATIONS - CRUD ====================
-  app.post('/api/leave-applications', async (req: Request, res: Response) => {
+  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
     try {
-      const validatedData = insertSalesmanLeaveApplicationSchema.parse(req.body);
-      const newApplication = await db.insert(salesmanLeaveApplications)
-        .values({
-          ...validatedData,
-          status: 'Pending',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newApplication[0], message: 'Leave application submitted' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to submit leave application' });
-    }
-  });
-
-  app.get('/api/leave-applications/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { status, year } = req.query;
-
-      let whereCondition = eq(salesmanLeaveApplications.userId, parseInt(userId));
-
-      if (status) {
-        whereCondition = and(whereCondition, eq(salesmanLeaveApplications.status, status as string));
-      }
-
-      if (year) {
-        whereCondition = and(
-          whereCondition,
-          gte(salesmanLeaveApplications.startDate, `${year}-01-01`),
-          lte(salesmanLeaveApplications.endDate, `${year}-12-31`)
-        );
-      }
-
-      const applications = await db.select().from(salesmanLeaveApplications)
-        .where(whereCondition)
-        .orderBy(desc(salesmanLeaveApplications.createdAt));
-
-      res.json({ success: true, data: applications });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch leave applications' });
-    }
-  });
-
-  app.put('/api/leave-applications/:id/status', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { status, adminRemarks } = req.body;
-
-      if (!['Approved', 'Rejected', 'Pending'].includes(status)) {
-        return res.status(400).json({ success: false, error: 'Invalid status' });
-      }
-
-      const updated = await db.update(salesmanLeaveApplications)
-        .set({ status, adminRemarks, updatedAt: new Date() })
-        .where(eq(salesmanLeaveApplications.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Leave application not found' });
-      }
-
-      res.json({ success: true, data: updated[0], message: `Leave ${status.toLowerCase()}` });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update leave status' });
-    }
-  });
-
-  app.get('/api/leave-applications/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const application = await db.select().from(salesmanLeaveApplications)
-        .where(eq(salesmanLeaveApplications.id, id))
-        .limit(1);
-
-      if (!application || application.length === 0) {
-        return res.status(404).json({ success: false, error: 'Leave application not found' });
-      }
-
-      res.json({ success: true, data: application[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch leave application' });
-    }
-  });
-
-  app.put('/api/leave-applications/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertSalesmanLeaveApplicationSchema.partial().parse(req.body);
-
-      const updated = await db.update(salesmanLeaveApplications)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(salesmanLeaveApplications.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Leave application not found' });
-      }
-
-      res.json({ success: true, data: updated[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update leave application' });
-    }
-  });
-
-  app.delete('/api/leave-applications/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deleted = await db.delete(salesmanLeaveApplications)
-        .where(eq(salesmanLeaveApplications.id, id))
-        .returning();
-
-      if (!deleted || deleted.length === 0) {
-        return res.status(404).json({ success: false, error: 'Leave application not found' });
-      }
-
-      res.json({ success: true, message: 'Leave application deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete leave application' });
-    }
-  });
-
-  // ==================== 7. CLIENT REPORTS - CRUD ====================
-  app.post('/api/client-reports', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertClientReportSchema.parse(req.body);
-      const newReport = await db.insert(clientReports)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newReport[0], message: 'Client report submitted' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to submit client report' });
-    }
-  });
-
-  app.get('/api/client-reports/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate } = req.query;
-
-      let whereCondition = eq(clientReports.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(clientReports.createdAt, new Date(startDate as string)),
-          lte(clientReports.createdAt, new Date(endDate as string))
-        );
-      }
-
-      const reports = await db.select().from(clientReports)
-        .where(whereCondition)
-        .orderBy(desc(clientReports.createdAt));
-
-      res.json({ success: true, data: reports });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch client reports' });
-    }
-  });
-
-  app.get('/api/client-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const report = await db.select().from(clientReports)
-        .where(eq(clientReports.id, id))
-        .limit(1);
-
-      if (!report || report.length === 0) {
-        return res.status(404).json({ success: false, error: 'Client report not found' });
-      }
-
-      res.json({ success: true, data: report[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch client report' });
-    }
-  });
-
-  app.put('/api/client-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertClientReportSchema.partial().parse(req.body);
-
-      const updated = await db.update(clientReports)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(clientReports.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Client report not found' });
-      }
-
-      res.json({ success: true, data: updated[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update client report' });
-    }
-  });
-
-  app.delete('/api/client-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deleted = await db.delete(clientReports)
-        .where(eq(clientReports.id, id))
-        .returning();
-
-      if (!deleted || deleted.length === 0) {
-        return res.status(404).json({ success: false, error: 'Client report not found' });
-      }
-
-      res.json({ success: true, message: 'Client report deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete client report' });
-    }
-  });
-
-  // ==================== 8. GEO-TRACKING WITH TURF.JS - CHECK IN/OUT ====================
-  app.post('/api/geo-tracking', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertGeoTrackingSchema.parse(req.body);
-      const newTracking = await db.insert(geoTracking)
-        .values({
-          ...validatedData,
-          recordedAt: new Date(),
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newTracking[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to record geo tracking' });
-    }
-  });
-
-  // Check-in at location with geo-validation
-  app.post('/api/geo-tracking/checkin', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, siteName, activityType } = req.body;
+      // Validate input against schema expectations
+      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
 
       if (!userId || !latitude || !longitude) {
-        return res.status(400).json({ success: false, error: 'Missing required fields' });
+        return res.status(400).json({
+          success: false,
+          error: 'userId, latitude, and longitude are required'
+        });
       }
 
-      const userPoint = turf.point([parseFloat(longitude), parseFloat(latitude)]);
+      // Geo-fencing validation
+      const userPoint = turf.point([longitude, latitude]);
+      let isValid = false;
+      let officeName = '';
 
-      const trackingData = {
-        userId: parseInt(userId),
-        latitude: latitude.toString(),
-        longitude: longitude.toString(),
-        siteName: siteName,
-        checkInTime: new Date(),
-        activityType: activityType || 'site_visit',
-        locationType: 'check_in',
-        recordedAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date()
+      for (const office of OFFICE_LOCATIONS) {
+        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
+          isValid = true;
+          officeName = office.name;
+          break;
+        }
+      }
+
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'You are not within office premises'
+        });
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+
+      // Build data matching exact schema
+      const attendanceData = {
+        userId: parseInt(userId), // integer type
+        attendanceDate: today, // date type
+        locationName: locationName || officeName, // varchar not null
+        inTimeTimestamp: new Date(), // timestamp not null
+        inTimeImageCaptured: !!selfieUrl, // boolean not null
+        outTimeImageCaptured: false, // boolean not null  
+        inTimeImageUrl: selfieUrl || null, // varchar nullable
+        inTimeLatitude: latitude.toString(), // decimal as string
+        inTimeLongitude: longitude.toString(), // decimal as string
+        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
+        // All other nullable fields will be null by default
       };
 
-      const newTracking = await db.insert(geoTracking).values(trackingData).returning();
+      // Validate against schema
+      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Attendance data validation failed',
+          details: parseResult.error.errors
+        });
+      }
 
+      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
       res.json({
         success: true,
-        data: newTracking[0],
-        message: `Checked in at ${siteName}`,
-        coordinates: { lat: latitude, lng: longitude }
+        data: result,
+        message: `Punched in at ${officeName}`,
+        geoInfo: { officeName, isValid }
       });
     } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to check in' });
+      console.error('Punch in error:', error);
+      res.status(500).json({ success: false, error: 'Punch in failed' });
     }
   });
 
-  // Check-out with distance calculation
-  app.post('/api/geo-tracking/checkout', async (req: Request, res: Response) => {
+  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
-      const { userId, latitude, longitude, trackingId } = req.body;
+      const { userId, latitude, longitude, selfieUrl } = req.body;
 
-      if (!trackingId) {
-        return res.status(400).json({ success: false, error: 'Tracking ID is required' });
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId is required'
+        });
       }
 
-      // Find the check-in record
-      const checkInRecord = await db.select().from(geoTracking)
-        .where(eq(geoTracking.id, trackingId))
+      const today = new Date().toISOString().split('T')[0];
+
+      // Find unpunched record
+      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
+        .where(and(
+          eq(salesmanAttendance.userId, parseInt(userId)),
+          eq(salesmanAttendance.attendanceDate, today),
+          isNull(salesmanAttendance.outTimeTimestamp)
+        ))
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
         .limit(1);
 
-      if (!checkInRecord || checkInRecord.length === 0) {
-        return res.status(404).json({ success: false, error: 'Check-in record not found' });
-      }
-
-      // Calculate distance traveled using Turf.js
-      const checkInPoint = turf.point([parseFloat(checkInRecord[0].longitude), parseFloat(checkInRecord[0].latitude)]);
-      const checkOutPoint = turf.point([parseFloat(longitude), parseFloat(latitude)]);
-      const distance = turf.distance(checkInPoint, checkOutPoint, { units: 'kilometers' });
-
-      // Update the record with checkout information
-      const updated = await db.update(geoTracking)
-        .set({
-          checkOutTime: new Date(),
-          totalDistanceTravelled: distance.toString(),
+      if (unpunchedRecord) {
+        // Update with proper data types
+        const updateData = {
+          outTimeTimestamp: new Date(), // timestamp
+          outTimeImageCaptured: !!selfieUrl, // boolean
+          outTimeImageUrl: selfieUrl || null, // varchar nullable
+          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
+          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
           updatedAt: new Date()
-        })
-        .where(eq(geoTracking.id, trackingId))
-        .returning();
+        };
 
-      res.json({
-        success: true,
-        data: updated[0],
-        message: 'Checked out successfully',
-        distanceTraveled: `${distance.toFixed(2)} km`
-      });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to check out' });
-    }
-  });
-
-  // Get geo-tracking history with route analysis
-  app.get('/api/geo-tracking/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { date, activityType } = req.query;
-
-      let whereCondition = eq(geoTracking.userId, parseInt(userId));
-
-      if (date) {
-        const startDate = new Date(date as string);
-        const endDate = new Date(startDate);
-        endDate.setDate(endDate.getDate() + 1);
-
-        whereCondition = and(
-          whereCondition,
-          gte(geoTracking.recordedAt, startDate),
-          lte(geoTracking.recordedAt, endDate)
-        );
-      }
-
-      if (activityType) {
-        whereCondition = and(whereCondition, eq(geoTracking.activityType, activityType as string));
-      }
-
-      const trackingData = await db.select().from(geoTracking)
-        .where(whereCondition)
-        .orderBy(asc(geoTracking.recordedAt));
-
-      // Create route analysis
-      if (trackingData.length > 1) {
-        const coordinates = trackingData.map(point => [
-          parseFloat(point.longitude),
-          parseFloat(point.latitude)
-        ]);
-
-        const lineString = turf.lineString(coordinates);
-        const totalDistance = turf.length(lineString, { units: 'kilometers' });
+        const [result] = await db.update(salesmanAttendance)
+          .set(updateData)
+          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
+          .returning();
 
         res.json({
           success: true,
-          data: trackingData,
-          analytics: {
-            totalPoints: trackingData.length,
-            totalDistance: `${totalDistance.toFixed(2)} km`,
-            route: coordinates
-          }
+          data: result,
+          message: 'Punched out successfully'
         });
       } else {
-        res.json({ success: true, data: trackingData });
-      }
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch geo tracking data' });
-    }
-  });
-
-  // ==================== 9. DAILY TASKS - ASSIGNMENT & ACCEPTANCE ====================
-  app.post('/api/daily-tasks', async (req: Request, res: Response) => {
-    try {
-      console.log('Received task data:', req.body);
-
-      // Transform frontend data to match your existing schema
-      const transformedData = {
-        userId: req.body.userId,
-        assignedByUserId: req.body.assignedByUserId || req.body.userId,
-        taskDate: req.body.taskDate || new Date().toISOString().split('T')[0],
-        visitType: req.body.visitType || req.body.title || 'General Task',
-        relatedDealerId: req.body.relatedDealerId || null,
-        siteName: req.body.siteName || req.body.title || '',
-        description: req.body.description || '',
-        pjpId: req.body.pjpId || null
-      };
-
-      // Use your existing schema
-      const validatedData = insertDailyTaskSchema.parse(transformedData);
-
-      const newTask = await db.insert(dailyTasks)
-        .values({
-          ...validatedData,
-          status: 'Assigned',
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newTask[0], message: 'Task created successfully' });
-    } catch (error) {
-      console.error('Task creation error:', error);
-      if (error.name === 'ZodError') {
-        res.status(400).json({
+        res.status(404).json({
           success: false,
-          error: 'Validation failed',
-          details: error.errors
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: error.message || 'Failed to create task'
+          error: 'No active punch-in record found'
         });
       }
-    }
-  });
-
-  app.put('/api/daily-tasks/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-
-      // Transform data before validation
-      const transformedData = {};
-      if (req.body.taskDate) transformedData.taskDate = req.body.taskDate;
-      if (req.body.visitType || req.body.title) {
-        transformedData.visitType = req.body.visitType || req.body.title;
-      }
-      if (req.body.siteName !== undefined) transformedData.siteName = req.body.siteName;
-      if (req.body.description !== undefined) transformedData.description = req.body.description;
-      if (req.body.relatedDealerId !== undefined) transformedData.relatedDealerId = req.body.relatedDealerId;
-      if (req.body.pjpId !== undefined) transformedData.pjpId = req.body.pjpId;
-      if (req.body.assignedByUserId) transformedData.assignedByUserId = req.body.assignedByUserId;
-
-      // Use your existing schema with partial
-      const validatedData = insertDailyTaskSchema.partial().parse(transformedData);
-
-      const updated = await db.update(dailyTasks)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(dailyTasks.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Task not found' });
-      }
-
-      res.json({ success: true, data: updated[0], message: 'Task updated successfully' });
     } catch (error) {
-      console.error('Task update error:', error);
-      if (error.name === 'ZodError') {
-        res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: error.errors
-        });
-      } else {
-        res.status(400).json({
-          success: false,
-          error: error.message || 'Failed to update task'
-        });
-      }
-    }
-  });
-  // ==================== 10. DEALER REPORTS AND SCORES - CRUD ====================
-  app.post('/api/dealer-reports-scores', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertDealerReportsAndScoresSchema.parse(req.body);
-
-      // Check if dealer exists
-      const dealer = await db.select().from(dealers)
-        .where(eq(dealers.id, validatedData.dealerId))
-        .limit(1);
-
-      if (!dealer || dealer.length === 0) {
-        return res.status(404).json({ success: false, error: 'Dealer not found' });
-      }
-
-      const newScore = await db.insert(dealerReportsAndScores)
-        .values({
-          ...validatedData,
-          lastUpdatedDate: new Date(),
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newScore[0], message: 'Dealer score recorded' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to record dealer score' });
+      console.error('Punch out error:', error);
+      res.status(500).json({ success: false, error: 'Punch out failed' });
     }
   });
 
-  app.get('/api/dealer-reports-scores/dealer/:dealerId', async (req: Request, res: Response) => {
-    try {
-      const { dealerId } = req.params;
-
-      const scores = await db.select().from(dealerReportsAndScores)
-        .where(eq(dealerReportsAndScores.dealerId, dealerId))
-        .orderBy(desc(dealerReportsAndScores.lastUpdatedDate));
-
-      res.json({ success: true, data: scores });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch dealer scores' });
-    }
-  });
-
-  app.put('/api/dealer-reports-scores/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertDealerReportsAndScoresSchema.partial().parse(req.body);
-
-      const updated = await db.update(dealerReportsAndScores)
-        .set({ ...validatedData, lastUpdatedDate: new Date(), updatedAt: new Date() })
-        .where(eq(dealerReportsAndScores.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Dealer score not found' });
-      }
-
-      res.json({ success: true, data: updated[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update dealer score' });
-    }
-  });
-
-  // ==================== 11. COMPETITION REPORTS - CRUD ====================
-  app.post('/api/competition-reports', async (req: Request, res: Response) => {
-    try {
-      const validatedData = insertCompetitionReportSchema.parse(req.body);
-      const newReport = await db.insert(competitionReports)
-        .values({
-          ...validatedData,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        })
-        .returning();
-
-      res.json({ success: true, data: newReport[0], message: 'Competition report submitted' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to submit competition report' });
-    }
-  });
-
-  app.get('/api/competition-reports/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, brandName } = req.query;
-
-      let whereCondition = eq(competitionReports.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(competitionReports.reportDate, startDate as string),
-          lte(competitionReports.reportDate, endDate as string)
-        );
-      }
-
-      if (brandName) {
-        whereCondition = and(whereCondition, eq(competitionReports.brandName, brandName as string));
-      }
-
-      const reports = await db.select().from(competitionReports)
-        .where(whereCondition)
-        .orderBy(desc(competitionReports.reportDate));
-
-      res.json({ success: true, data: reports });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch competition reports' });
-    }
-  });
-
-  app.get('/api/competition-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const report = await db.select().from(competitionReports)
-        .where(eq(competitionReports.id, id))
-        .limit(1);
-
-      if (!report || report.length === 0) {
-        return res.status(404).json({ success: false, error: 'Competition report not found' });
-      }
-
-      res.json({ success: true, data: report[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch competition report' });
-    }
-  });
-
-  app.put('/api/competition-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const validatedData = insertCompetitionReportSchema.partial().parse(req.body);
-
-      const updated = await db.update(competitionReports)
-        .set({ ...validatedData, updatedAt: new Date() })
-        .where(eq(competitionReports.id, id))
-        .returning();
-
-      if (!updated || updated.length === 0) {
-        return res.status(404).json({ success: false, error: 'Competition report not found' });
-      }
-
-      res.json({ success: true, data: updated[0] });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to update competition report' });
-    }
-  });
-
-  app.delete('/api/competition-reports/:id', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const deleted = await db.delete(competitionReports)
-        .where(eq(competitionReports.id, id))
-        .returning();
-
-      if (!deleted || deleted.length === 0) {
-        return res.status(404).json({ success: false, error: 'Competition report not found' });
-      }
-
-      res.json({ success: true, message: 'Competition report deleted successfully' });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to delete competition report' });
-    }
-  });
-
-  // ==================== DASHBOARD & ANALYTICS ====================
+  // ============================================
+  // DASHBOARD STATS (with proper type handling)
+  // ============================================
   app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
     try {
-      const { userId } = req.params;
+      const userId = parseInt(req.params.userId);
+      if (isNaN(userId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid userId - must be a number'
+        });
+      }
+
       const today = new Date().toISOString().split('T')[0];
       const currentMonth = new Date().toISOString().slice(0, 7);
 
-      // Get various statistics
       const [
         todayAttendance,
         monthlyReports,
@@ -1628,32 +863,32 @@ export function setupWebRoutes(app: Express) {
       ] = await Promise.all([
         db.select().from(salesmanAttendance)
           .where(and(
-            eq(salesmanAttendance.userId, parseInt(userId)),
+            eq(salesmanAttendance.userId, userId),
             eq(salesmanAttendance.attendanceDate, today)
           )).limit(1),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyVisitReports)
           .where(and(
-            eq(dailyVisitReports.userId, parseInt(userId)),
+            eq(dailyVisitReports.userId, userId),
             like(dailyVisitReports.reportDate, `${currentMonth}%`)
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyTasks)
           .where(and(
-            eq(dailyTasks.userId, parseInt(userId)),
+            eq(dailyTasks.userId, userId),
             eq(dailyTasks.status, 'Assigned')
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dealers)
-          .where(eq(dealers.userId, parseInt(userId))),
+          .where(eq(dealers.userId, userId)),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(salesmanLeaveApplications)
           .where(and(
-            eq(salesmanLeaveApplications.userId, parseInt(userId)),
+            eq(salesmanLeaveApplications.userId, userId),
             eq(salesmanLeaveApplications.status, 'Pending')
           ))
       ]);
@@ -1662,9 +897,9 @@ export function setupWebRoutes(app: Express) {
         success: true,
         data: {
           attendance: {
-            isPresent: todayAttendance && todayAttendance.length > 0,
-            punchInTime: todayAttendance && todayAttendance[0] ? todayAttendance[0].inTimeTimestamp : null,
-            punchOutTime: todayAttendance && todayAttendance[0] ? todayAttendance[0].outTimeTimestamp : null
+            isPresent: todayAttendance?.length > 0,
+            punchInTime: todayAttendance?.[0]?.inTimeTimestamp,
+            punchOutTime: todayAttendance?.[0]?.outTimeTimestamp
           },
           stats: {
             monthlyReports: monthlyReports[0]?.count || 0,
@@ -1675,82 +910,8 @@ export function setupWebRoutes(app: Express) {
         }
       });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch dashboard stats',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      console.error('Dashboard stats error:', error);
+      res.status(500).json({ success: false, error: 'Failed to fetch dashboard stats' });
     }
-  });
-
-  // ==================== COMPANIES & USERS ENDPOINTS ====================
-  app.get('/api/companies/:id/users', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const { role } = req.query;
-
-      let whereCondition = eq(users.companyId, parseInt(id));
-
-      if (role) {
-        whereCondition = and(whereCondition, eq(users.role, role as string));
-      }
-
-      const companyUsers = await db.select().from(users)
-        .where(whereCondition)
-        .orderBy(asc(users.firstName));
-
-      res.json({ success: true, data: companyUsers });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch company users' });
-    }
-  });
-
-  app.get('/api/users/:id/hierarchy', async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-
-      // Get user with their reports
-      const userWithReports = await db.select().from(users)
-        .where(eq(users.reportsToId, parseInt(id)));
-
-      // Get user's manager
-      const user = await db.select().from(users)
-        .where(eq(users.id, parseInt(id)))
-        .limit(1);
-
-      let manager = null;
-      if (user[0]?.reportsToId) {
-        const managerResult = await db.select().from(users)
-          .where(eq(users.id, user[0].reportsToId))
-          .limit(1);
-        manager = managerResult[0] || null;
-      }
-
-      res.json({
-        success: true,
-        data: {
-          user: user[0],
-          manager,
-          reports: userWithReports
-        }
-      });
-    } catch (error) {
-      res.status(400).json({ success: false, error: 'Failed to fetch user hierarchy' });
-    }
-  });
-
-  // Health check endpoint
-  app.get('/api/health', (req: Request, res: Response) => {
-    res.json({
-      success: true,
-      message: 'Sales Management API is running',
-      timestamp: new Date().toISOString(),
-      endpoints: {
-        reports: ['DVR', 'TVR', 'PJP', 'Client Reports', 'Competition Reports'],
-        operations: ['Dealers CRUD', 'Attendance', 'Leave Applications', 'Daily Tasks'],
-        tracking: ['Geo Tracking', 'Dealer Scores'],
-        analytics: ['Dashboard Stats', 'User Hierarchy']
-      }
-    });
   });
 }
