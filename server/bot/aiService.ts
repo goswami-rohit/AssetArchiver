@@ -73,7 +73,7 @@ class EnhancedRAGService {
   private async generateEmbedding(text: string): Promise<number[]> {
     try {
       const response = await this.openai.embeddings.create({
-        model: "text-embedding-3-small",
+        model: "Xenova/all-MiniLM-L6-v2",
         input: text,
       });
       return response.data[0].embedding;
