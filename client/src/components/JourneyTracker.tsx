@@ -7,7 +7,8 @@ import {
   Square, MapPin, Clock, Navigation, Pause, Play, ArrowLeft,
   Users, CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
   Target, Route, Store, TrendingUp, Camera, Share, Heart,
-  Zap, Signal, Smartphone, Activity, Eye, Settings
+  Zap, Signal, Smartphone, Activity, Eye, Settings, Shield,
+  Radar, Bell, MapPinned, Navigation2, Moon, Sun
 } from 'lucide-react';
 
 interface JourneyTrackerProps {
@@ -25,14 +26,17 @@ interface LocationData {
   altitude?: number;
 }
 
-interface JourneyData {
+interface RadarJourneyData {
   id: string;
+  tripId?: string;
   startTime: string;
   duration: string;
   totalDistance: string;
   trackingPoints: number;
   activeCheckins: number;
   status: 'active' | 'paused';
+  fraudDetected: boolean;
+  locationValidated: boolean;
 }
 
 interface DealerCheckIn {
@@ -40,31 +44,135 @@ interface DealerCheckIn {
   dealerName: string;
   checkInTime: string;
   location: string;
+  validated: boolean;
+  distance?: number;
 }
 
 interface GeoTrackingEntry {
   id: string;
   userId: number;
-  checkInTime: string;
-  checkOutTime?: string;
   latitude: number;
   longitude: number;
-  accuracy: number;
-  speed: number;
-  heading: number;
-  altitude: number;
-  notes?: string;
+  recordedAt: string;
+  accuracy?: number;
+  speed?: number;
+  heading?: number;
+  altitude?: number;
+  locationType?: string;
+  activityType?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApproachAlert {
+  isApproaching: boolean;
+  dealerName?: string;
+  eta?: string;
+  distance?: number;
+}
+
+// 🔐 SMART WAKE LOCK MANAGER CLASS
+class SmartWakeLock {
+  private wakeLock: WakeLockSentinel | null = null;
+  private isSupported: boolean;
+  private listeners: ((isActive: boolean) => void)[] = [];
+
+  constructor() {
+    this.isSupported = 'wakeLock' in navigator;
+    
+    // Handle visibility change to release wake lock when app goes to background
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        this.releaseWakeLock('app_backgrounded');
+      } else if (document.visibilityState === 'visible' && this.shouldMaintainWakeLock()) {
+        this.requestWakeLock('app_foregrounded');
+      }
+    });
+  }
+
+  private shouldMaintainWakeLock(): boolean {
+    // Only maintain wake lock if we have an active journey in progress
+    return document.body.dataset.journeyActive === 'true';
+  }
+
+  async requestWakeLock(reason: string = 'journey_active'): Promise<boolean> {
+    if (!this.isSupported) {
+      console.log('Wake Lock not supported');
+      return false;
+    }
+
+    try {
+      // Release existing wake lock first
+      if (this.wakeLock) {
+        await this.releaseWakeLock('replacing_lock');
+      }
+
+      this.wakeLock = await (navigator as any).wakeLock.request('screen');
+      console.log(`🔐 Wake Lock acquired: ${reason}`);
+      
+      // Set marker that journey is active
+      document.body.dataset.journeyActive = 'true';
+      
+      // Listen for wake lock release
+      this.wakeLock.addEventListener('release', () => {
+        console.log('🔓 Wake Lock was released');
+        document.body.dataset.journeyActive = 'false';
+        this.notifyListeners(false);
+      });
+
+      this.notifyListeners(true);
+      return true;
+    } catch (err) {
+      console.error('Failed to acquire wake lock:', err);
+      return false;
+    }
+  }
+
+  async releaseWakeLock(reason: string = 'manual'): Promise<void> {
+    if (this.wakeLock) {
+      try {
+        await this.wakeLock.release();
+        this.wakeLock = null;
+        document.body.dataset.journeyActive = 'false';
+        console.log(`🔓 Wake Lock released: ${reason}`);
+        this.notifyListeners(false);
+      } catch (err) {
+        console.error('Failed to release wake lock:', err);
+      }
+    }
+  }
+
+  isActive(): boolean {
+    return this.wakeLock !== null && !this.wakeLock.released;
+  }
+
+  onStateChange(callback: (isActive: boolean) => void) {
+    this.listeners.push(callback);
+  }
+
+  private notifyListeners(isActive: boolean) {
+    this.listeners.forEach(callback => callback(isActive));
+  }
 }
 
 export default function JourneyTracker({ userId, onBack, onJourneyEnd }: JourneyTrackerProps) {
   // Core State
   const [isLoading, setIsLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
-  const [activeJourney, setActiveJourney] = useState<JourneyData | null>(null);
+  const [activeJourney, setActiveJourney] = useState<RadarJourneyData | null>(null);
   const [dealerCheckins, setDealerCheckins] = useState<DealerCheckIn[]>([]);
   const [trackingMode, setTrackingMode] = useState<'conservative' | 'balanced' | 'precise'>('balanced');
-  const [journeyWakeLock, setJourneyWakeLock] = useState<WakeLockSentinel | null>(null);
   const [geoTrackingHistory, setGeoTrackingHistory] = useState<GeoTrackingEntry[]>([]);
+
+  // 🎯 Radar Integration State
+  const [approachAlert, setApproachAlert] = useState<ApproachAlert>({ isApproaching: false });
+  const [radarTripId, setRadarTripId] = useState<string | null>(null);
+  const [locationValidation, setLocationValidation] = useState({ isValid: true, confidence: 100 });
+  const [fraudAlerts, setFraudAlerts] = useState<string[]>([]);
+
+  // 🔐 Smart Wake Lock State
+  const [wakeLockManager] = useState(() => new SmartWakeLock());
+  const [wakeLockActive, setWakeLockActive] = useState(false);
 
   // Battery & Network Status
   const [batteryLevel, setBatteryLevel] = useState<number>(100);
@@ -75,6 +183,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
+
+  // 🔐 Setup Wake Lock Listener
+  useEffect(() => {
+    wakeLockManager.onStateChange((isActive) => {
+      setWakeLockActive(isActive);
+    });
+
+    return () => {
+      wakeLockManager.releaseWakeLock('component_unmount');
+    };
+  }, [wakeLockManager]);
 
   // 🔋 BATTERY OPTIMIZED LOCATION OPTIONS
   const getLocationOptions = useCallback(() => {
@@ -101,7 +220,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     return options[trackingMode];
   }, [trackingMode]);
 
-  // 🚀 INITIALIZE - CHECK FOR ACTIVE JOURNEY
+  // 🚀 INITIALIZE
   useEffect(() => {
     initializeJourneyTracker();
     setupBatteryMonitoring();
@@ -111,9 +230,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       if (locationWatchId) {
         navigator.geolocation.clearWatch(locationWatchId);
       }
-      if (journeyWakeLock) {
-        journeyWakeLock.release();
-      }
+      wakeLockManager.releaseWakeLock('cleanup');
     };
   }, [userId]);
 
@@ -140,41 +257,50 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
   };
 
-  // 🔍 INITIALIZE JOURNEY TRACKER - FETCH USER TRACKING DATA
+  // 🔍 INITIALIZE JOURNEY TRACKER
   const initializeJourneyTracker = async () => {
     setIsLoading(true);
     try {
       const today = new Date().toISOString().split('T')[0];
-      const response = await fetch(`/api/geo-tracking/user/${userId}?dateFrom=${today}`);
+      const response = await fetch(`/api/geo-tracking/user/${userId}?startDate=${today}&endDate=${today}`);
       const data = await response.json();
 
       if (data.success && data.data && data.data.length > 0) {
         setGeoTrackingHistory(data.data);
         
-        // Check if there's an active journey (no checkout time)
-        const activeGeoTracking = data.data.find((track: GeoTrackingEntry) => !track.checkOutTime);
+        // Check for active journey
+        const activeGeoTracking = data.data
+          .sort((a: GeoTrackingEntry, b: GeoTrackingEntry) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          )[0];
         
-        if (activeGeoTracking) {
-          const duration = calculateDuration(activeGeoTracking.checkInTime);
+        if (activeGeoTracking && activeGeoTracking.activityType === 'journey_active') {
+          const duration = calculateDuration(activeGeoTracking.createdAt);
           const distance = calculateTotalDistance(data.data);
           
           setActiveJourney({
             id: activeGeoTracking.id,
-            startTime: activeGeoTracking.checkInTime,
+            startTime: activeGeoTracking.createdAt,
             duration,
             totalDistance: `${distance.toFixed(3)} km`,
             trackingPoints: data.data.length,
-            activeCheckins: data.data.filter((track: GeoTrackingEntry) => track.checkOutTime).length,
-            status: 'active'
+            activeCheckins: data.data.filter((track: GeoTrackingEntry) => 
+              track.activityType === 'dealer_checkin'
+            ).length,
+            status: 'active',
+            fraudDetected: false,
+            locationValidated: true
           });
 
-          setSuccessMessage('Resumed active journey');
+          // 🔐 Resume wake lock for active journey
+          await wakeLockManager.requestWakeLock('resumed_active_journey');
+          setSuccessMessage('🔄 Resumed active journey with smart wake lock');
           startLocationTracking();
         } else {
-          setSuccessMessage('Ready to start new journey');
+          setSuccessMessage('✨ Ready to start new Radar-powered journey');
         }
       } else {
-        setSuccessMessage('No previous journeys found');
+        setSuccessMessage('🚀 Ready for your first journey with location intelligence');
       }
     } catch (error) {
       console.error('Error checking active journey:', error);
@@ -184,7 +310,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
   };
 
-  // 📏 CALCULATE TOTAL DISTANCE FROM TRACKING POINTS
+  // Calculate duration and distance helpers
   const calculateTotalDistance = (trackingData: GeoTrackingEntry[]): number => {
     if (trackingData.length < 2) return 0;
     
@@ -193,8 +319,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       const prev = trackingData[i - 1];
       const curr = trackingData[i];
       
-      // Haversine formula for distance calculation
-      const R = 6371; // Earth's radius in km
+      const R = 6371;
       const dLat = (curr.latitude - prev.latitude) * Math.PI / 180;
       const dLon = (curr.longitude - prev.longitude) * Math.PI / 180;
       const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -207,7 +332,6 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     return totalDistance;
   };
 
-  // ⏱️ CALCULATE DURATION HELPER
   const calculateDuration = (startTime: string) => {
     const start = new Date(startTime);
     const now = new Date();
@@ -217,7 +341,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   };
 
-  // 🌍 START LOCATION TRACKING WITH BATTERY OPTIMIZATION
+  // 🌍 SMART LOCATION TRACKING WITH BATTERY-AWARE WAKE LOCK
   const startLocationTracking = useCallback(() => {
     if (locationWatchId) {
       navigator.geolocation.clearWatch(locationWatchId);
@@ -226,7 +350,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     const options = getLocationOptions();
 
     const watchId = navigator.geolocation.watchPosition(
-      (position) => {
+      async (position) => {
         const newLocation: LocationData = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -239,10 +363,24 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         setCurrentLocation(newLocation);
         setLastUpdate(new Date());
 
-        // Auto-adjust tracking mode based on speed
+        // 🔐 Smart wake lock management based on movement
+        const speedKmh = (newLocation.speed || 0) * 3.6;
+        if (speedKmh > 1 && !wakeLockManager.isActive()) {
+          // User is moving, acquire wake lock
+          await wakeLockManager.requestWakeLock('movement_detected');
+        } else if (speedKmh < 0.5 && wakeLockManager.isActive() && batteryLevel < 20) {
+          // User is stationary and battery is low, consider releasing wake lock
+          setTimeout(() => {
+            if ((currentLocation?.speed || 0) * 3.6 < 0.5) {
+              wakeLockManager.releaseWakeLock('stationary_low_battery');
+            }
+          }, 30000); // Wait 30 seconds before releasing
+        }
+
+        await checkApproachingDealers(newLocation);
         autoAdjustTrackingMode(newLocation.speed || 0);
+        await logTrackingPoint(newLocation);
         
-        // Update active journey stats if available
         if (activeJourney) {
           setActiveJourney(prev => prev ? {
             ...prev,
@@ -259,22 +397,76 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     );
 
     setLocationWatchId(watchId);
-  }, [activeJourney, trackingMode, getLocationOptions]);
+  }, [activeJourney, trackingMode, getLocationOptions, batteryLevel]);
 
-  // 🎯 AUTO-ADJUST TRACKING MODE BASED ON SPEED
+  // Check approaching dealers
+  const checkApproachingDealers = async (location: LocationData) => {
+    try {
+      const response = await fetch('/api/radar/check-approaching', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          latitude: location.lat,
+          longitude: location.lng
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.isApproaching) {
+          setApproachAlert({
+            isApproaching: true,
+            dealerName: data.dealerName,
+            eta: data.eta,
+            distance: data.distance
+          });
+        } else {
+          setApproachAlert({ isApproaching: false });
+        }
+      }
+    } catch (error) {
+      console.warn('Dealer approach check failed:', error);
+    }
+  };
+
+  // Log tracking point
+  const logTrackingPoint = async (location: LocationData) => {
+    if (!activeJourney) return;
+
+    try {
+      await fetch('/api/geo-tracking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          latitude: location.lat,
+          longitude: location.lng,
+          accuracy: location.accuracy,
+          speed: location.speed,
+          heading: location.heading,
+          altitude: location.altitude,
+          locationType: trackingMode,
+          activityType: 'journey_tracking'
+        })
+      });
+    } catch (error) {
+      console.warn('Failed to log tracking point:', error);
+    }
+  };
+
   const autoAdjustTrackingMode = (speed: number) => {
-    const speedKmh = speed * 3.6; // Convert m/s to km/h
-
+    const speedKmh = speed * 3.6;
     let newMode: 'conservative' | 'balanced' | 'precise' = 'conservative';
-    if (speedKmh > 30) newMode = 'precise'; // Fast movement
-    else if (speedKmh > 5) newMode = 'balanced'; // Walking/slow driving
+    if (speedKmh > 30) newMode = 'precise';
+    else if (speedKmh > 5) newMode = 'balanced';
 
     if (newMode !== trackingMode) {
       setTrackingMode(newMode);
     }
   };
 
-  // 🏁 START NEW JOURNEY - GEO-TRACKING CHECK-IN
+  // 🏁 START NEW JOURNEY WITH SMART WAKE LOCK
   const handleStartJourney = async () => {
     if (!currentLocation) {
       setErrorMessage('Please enable location services');
@@ -284,19 +476,39 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     setIsLoading(true);
     setErrorMessage('');
 
-    // Request wake lock
-    let wakeLock = null;
     try {
-      if ('wakeLock' in navigator) {
-        wakeLock = await (navigator as any).wakeLock.request('screen');
-        setJourneyWakeLock(wakeLock);
+      // 🔐 Request wake lock ONLY when journey starts
+      const wakeLockAcquired = await wakeLockManager.requestWakeLock('journey_started');
+      if (!wakeLockAcquired) {
+        console.warn('Wake lock not available, continuing without screen lock');
       }
-    } catch (wakeLockError) {
-      console.log('Wake lock not available, continuing without it');
-    }
 
-    try {
-      const checkInData = {
+      // Start Radar journey tracking
+      const radarResponse = await fetch('/api/radar/start-journey', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userId.toString(),
+          externalId: `journey_${Date.now()}`,
+          latitude: currentLocation.lat,
+          longitude: currentLocation.lng,
+          metadata: {
+            startedFrom: 'pwa_tracker',
+            trackingMode,
+            wakeLockActive: wakeLockAcquired
+          }
+        })
+      });
+
+      let radarTripId = null;
+      if (radarResponse.ok) {
+        const radarData = await radarResponse.json();
+        radarTripId = radarData.tripId;
+        setRadarTripId(radarTripId);
+      }
+
+      // Create geo-tracking record
+      const journeyData = {
         userId,
         latitude: currentLocation.lat,
         longitude: currentLocation.lng,
@@ -304,13 +516,16 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         speed: currentLocation.speed || 0,
         heading: currentLocation.heading || 0,
         altitude: currentLocation.altitude || 0,
-        notes: `Journey started via PWA tracker at ${new Date().toLocaleTimeString()}`
+        locationType: trackingMode,
+        activityType: 'journey_active',
+        siteName: `Journey ${new Date().toLocaleTimeString()}`,
+        checkInTime: new Date().toISOString()
       };
 
-      const response = await fetch('/api/geo-tracking/checkin', {
+      const response = await fetch('/api/geo-tracking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkInData)
+        body: JSON.stringify(journeyData)
       });
 
       const data = await response.json();
@@ -318,32 +533,27 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       if (data.success && data.data) {
         setActiveJourney({
           id: data.data.id,
-          startTime: data.data.checkInTime,
+          tripId: radarTripId || undefined,
+          startTime: data.data.createdAt,
           duration: '0m',
           totalDistance: '0.000 km',
           trackingPoints: 1,
-          activeCheckins: 1,
-          status: 'active'
+          activeCheckins: 0,
+          status: 'active',
+          fraudDetected: false,
+          locationValidated: true
         });
 
-        // Add to tracking history
         setGeoTrackingHistory(prev => [...prev, data.data]);
-
         startLocationTracking();
-        setSuccessMessage('🚀 Journey started successfully!');
+        setSuccessMessage(`🚀 Journey started with ${wakeLockAcquired ? 'screen lock' : 'battery optimization'}!`);
         setErrorMessage('');
       } else {
-        if (wakeLock) {
-          wakeLock.release();
-          setJourneyWakeLock(null);
-        }
+        await wakeLockManager.releaseWakeLock('journey_start_failed');
         setErrorMessage(data.error || 'Failed to start journey');
       }
     } catch (error) {
-      if (wakeLock) {
-        wakeLock.release();
-        setJourneyWakeLock(null);
-      }
+      await wakeLockManager.releaseWakeLock('journey_start_error');
       console.error('Error starting journey:', error);
       setErrorMessage('Network error: Failed to start journey');
     } finally {
@@ -351,7 +561,58 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
   };
 
-  // 🔚 END JOURNEY - GEO-TRACKING CHECK-OUT
+  // 🎯 PAUSE/RESUME WITH SMART WAKE LOCK MANAGEMENT
+  const handlePauseResumeJourney = async () => {
+    if (!activeJourney || !currentLocation) return;
+
+    setIsLoading(true);
+    try {
+      const action = activeJourney.status === 'active' ? 'pause' : 'resume';
+      
+      if (radarTripId) {
+        await fetch(`/api/radar/${action}-journey`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tripId: radarTripId,
+            userId: userId.toString(),
+            currentLocation: {
+              latitude: currentLocation.lat,
+              longitude: currentLocation.lng
+            }
+          })
+        });
+      }
+
+      if (action === 'pause') {
+        // 🔐 Release wake lock when pausing - save battery!
+        await wakeLockManager.releaseWakeLock('journey_paused');
+        if (locationWatchId) {
+          navigator.geolocation.clearWatch(locationWatchId);
+          setLocationWatchId(null);
+        }
+        setSuccessMessage('⏸️ Journey paused • Screen lock released to save battery');
+      } else {
+        // 🔐 Reacquire wake lock when resuming
+        const wakeLockAcquired = await wakeLockManager.requestWakeLock('journey_resumed');
+        startLocationTracking();
+        setSuccessMessage(`▶️ Journey resumed ${wakeLockAcquired ? 'with screen lock' : '• Battery optimization active'}`);
+      }
+
+      setActiveJourney(prev => prev ? {
+        ...prev,
+        status: prev.status === 'active' ? 'paused' : 'active'
+      } : null);
+
+    } catch (error) {
+      console.error('Error pausing/resuming journey:', error);
+      setErrorMessage('Failed to pause/resume journey');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 🔚 END JOURNEY WITH WAKE LOCK CLEANUP
   const handleEndJourney = async () => {
     if (!activeJourney) return;
 
@@ -359,32 +620,38 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     setErrorMessage('');
 
     try {
-      const checkOutData = {
-        userId,
-        trackingId: activeJourney.id,
-        latitude: currentLocation?.lat || 0,
-        longitude: currentLocation?.lng || 0,
-        notes: `Journey completed via PWA tracker. Duration: ${activeJourney.duration}, Check-ins: ${dealerCheckins.length}`
+      // Complete Radar journey
+      if (radarTripId && currentLocation) {
+        await fetch('/api/radar/complete-journey', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tripId: radarTripId,
+            userId: userId.toString(),
+            finalLocation: {
+              latitude: currentLocation.lat,
+              longitude: currentLocation.lng
+            }
+          })
+        });
+      }
+
+      // Update geo-tracking record
+      const updateData = {
+        checkOutTime: new Date().toISOString(),
+        activityType: 'journey_completed',
+        totalDistanceTravelled: parseFloat(activeJourney.totalDistance.replace(' km', ''))
       };
 
-      const response = await fetch('/api/geo-tracking/checkout', {
-        method: 'POST',
+      const response = await fetch(`/api/geo-tracking/${activeJourney.id}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkOutData)
+        body: JSON.stringify(updateData)
       });
 
-      const data = await response.json();
-      
-      if (data.success) {
-        // Release wake lock
-        if (journeyWakeLock) {
-          try {
-            journeyWakeLock.release();
-            setJourneyWakeLock(null);
-          } catch (wakeLockError) {
-            console.log('Wake lock release failed, continuing normally');
-          }
-        }
+      if (response.ok) {
+        // 🔐 Release wake lock when journey ends
+        await wakeLockManager.releaseWakeLock('journey_completed');
 
         // Stop location tracking
         if (locationWatchId) {
@@ -392,23 +659,23 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
           setLocationWatchId(null);
         }
 
-        // Show success message
         const duration = activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m';
-        setSuccessMessage(`🎉 Journey Complete! Duration: ${duration}, Check-ins: ${dealerCheckins.length}`);
+        setSuccessMessage(`🎉 Journey Complete! Duration: ${duration} • Screen lock released`);
 
         // Reset state
         setActiveJourney(null);
         setDealerCheckins([]);
+        setRadarTripId(null);
+        setApproachAlert({ isApproaching: false });
         setErrorMessage('');
 
-        // Refresh journey data
         setTimeout(() => {
           initializeJourneyTracker();
           onJourneyEnd();
         }, 2000);
 
       } else {
-        setErrorMessage(data.error || 'Failed to end journey');
+        setErrorMessage('Failed to end journey');
       }
     } catch (error) {
       console.error('Error ending journey:', error);
@@ -418,13 +685,20 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
   };
 
-  // 🔋 SETUP BATTERY MONITORING
+  // Battery monitoring
   const setupBatteryMonitoring = () => {
     if ('getBattery' in navigator) {
       (navigator as any).getBattery().then((battery: any) => {
         setBatteryLevel(Math.round(battery.level * 100));
         battery.addEventListener('levelchange', () => {
-          setBatteryLevel(Math.round(battery.level * 100));
+          const newBatteryLevel = Math.round(battery.level * 100);
+          setBatteryLevel(newBatteryLevel);
+          
+          // 🔐 Auto-release wake lock if battery is critically low
+          if (newBatteryLevel < 10 && wakeLockManager.isActive()) {
+            wakeLockManager.releaseWakeLock('critical_low_battery');
+            setSuccessMessage('⚠️ Screen lock released due to low battery');
+          }
         });
       });
     }
@@ -433,7 +707,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     window.addEventListener('offline', () => setNetworkStatus('offline'));
   };
 
-  // 📱 QUICK DEALER CHECK-IN
+  // Enhanced dealer check-in
   const handleQuickCheckIn = async () => {
     if (!activeJourney || !currentLocation) {
       setErrorMessage('No active journey or location unavailable');
@@ -441,18 +715,48 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
 
     try {
-      // This would integrate with your dealer check-in endpoints
-      // For now, we'll add a mock check-in
-      const newCheckIn: DealerCheckIn = {
-        id: Date.now().toString(),
+      const visitData = {
+        userId,
+        reportDate: new Date().toISOString().split('T')[0],
+        dealerType: 'Quick Check-in',
         dealerName: `Dealer ${dealerCheckins.length + 1}`,
-        checkInTime: new Date().toLocaleTimeString(),
-        location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`
+        location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`,
+        latitude: currentLocation.lat,
+        longitude: currentLocation.lng,
+        visitType: 'Quick Check-in',
+        dealerTotalPotential: 0,
+        dealerBestPotential: 0,
+        brandSelling: ['Quick Visit'],
+        todayOrderMt: 0,
+        todayCollectionRupees: 0,
+        feedbacks: 'Quick check-in via journey tracker',
+        checkInTime: new Date().toISOString()
       };
 
-      setDealerCheckins(prev => [...prev, newCheckIn]);
-      setActiveJourney(prev => prev ? { ...prev, activeCheckins: prev.activeCheckins + 1 } : null);
-      setSuccessMessage('✅ Quick check-in recorded');
+      const response = await fetch('/api/dvr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(visitData)
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const newCheckIn: DealerCheckIn = {
+          id: data.data.id,
+          dealerName: visitData.dealerName,
+          checkInTime: new Date().toLocaleTimeString(),
+          location: visitData.location,
+          validated: data.data.locationValidated || false,
+          distance: data.data.distance
+        };
+
+        setDealerCheckins(prev => [...prev, newCheckIn]);
+        setActiveJourney(prev => prev ? { ...prev, activeCheckins: prev.activeCheckins + 1 } : null);
+        setSuccessMessage('✅ Quick check-in recorded with location validation');
+      } else {
+        setErrorMessage('Failed to record check-in');
+      }
     } catch (error) {
       setErrorMessage('Failed to record check-in');
     }
@@ -464,9 +768,9 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       <div className="h-full bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-            <Navigation className="w-8 h-8 text-white" />
+            <Radar className="w-8 h-8 text-white animate-spin" />
           </div>
-          <p className="text-gray-600 font-medium">Loading journey tracker...</p>
+          <p className="text-gray-600 font-medium">Initializing smart tracking...</p>
         </div>
       </div>
     );
@@ -474,7 +778,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
   return (
     <div className="h-full bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex flex-col">
-      {/* 🎨 INSTAGRAM-STYLE HEADER */}
+      {/* ENHANCED HEADER WITH WAKE LOCK STATUS */}
       <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-10">
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
@@ -491,32 +795,61 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               )}
               <Avatar className="h-10 w-10">
                 <AvatarFallback className="bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 text-white">
-                  <Navigation className="w-5 h-5" />
+                  <Radar className="w-5 h-5" />
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h1 className="font-semibold text-lg">Journey Tracker</h1>
+                <h1 className="font-semibold text-lg">Smart Journey Tracker</h1>
                 <div className="flex items-center space-x-2 text-sm text-gray-500">
                   <div className={`w-2 h-2 rounded-full ${networkStatus === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
-                  <span>GPS Tracking • {batteryLevel}%</span>
+                  <span>Radar.io • {batteryLevel}%</span>
+                  {wakeLockActive && (
+                    <div className="flex items-center space-x-1 text-blue-600">
+                      <Sun className="w-3 h-3" />
+                      <span className="text-xs">Screen Lock</span>
+                    </div>
+                  )}
+                  {!wakeLockActive && activeJourney && (
+                    <div className="flex items-center space-x-1 text-gray-500">
+                      <Moon className="w-3 h-3" />
+                      <span className="text-xs">Battery Save</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
             <div className="flex items-center space-x-2">
+              {approachAlert.isApproaching && (
+                <Button variant="ghost" size="sm" className="p-2 rounded-full text-orange-600">
+                  <Bell className="w-5 h-5 animate-bounce" />
+                </Button>
+              )}
               <Button variant="ghost" size="sm" className="p-2 rounded-full">
                 <Settings className="w-5 h-5" />
-              </Button>
-              <Button variant="ghost" size="sm" className="p-2 rounded-full">
-                <MoreHorizontal className="w-5 h-5" />
               </Button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 🚀 MAIN CONTENT */}
+      {/* APPROACH ALERT */}
+      {approachAlert.isApproaching && (
+        <div className="mx-4 mt-4 p-3 bg-orange-100 border border-orange-300 rounded-xl">
+          <div className="flex items-center space-x-2">
+            <MapPinned className="w-5 h-5 text-orange-600" />
+            <div>
+              <p className="font-medium text-orange-700">Approaching Dealer</p>
+              <p className="text-sm text-orange-600">
+                {approachAlert.dealerName} • {approachAlert.distance}m • ETA: {approachAlert.eta}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MAIN CONTENT */}
       <div className="flex-1 overflow-y-auto pb-6">
-        {/* Success/Error Messages */}
+        {/* Messages */}
         {successMessage && (
           <div className="mx-4 mt-4 p-3 bg-green-100 border border-green-300 rounded-xl">
             <p className="text-green-700 text-sm text-center">{successMessage}</p>
@@ -530,16 +863,16 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         )}
 
         {!activeJourney ? (
-          // 🌟 START JOURNEY SCREEN
+          // START JOURNEY SCREEN
           <div className="p-6">
             <div className="text-center mb-8">
               <div className="w-24 h-24 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full mx-auto mb-6 flex items-center justify-center shadow-2xl">
-                <Route className="w-12 h-12 text-white" />
+                <Navigation2 className="w-12 h-12 text-white" />
               </div>
               <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Ready to Journey?
+                Ready for Smart Journey?
               </h2>
-              <p className="text-gray-600 text-lg">Start tracking your field visits</p>
+              <p className="text-gray-600 text-lg">With intelligent wake lock & battery optimization</p>
             </div>
 
             {/* Location Status */}
@@ -549,12 +882,15 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
                       <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                        <MapPin className="w-6 h-6 text-green-600" />
+                        <Radar className="w-6 h-6 text-green-600" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">Location Ready</h3>
+                        <h3 className="font-semibold text-gray-900">Smart Location Ready</h3>
                         <p className="text-sm text-gray-600">
                           {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Wake lock will activate only during active tracking
                         </p>
                       </div>
                     </div>
@@ -591,32 +927,20 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               </Card>
             )}
 
-            {/* Journey History Summary */}
-            {geoTrackingHistory.length > 0 && (
-              <Card className="mb-6 bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-lg">
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-2">Today's Activity</h3>
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <div className="text-xl font-bold text-blue-600">{geoTrackingHistory.length}</div>
-                      <div className="text-xs text-gray-600">Tracking Points</div>
-                    </div>
-                    <div>
-                      <div className="text-xl font-bold text-purple-600">
-                        {calculateTotalDistance(geoTrackingHistory).toFixed(1)}km
-                      </div>
-                      <div className="text-xs text-gray-600">Distance</div>
-                    </div>
-                    <div>
-                      <div className="text-xl font-bold text-pink-600">
-                        {geoTrackingHistory.filter(h => h.checkOutTime).length}
-                      </div>
-                      <div className="text-xs text-gray-600">Completed</div>
-                    </div>
+            {/* Wake Lock Info */}
+            <Card className="mb-6 bg-blue-50/60 backdrop-blur-sm border border-blue-200/50 shadow-lg">
+              <CardContent className="p-4">
+                <div className="flex items-center space-x-3">
+                  <Sun className="w-6 h-6 text-blue-600" />
+                  <div>
+                    <h3 className="font-semibold text-gray-900">Smart Screen Management</h3>
+                    <p className="text-sm text-gray-600">
+                      Screen stays awake only while actively tracking • Battery optimization included
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              </CardContent>
+            </Card>
 
             {/* System Status */}
             <div className="grid grid-cols-2 gap-4 mb-8">
@@ -624,12 +948,18 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 <CardContent className="p-4 text-center">
                   <Battery className={`w-6 h-6 mx-auto mb-2 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
                   <p className="text-sm font-medium">{batteryLevel}% Battery</p>
+                  <p className="text-xs text-gray-500">
+                    {batteryLevel < 20 ? 'Wake lock will auto-release' : 'Optimized for tracking'}
+                  </p>
                 </CardContent>
               </Card>
               <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
                 <CardContent className="p-4 text-center">
                   <Wifi className={`w-6 h-6 mx-auto mb-2 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
                   <p className="text-sm font-medium">{networkStatus === 'online' ? 'Online' : 'Offline'}</p>
+                  <p className="text-xs text-gray-500">
+                    {networkStatus === 'online' ? 'Radar tracking ready' : 'Local tracking only'}
+                  </p>
                 </CardContent>
               </Card>
             </div>
@@ -643,20 +973,20 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               {isLoading ? (
                 <div className="flex items-center space-x-2">
                   <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Starting Journey...</span>
+                  <span>Starting Smart Journey...</span>
                 </div>
               ) : (
                 <div className="flex items-center space-x-3">
                   <Play className="w-6 h-6" />
-                  <span>Start Journey</span>
+                  <span>Start Smart Journey</span>
                 </div>
               )}
             </Button>
           </div>
         ) : (
-          // 🎯 ACTIVE JOURNEY SCREEN
+          // ACTIVE JOURNEY SCREEN
           <div className="p-6 space-y-6">
-            {/* Journey Status Story */}
+            {/* Journey Status with Wake Lock Indicator */}
             <Card className="bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 text-white shadow-2xl">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -666,7 +996,21 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                     </div>
                     <div>
                       <h3 className="text-xl font-bold">Journey Active</h3>
-                      <p className="text-white/80">Live GPS Tracking</p>
+                      <p className="text-white/80 flex items-center space-x-2">
+                        <span>Smart GPS Tracking</span>
+                        {wakeLockActive && (
+                          <span className="flex items-center space-x-1">
+                            <Sun className="w-3 h-3" />
+                            <span className="text-xs">Screen Lock ON</span>
+                          </span>
+                        )}
+                        {!wakeLockActive && (
+                          <span className="flex items-center space-x-1">
+                            <Moon className="w-3 h-3" />
+                            <span className="text-xs">Battery Save</span>
+                          </span>
+                        )}
+                      </p>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
@@ -683,7 +1027,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center">
                     <div className="text-2xl font-bold">
-                      ⏱️ {activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m'}
+                      ⏱️ {calculateDuration(activeJourney.startTime)}
                     </div>
                     <div className="text-white/80 text-sm">Duration</div>
                   </div>
@@ -730,18 +1074,14 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             {/* Quick Actions */}
             <div className="grid grid-cols-2 gap-4">
               <Button
-                onClick={() => {
-                  // Handle pause/resume logic here
-                  setActiveJourney(prev => prev ? {
-                    ...prev,
-                    status: prev.status === 'active' ? 'paused' : 'active'
-                  } : null);
-                }}
+                onClick={handlePauseResumeJourney}
                 className="h-16 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg"
               >
                 <div className="flex flex-col items-center space-y-1">
                   {activeJourney.status === 'active' ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                  <span className="text-sm">{activeJourney.status === 'active' ? 'Pause' : 'Resume'}</span>
+                  <span className="text-sm">
+                    {activeJourney.status === 'active' ? 'Pause & Save Battery' : 'Resume Tracking'}
+                  </span>
                 </div>
               </Button>
 
@@ -751,7 +1091,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               >
                 <div className="flex flex-col items-center space-y-1">
                   <Store className="w-6 h-6" />
-                  <span className="text-sm">Check-in</span>
+                  <span className="text-sm">Quick Check-in</span>
                 </div>
               </Button>
             </div>
@@ -765,8 +1105,9 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                     {dealerCheckins.slice(-3).map((checkin) => (
                       <div key={checkin.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
                         <div className="flex items-center space-x-2">
-                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          <CheckCircle className={`w-4 h-4 ${checkin.validated ? 'text-green-600' : 'text-orange-600'}`} />
                           <span className="text-sm font-medium">{checkin.dealerName}</span>
+                          {checkin.validated && <Shield className="w-3 h-3 text-green-600" />}
                         </div>
                         <span className="text-xs text-gray-500">{checkin.checkInTime}</span>
                       </div>
@@ -776,7 +1117,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               </Card>
             )}
 
-            {/* System Status */}
+            {/* System Status with Wake Lock */}
             <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -790,8 +1131,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       <span className="text-sm">{networkStatus}</span>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Activity className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm">{activeJourney.trackingPoints} points</span>
+                      {wakeLockActive ? (
+                        <>
+                          <Sun className="w-4 h-4 text-blue-600" />
+                          <span className="text-sm text-blue-600">Screen Lock</span>
+                        </>
+                      ) : (
+                        <>
+                          <Moon className="w-4 h-4 text-gray-500" />
+                          <span className="text-sm text-gray-500">Battery Save</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
@@ -817,7 +1167,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               ) : (
                 <div className="flex items-center space-x-3">
                   <Square className="w-6 h-6" />
-                  <span>🏁 End Journey</span>
+                  <span>🏁 End Journey & Release Lock</span>
                 </div>
               )}
             </Button>

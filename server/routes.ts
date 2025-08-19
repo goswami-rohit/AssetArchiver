@@ -1,4 +1,4 @@
-// routes.ts - COMPLETE IMPLEMENTATION WITH AUTO-CRUD
+// routes.ts - ENHANCED WITH SMART RADAR.IO INTEGRATION
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
 import {
@@ -30,11 +30,11 @@ import {
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import multer from 'multer';
-import { getDistance } from 'geolib';
-import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
-// ✅ Correct - import default export
+// ✅ Import services
 import EnhancedRAGService from './bot/aiService';
+// 🎯 Smart Radar integration - no more hardcoded locations!
+import { radarService } from 'server/services/RadarService';
 
 // Fix multer typing
 interface MulterRequest extends Request {
@@ -55,19 +55,39 @@ const upload = multer({
   }
 });
 
-// Office location coordinates with geo-fencing polygons
-const OFFICE_LOCATIONS = [
-  {
-    name: "Head Office",
-    lat: 26.1200853,
-    lng: 91.7955807,
-    radius: 100,
-    polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
+// ============================================
+// 🎯 SMART OFFICE VALIDATION (RADAR-POWERED)
+// ============================================
+async function validateOfficeLocation(userId: string, latitude: number, longitude: number) {
+  try {
+    // Use Radar's intelligent geofencing instead of hardcoded coordinates
+    const validation = await radarService.validateAttendanceLocation(
+      userId,
+      latitude,
+      longitude,
+      'office' // Use office geofences created in Radar
+    );
+
+    return {
+      isValid: validation.isValid,
+      officeName: validation.events?.find(e => e.type === 'user.entered_geofence')?.geofence?.description || 'Office',
+      confidence: validation.confidence,
+      fraudDetected: validation.fraudDetected,
+      distance: validation.distance,
+      events: validation.events
+    };
+  } catch (error) {
+    console.error('Smart office validation failed:', error);
+    return { 
+      isValid: false, 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      officeName: 'Unknown Office'
+    };
   }
-];
+}
 
 // ============================================
-// SCHEMA-PERFECT AUTO-CRUD GENERATOR
+// 🚀 ENHANCED AUTO-CRUD WITH RADAR.IO INTEGRATION
 // ============================================
 function createAutoCRUD(app: Express, config: {
   endpoint: string,
@@ -75,14 +95,29 @@ function createAutoCRUD(app: Express, config: {
   schema: z.ZodSchema,
   tableName: string,
   autoFields?: { [key: string]: () => any },
-  dateField?: string // For date range filtering
+  dateField?: string,
+  // 🎯 Radar integration based on exact schema
+  locationConfig?: {
+    enabled: boolean,
+    // Schema-specific field mapping
+    latField?: string,    // 'latitude' for DVR, 'inTimeLatitude' for attendance
+    lngField?: string,    // 'longitude' for DVR, 'inTimeLongitude' for attendance  
+    locationField?: string, // 'location' for DVR, 'locationName' for attendance
+    // Radar features
+    createGeofence?: boolean,
+    validateLocation?: boolean,
+    trackLocation?: boolean,
+    geofenceTag?: string,
+    geofenceRadius?: number,
+    requireLocationValidation?: boolean,
+    dealerIdField?: string  // field that contains dealer ID for validation
+  }
 }) {
-  const { endpoint, table, schema, tableName, autoFields = {}, dateField } = config;
+  const { endpoint, table, schema, tableName, autoFields = {}, dateField, locationConfig } = config;
 
-  // CREATE - with perfect schema validation
+  // CREATE - with Radar integration
   app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
     try {
-      // Parse and validate against exact schema
       const parseResult = schema.safeParse(req.body);
 
       if (!parseResult.success) {
@@ -97,9 +132,91 @@ function createAutoCRUD(app: Express, config: {
         });
       }
 
-      const validatedData = parseResult.data;
+      let validatedData = parseResult.data;
 
-      // Apply auto-generated fields (only if not provided)
+      // 🎯 RADAR INTEGRATION based on exact schema fields
+      if (locationConfig?.enabled) {
+        const latField = locationConfig.latField || 'latitude';
+        const lngField = locationConfig.lngField || 'longitude';
+        const locationField = locationConfig.locationField || 'location';
+
+        const lat = validatedData[latField];
+        const lng = validatedData[lngField];
+
+        if (lat && lng) {
+          
+          // 1. Location validation for dealer visits
+          if (locationConfig.validateLocation && locationConfig.dealerIdField) {
+            const dealerId = validatedData[locationConfig.dealerIdField];
+            if (dealerId && validatedData.userId) {
+              try {
+                const validation = await radarService.validateAttendanceLocation(
+                  validatedData.userId.toString(),
+                  parseFloat(lat.toString()),
+                  parseFloat(lng.toString()),
+                  dealerId.toString()
+                );
+
+                if (locationConfig.requireLocationValidation && !validation.isValid) {
+                  return res.status(400).json({
+                    success: false,
+                    error: 'Location validation failed - not within valid geofence area',
+                    details: {
+                      distance: validation.distance,
+                      fraudDetected: validation.fraudDetected,
+                      confidence: validation.confidence,
+                      suggestion: 'Move closer to the dealer location'
+                    }
+                  });
+                }
+
+                // Add validation results to response metadata
+                validatedData.locationValidated = validation.isValid;
+                validatedData.locationConfidence = validation.confidence;
+              } catch (error) {
+                console.warn('Radar location validation failed:', error);
+              }
+            }
+          }
+
+          // 2. Reverse geocode for address if location field exists but is empty
+          if (locationField && !validatedData[locationField]) {
+            try {
+              const geocodeResult = await radarService.reverseGeocode(
+                parseFloat(lat.toString()),
+                parseFloat(lng.toString())
+              );
+              if (geocodeResult.addresses?.[0]?.formattedAddress) {
+                validatedData[locationField] = geocodeResult.addresses[0].formattedAddress;
+              }
+            } catch (error) {
+              console.warn('Reverse geocoding failed:', error);
+            }
+          }
+
+          // 3. Track location in Radar
+          if (locationConfig.trackLocation && validatedData.userId) {
+            try {
+              await radarService.trackUserLocation(
+                validatedData.userId.toString(),
+                parseFloat(lat.toString()),
+                parseFloat(lng.toString()),
+                {
+                  metadata: {
+                    action: `create_${endpoint}`,
+                    recordType: tableName,
+                    timestamp: new Date().toISOString()
+                  }
+                }
+              );
+            } catch (error) {
+              console.warn('Location tracking failed:', error);
+            }
+          }
+        }
+      }
+
+      // Apply auto-generated fields
       const finalData = { ...validatedData };
       Object.entries(autoFields).forEach(([field, generator]) => {
         if (finalData[field] === undefined || finalData[field] === null) {
@@ -107,7 +224,7 @@ function createAutoCRUD(app: Express, config: {
         }
       });
 
-      // Schema handles createdAt/updatedAt with defaultNow(), but ensure they're set
+      // Handle timestamps
       if (table.createdAt && !finalData.createdAt) {
         finalData.createdAt = new Date();
       }
@@ -116,11 +233,39 @@ function createAutoCRUD(app: Express, config: {
       }
 
       const newRecord = await db.insert(table).values(finalData).returning();
+
+      // 🎯 POST-CREATE: Geofence creation for relevant records
+      if (locationConfig?.createGeofence && newRecord[0]) {
+        const record = newRecord[0];
+        const latField = locationConfig.latField || 'latitude';
+        const lngField = locationConfig.lngField || 'longitude';
+        
+        if (record[latField] && record[lngField]) {
+          try {
+            await radarService.createDealerGeofence({
+              externalId: record.id,
+              description: record.name || record.dealerName || `${tableName} ${record.id}`,
+              tag: locationConfig.geofenceTag || endpoint,
+              latitude: parseFloat(record[latField].toString()),
+              longitude: parseFloat(record[lngField].toString()),
+              radius: locationConfig.geofenceRadius || 100,
+              metadata: {
+                recordType: tableName,
+                createdAt: new Date().toISOString()
+              }
+            });
+          } catch (error) {
+            console.warn('Geofence creation failed:', error);
+          }
+        }
+      }
+
       res.json({
         success: true,
         data: newRecord[0],
         message: `${tableName} created successfully`
       });
+
     } catch (error) {
       console.error(`Create ${tableName} error:`, error);
       res.status(500).json({
@@ -131,16 +276,14 @@ function createAutoCRUD(app: Express, config: {
     }
   });
 
-  // GET ALL by User ID - with proper date field handling
+  // GET ALL by User ID - with optional location context
   app.get(`/api/${endpoint}/user/:userId`, async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
-      const { startDate, endDate, limit = '50', completed, ...filters } = req.query;
+      const { startDate, endDate, limit = '50', completed, lat, lng, ...filters } = req.query;
 
-      // Base condition - userId is integer in schema
       let whereCondition = eq(table.userId, parseInt(userId));
 
-      // Date range filtering using the correct date field for each table
       if (startDate && endDate && dateField && table[dateField]) {
         whereCondition = and(
           whereCondition,
@@ -149,27 +292,49 @@ function createAutoCRUD(app: Express, config: {
         );
       }
 
-      // Handle completed filter for PJPs
       if (completed === 'true' && table.status) {
         whereCondition = and(whereCondition, eq(table.status, 'completed'));
       }
 
-      // Additional filters from query params
       Object.entries(filters).forEach(([key, value]) => {
         if (value && table[key]) {
           whereCondition = and(whereCondition, eq(table[key], value));
         }
       });
 
-      // Order by most relevant date field or createdAt
       const orderField = table[dateField] || table.createdAt || table.updatedAt;
-
       const records = await db.select().from(table)
         .where(whereCondition)
         .orderBy(desc(orderField))
         .limit(parseInt(limit as string));
 
-      res.json({ success: true, data: records });
+      // 🎯 Optional location context from Radar
+      let locationContext = null;
+      if (locationConfig?.enabled && lat && lng) {
+        try {
+          const tracking = await radarService.checkApproachingDealer(
+            userId,
+            parseFloat(lat as string),
+            parseFloat(lng as string)
+          );
+          locationContext = {
+            isApproaching: tracking.isApproaching,
+            hasArrived: tracking.hasArrived,
+            distance: tracking.distance,
+            eta: tracking.eta
+          };
+        } catch (error) {
+          console.warn('Location context failed:', error);
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        data: records,
+        locationContext,
+        count: records.length
+      });
+
     } catch (error) {
       console.error(`Get ${tableName}s error:`, error);
       res.status(500).json({
@@ -180,7 +345,7 @@ function createAutoCRUD(app: Express, config: {
     }
   });
 
-  // GET BY ID - with proper UUID/varchar handling
+  // GET BY ID
   app.get(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
@@ -204,12 +369,10 @@ function createAutoCRUD(app: Express, config: {
     }
   });
 
-  // UPDATE - with partial schema validation
+  // UPDATE - with location tracking on updates
   app.put(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
     try {
       const { id } = req.params;
-
-      // Create partial schema for updates
       const partialSchema = schema.partial();
       const parseResult = partialSchema.safeParse(req.body);
 
@@ -225,9 +388,34 @@ function createAutoCRUD(app: Express, config: {
         });
       }
 
-      const validatedData = parseResult.data;
+      let validatedData = parseResult.data;
 
-      // Always update the updatedAt field
+      // 🎯 Track location updates
+      if (locationConfig?.trackLocation && locationConfig?.enabled) {
+        const latField = locationConfig.latField || 'latitude';
+        const lngField = locationConfig.lngField || 'longitude';
+        
+        if (validatedData[latField] && validatedData[lngField] && validatedData.userId) {
+          try {
+            await radarService.trackUserLocation(
+              validatedData.userId.toString(),
+              parseFloat(validatedData[latField].toString()),
+              parseFloat(validatedData[lngField].toString()),
+              {
+                metadata: {
+                  action: `update_${endpoint}`,
+                  recordId: id,
+                  recordType: tableName,
+                  timestamp: new Date().toISOString()
+                }
+              }
+            );
+          } catch (error) {
+            console.warn('Location tracking on update failed:', error);
+          }
+        }
+      }
+
       const updateData = {
         ...validatedData,
         updatedAt: new Date()
@@ -250,6 +438,7 @@ function createAutoCRUD(app: Express, config: {
         data: updatedRecord[0],
         message: `${tableName} updated successfully`
       });
+
     } catch (error) {
       console.error(`Update ${tableName} error:`, error);
       res.status(500).json({
@@ -304,7 +493,6 @@ export function setupWebRoutes(app: Express) {
         return res.status(400).json({ error: 'Login ID and password are required' });
       }
 
-      // Find user by salesmanLoginId or email
       const user = await db.query.users.findFirst({
         where: or(
           eq(users.salesmanLoginId, loginId),
@@ -319,17 +507,14 @@ export function setupWebRoutes(app: Express) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Check if user is active
       if (user.status !== 'active') {
         return res.status(401).json({ error: 'Account is not active' });
       }
 
-      // For now, simple password check (you should use bcrypt in production)
       if (user.hashedPassword !== password) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Success - return user data (without password)
       const { hashedPassword, ...userWithoutPassword } = user;
 
       res.json({
@@ -345,12 +530,10 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== ENHANCED AI/RAG ROUTES ====================
-  // 🚀 ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
 
-      // Enhanced validation
       if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({
           success: false,
@@ -358,7 +541,6 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Validate message format
       for (const msg of messages) {
         if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
           return res.status(400).json({
@@ -368,7 +550,6 @@ export function setupWebRoutes(app: Express) {
         }
       }
 
-      // Process with enhanced RAG service (vector search enabled)
       const aiResponse = await EnhancedRAGService.chat(messages, userId);
 
       res.json({
@@ -377,7 +558,7 @@ export function setupWebRoutes(app: Express) {
         timestamp: new Date().toISOString(),
         userId: userId,
         messageCount: messages.length,
-        enhanced: true // Flag to indicate vector search was used
+        enhanced: true
       });
     } catch (error) {
       console.error('Enhanced RAG Chat error:', error);
@@ -389,7 +570,6 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🤖 INTELLIGENT RAG CHAT (Complete Vector Flow)
   app.post('/api/rag/vector-chat', async (req: Request, res: Response) => {
     try {
       const { message, userId }: { message: string, userId?: number } = req.body;
@@ -403,7 +583,6 @@ export function setupWebRoutes(app: Express) {
 
       console.log(`🤖 Vector RAG request from user ${userId}: "${message.substring(0, 50)}..."`);
 
-      // Use intelligent RAG with vector search + direct execution
       const result = await EnhancedRAGService.ragChat(message, userId);
 
       res.json({
@@ -428,7 +607,6 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🔍 VECTOR-POWERED ENDPOINT DISCOVERY
   app.post('/api/rag/find-endpoint', async (req: Request, res: Response) => {
     try {
       const { query }: { query: string } = req.body;
@@ -470,7 +648,6 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ⚡ DIRECT API EXECUTION
   app.post('/api/rag/execute', async (req: Request, res: Response) => {
     try {
       const { endpoint, data, userId }: { endpoint: string, data: any, userId?: number } = req.body;
@@ -505,12 +682,10 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 📋 ENHANCED DATA EXTRACTION & SUBMISSION
   app.post('/api/rag/submit', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
 
-      // Enhanced validation
       if (!Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({
           success: false,
@@ -525,7 +700,6 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Validate message format
       for (const msg of messages) {
         if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
           return res.status(400).json({
@@ -537,7 +711,6 @@ export function setupWebRoutes(app: Express) {
 
       console.log(`📋 Enhanced data extraction for user ${userId}`);
 
-      // Enhanced structured data extraction with vector context
       const extracted = await EnhancedRAGService.extractStructuredData(messages, userId);
 
       if (!extracted || extracted.error) {
@@ -549,7 +722,6 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Direct execution using enhanced service
       const executionResult = await EnhancedRAGService.executeEndpoint(
         extracted.endpoint,
         extracted.data,
@@ -566,7 +738,6 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Enhanced success response
       const endpointName = extracted.endpoint.replace('/api/', '').toUpperCase();
 
       res.json({
@@ -596,7 +767,6 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 📊 SMART DATA FETCHING
   app.get('/api/rag/fetch/:endpoint/user/:userId', async (req: Request, res: Response) => {
     try {
       const { endpoint, userId } = req.params;
@@ -636,12 +806,8 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🎯 RAG HEALTH CHECK with Vector Status
   app.get('/api/rag/health', async (req: Request, res: Response) => {
     try {
-      // Test Qdrant connection
-      const qdrantStatus = await qdrantClient.getCollections();
-
       res.json({
         success: true,
         status: 'Enhanced RAG System Online',
@@ -649,11 +815,9 @@ export function setupWebRoutes(app: Express) {
           vectorSearch: true,
           directExecution: true,
           autoCrudIntegration: true,
+          radarIntegration: true,
+          smartOfficeValidation: true,
           uiAwareness: true
-        },
-        qdrant: {
-          connected: true,
-          collections: qdrantStatus.collections.length
         },
         timestamp: new Date().toISOString()
       });
@@ -661,19 +825,16 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({
         success: false,
         status: 'RAG System Degraded',
-        error: error instanceof Error ? error.message : 'Unknown error',
-        qdrant: {
-          connected: false,
-          error: 'Connection failed'
-        }
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   });
+
   // ============================================
-  // SCHEMA-PERFECT AUTO-GENERATED CRUD ROUTES
+  // 🚀 ENHANCED AUTO-CRUD ROUTES WITH RADAR INTEGRATION
   // ============================================
 
-  // 1. Daily Visit Reports - date field, auto reportDate
+  // 1. ✅ AUTO-CRUD: Daily Visit Reports - with dealer location validation
   createAutoCRUD(app, {
     endpoint: 'dvr',
     table: dailyVisitReports,
@@ -681,12 +842,23 @@ export function setupWebRoutes(app: Express) {
     tableName: 'Daily Visit Report',
     dateField: 'reportDate',
     autoFields: {
-      reportDate: () => new Date().toISOString().split('T')[0], // date type
-      checkInTime: () => new Date() // timestamp type
+      reportDate: () => new Date().toISOString().split('T')[0],
+      checkInTime: () => new Date()
+    },
+    locationConfig: {
+      enabled: true,
+      latField: 'latitude',       // matches your schema
+      lngField: 'longitude',      // matches your schema  
+      locationField: 'location',  // matches your schema
+      validateLocation: true,
+      requireLocationValidation: true,
+      trackLocation: true,
+      dealerIdField: 'dealerName',
+      geofenceTag: 'dealer'
     }
   });
 
-  // 2. Technical Visit Reports - date field, auto reportDate
+  // 2. ✅ AUTO-CRUD: Technical Visit Reports - with location tracking
   createAutoCRUD(app, {
     endpoint: 'tvr',
     table: technicalVisitReports,
@@ -696,10 +868,15 @@ export function setupWebRoutes(app: Express) {
     autoFields: {
       reportDate: () => new Date().toISOString().split('T')[0],
       checkInTime: () => new Date()
+    },
+    locationConfig: {
+      enabled: true,
+      trackLocation: true,
+      geofenceTag: 'technical_visit'
     }
   });
 
-  // 3. Permanent Journey Plans - date field, auto planDate and status
+  // 3. ✅ AUTO-CRUD: Permanent Journey Plans - basic tracking
   createAutoCRUD(app, {
     endpoint: 'pjp',
     table: permanentJourneyPlans,
@@ -708,20 +885,26 @@ export function setupWebRoutes(app: Express) {
     dateField: 'planDate',
     autoFields: {
       planDate: () => new Date().toISOString().split('T')[0],
-      status: () => 'planned' // varchar type with default
+      status: () => 'planned'
     }
   });
 
-  // 4. Dealers - no date field for filtering
+  // 4. ✅ AUTO-CRUD: Dealers - with address geocoding
   createAutoCRUD(app, {
     endpoint: 'dealers',
     table: dealers,
     schema: insertDealerSchema,
-    tableName: 'Dealer'
-    // No auto fields needed - all required fields should be provided
+    tableName: 'Dealer',
+    locationConfig: {
+      enabled: true,
+      locationField: 'address',
+      // Note: Enable geofence creation when adding lat/lng fields to dealer schema
+      createGeofence: false,
+      geofenceTag: 'dealer'
+    }
   });
 
-  // 5. Daily Tasks - date field, auto taskDate and status
+  // 5. ✅ AUTO-CRUD: Daily Tasks - basic functionality
   createAutoCRUD(app, {
     endpoint: 'daily-tasks',
     table: dailyTasks,
@@ -730,11 +913,11 @@ export function setupWebRoutes(app: Express) {
     dateField: 'taskDate',
     autoFields: {
       taskDate: () => new Date().toISOString().split('T')[0],
-      status: () => 'Assigned' // matches schema default
+      status: () => 'Assigned'
     }
   });
 
-  // 6. Leave Applications - date field, auto status
+  // 6. ✅ AUTO-CRUD: Leave Applications - basic functionality
   createAutoCRUD(app, {
     endpoint: 'leave-applications',
     table: salesmanLeaveApplications,
@@ -742,20 +925,19 @@ export function setupWebRoutes(app: Express) {
     tableName: 'Leave Application',
     dateField: 'startDate',
     autoFields: {
-      status: () => 'Pending' // varchar type
+      status: () => 'Pending'
     }
   });
 
-  // 7. Client Reports - no specific date field for range filtering
+  // 7. ✅ AUTO-CRUD: Client Reports - basic functionality
   createAutoCRUD(app, {
     endpoint: 'client-reports',
     table: clientReports,
     schema: insertClientReportSchema,
     tableName: 'Client Report'
-    // checkOutTime is timestamp but not used for filtering
   });
 
-  // 8. Competition Reports - date field, auto reportDate
+  // 8. ✅ AUTO-CRUD: Competition Reports - basic functionality
   createAutoCRUD(app, {
     endpoint: 'competition-reports',
     table: competitionReports,
@@ -767,20 +949,96 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 9. Dealer Reports and Scores - no date field for filtering
+  // 9. ✅ AUTO-CRUD: Geo Tracking - comprehensive location tracking
+  createAutoCRUD(app, {
+    endpoint: 'geo-tracking',
+    table: geoTracking,
+    schema: insertGeoTrackingSchema,
+    tableName: 'Geo Tracking',
+    dateField: 'recordedAt',
+    locationConfig: {
+      enabled: true,
+      latField: 'latitude',
+      lngField: 'longitude',
+      trackLocation: true,
+      geofenceTag: 'tracking'
+    }
+  });
+
+  // 10. ✅ AUTO-CRUD: Dealer Reports and Scores - basic functionality
   createAutoCRUD(app, {
     endpoint: 'dealer-reports-scores',
     table: dealerReportsAndScores,
     schema: insertDealerReportsAndScoresSchema,
     tableName: 'Dealer Report and Score',
     autoFields: {
-      lastUpdatedDate: () => new Date() // timestamp type
+      lastUpdatedDate: () => new Date()
     }
   });
 
   // ============================================
-  // SPECIAL ATTENDANCE ROUTES (with schema validation)
+  // 🔧 SPECIAL ROUTES (NOT AUTO-CRUD)
   // ============================================
+
+  // 🏢 SMART OFFICE MANAGEMENT (Radar-powered)
+  app.post('/api/admin/create-office-geofence', async (req: Request, res: Response) => {
+    try {
+      const { name, address, latitude, longitude, radius = 100 } = req.body;
+
+      if (!name || !latitude || !longitude) {
+        return res.status(400).json({
+          success: false,
+          error: 'Name, latitude, and longitude are required'
+        });
+      }
+
+      const geofence = await radarService.createDealerGeofence({
+        externalId: `office_${Date.now()}`,
+        description: name,
+        tag: 'office',
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        radius,
+        metadata: {
+          type: 'office',
+          address,
+          createdAt: new Date().toISOString()
+        }
+      });
+
+      res.json({
+        success: true,
+        data: geofence,
+        message: `Office geofence "${name}" created successfully`
+      });
+    } catch (error) {
+      console.error('Create office geofence error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to create office geofence'
+      });
+    }
+  });
+
+  app.get('/api/admin/office-locations', async (req: Request, res: Response) => {
+    try {
+      const offices = await radarService.listGeofences('office', 50);
+      
+      res.json({
+        success: true,
+        data: offices.geofences || [],
+        count: offices.geofences?.length || 0
+      });
+    } catch (error) {
+      console.error('List office locations error:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to fetch office locations'
+      });
+    }
+  });
+
+  // 👤 ATTENDANCE ROUTES (Custom Logic - Smart Radar validation)
   app.get('/api/attendance/user/:userId', async (req: Request, res: Response) => {
     try {
       const { userId } = req.params;
@@ -807,9 +1065,9 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  // 🎯 SMART PUNCH-IN (Radar-powered office validation)
   app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
     try {
-      // Validate input against schema expectations
       const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
 
       if (!userId || !latitude || !longitude) {
@@ -819,44 +1077,41 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      // Geo-fencing validation
-      const userPoint = turf.point([longitude, latitude]);
-      let isValid = false;
-      let officeName = '';
+      // 🎯 Smart office validation using Radar (no hardcoded coordinates!)
+      const officeValidation = await validateOfficeLocation(
+        userId.toString(),
+        latitude,
+        longitude
+      );
 
-      for (const office of OFFICE_LOCATIONS) {
-        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
-          isValid = true;
-          officeName = office.name;
-          break;
-        }
-      }
-
-      if (!isValid) {
+      if (!officeValidation.isValid) {
         return res.status(400).json({
           success: false,
-          error: 'You are not within office premises'
+          error: 'Not within office premises',
+          details: {
+            distance: officeValidation.distance,
+            fraudDetected: officeValidation.fraudDetected,
+            confidence: officeValidation.confidence,
+            suggestion: 'Move closer to your office location'
+          }
         });
       }
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Build data matching exact schema
       const attendanceData = {
-        userId: parseInt(userId), // integer type
-        attendanceDate: today, // date type
-        locationName: locationName || officeName, // varchar not null
-        inTimeTimestamp: new Date(), // timestamp not null
-        inTimeImageCaptured: !!selfieUrl, // boolean not null
-        outTimeImageCaptured: false, // boolean not null  
-        inTimeImageUrl: selfieUrl || null, // varchar nullable
-        inTimeLatitude: latitude.toString(), // decimal as string
-        inTimeLongitude: longitude.toString(), // decimal as string
-        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
-        // All other nullable fields will be null by default
+        userId: parseInt(userId),
+        attendanceDate: today,
+        locationName: locationName || officeValidation.officeName,
+        inTimeTimestamp: new Date(),
+        inTimeImageCaptured: !!selfieUrl,
+        outTimeImageCaptured: false,
+        inTimeImageUrl: selfieUrl || null,
+        inTimeLatitude: latitude.toString(),
+        inTimeLongitude: longitude.toString(),
+        inTimeAccuracy: accuracy ? accuracy.toString() : null,
       };
 
-      // Validate against schema
       const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
       if (!parseResult.success) {
         return res.status(400).json({
@@ -867,18 +1122,25 @@ export function setupWebRoutes(app: Express) {
       }
 
       const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+      
       res.json({
         success: true,
         data: result,
-        message: `Punched in at ${officeName}`,
-        geoInfo: { officeName, isValid }
+        message: `Punched in at ${officeValidation.officeName}`,
+        radarInfo: {
+          officeName: officeValidation.officeName,
+          confidence: officeValidation.confidence,
+          fraudDetected: officeValidation.fraudDetected,
+          validated: true
+        }
       });
     } catch (error) {
-      console.error('Punch in error:', error);
+      console.error('Smart punch in error:', error);
       res.status(500).json({ success: false, error: 'Punch in failed' });
     }
   });
 
+  // 🎯 SMART PUNCH-OUT
   app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
       const { userId, latitude, longitude, selfieUrl } = req.body;
@@ -892,7 +1154,6 @@ export function setupWebRoutes(app: Express) {
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Find unpunched record
       const [unpunchedRecord] = await db.select().from(salesmanAttendance)
         .where(and(
           eq(salesmanAttendance.userId, parseInt(userId)),
@@ -903,13 +1164,12 @@ export function setupWebRoutes(app: Express) {
         .limit(1);
 
       if (unpunchedRecord) {
-        // Update with proper data types
         const updateData = {
-          outTimeTimestamp: new Date(), // timestamp
-          outTimeImageCaptured: !!selfieUrl, // boolean
-          outTimeImageUrl: selfieUrl || null, // varchar nullable
-          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
-          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
+          outTimeTimestamp: new Date(),
+          outTimeImageCaptured: !!selfieUrl,
+          outTimeImageUrl: selfieUrl || null,
+          outTimeLatitude: latitude ? latitude.toString() : null,
+          outTimeLongitude: longitude ? longitude.toString() : null,
           updatedAt: new Date()
         };
 
@@ -935,9 +1195,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ============================================
-  // DASHBOARD STATS (with proper type handling)
-  // ============================================
+  // 📊 DASHBOARD STATS (Custom aggregation logic)
   app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.userId);
