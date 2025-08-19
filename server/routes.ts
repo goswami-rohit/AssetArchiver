@@ -1,1272 +1,809 @@
-// routes.ts - ENHANCED WITH SMART RADAR.IO INTEGRATION
-import { Express, Request, Response } from 'express';
-import { db } from 'server/db';
-import {
-  dailyVisitReports,
-  technicalVisitReports,
-  permanentJourneyPlans,
-  salesmanAttendance,
-  salesmanLeaveApplications,
-  clientReports,
-  competitionReports,
-  geoTracking,
-  dailyTasks,
-  users,
-  dealers,
-  companies,
-  dealerReportsAndScores,
-  insertDailyVisitReportSchema,
-  insertTechnicalVisitReportSchema,
-  insertPermanentJourneyPlanSchema,
-  insertSalesmanAttendanceSchema,
-  insertSalesmanLeaveApplicationSchema,
-  insertClientReportSchema,
-  insertCompetitionReportSchema,
-  insertGeoTrackingSchema,
-  insertDailyTaskSchema,
-  insertDealerSchema,
-  insertDealerReportsAndScoresSchema
-} from 'shared/schema';
-import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or, sql } from 'drizzle-orm';
+// server/routes.ts
+import express, { Request, Response } from 'express';
+import { eq, desc, and, gte, lte, like, count } from 'drizzle-orm';
 import { z } from 'zod';
-import multer from 'multer';
-import { ChatMessage } from 'server/bot/aiService';
-// ✅ Import services
-import EnhancedRAGService from './bot/aiService';
-// 🎯 Smart Radar integration - no more hardcoded locations!
-import { radarService } from 'server/services/RadarService';
+import { db } from './db';
+import * as schema from '../shared/schema';
+import { radarService } from './services/RadarService';
 
-// Fix multer typing
-interface MulterRequest extends Request {
-  file?: Express.Multer.File;
+const app = express.Router();
+
+// =================== LOCATION CONFIG INTERFACE ===================
+interface LocationConfig {
+  enabled: boolean;
+  latField?: string;
+  lngField?: string;
+  locationField?: string;
+  createGeofence?: boolean;
+  validateLocation?: boolean;
+  trackLocation?: boolean;
+  requireLocationValidation?: boolean;
+  dealerIdField?: string;
+  reverseLookup?: boolean;
 }
 
-// Configure multer for image uploads
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'));
-    }
+// =================== AUTO CRUD FUNCTION WITH RADAR INTEGRATION ===================
+function createAutoCRUD<T extends { id?: string | number }>(
+  app: express.Router,
+  config: {
+    endpoint: string;
+    table: any;
+    schema: z.ZodSchema<any>;
+    updateSchema?: z.ZodSchema<any>;
+    locationConfig?: LocationConfig;
   }
-});
+) {
+  const { endpoint, table, schema: insertSchema, updateSchema, locationConfig } = config;
 
-// ============================================
-// 🎯 SMART OFFICE VALIDATION (RADAR-POWERED)
-// ============================================
-async function validateOfficeLocation(userId: string, latitude: number, longitude: number) {
-  try {
-    // Use Radar's intelligent geofencing instead of hardcoded coordinates
-    const validation = await radarService.validateAttendanceLocation(
-      userId,
-      latitude,
-      longitude,
-      'office' // Use office geofences created in Radar
-    );
+  // Helper function to process location data with Radar
+  async function processLocationData(
+    validatedData: any,
+    userId?: string,
+    isUpdate: boolean = false
+  ) {
+    if (!locationConfig?.enabled) return validatedData;
 
-    return {
-      isValid: validation.isValid,
-      officeName: validation.events?.find(e => e.type === 'user.entered_geofence')?.geofence?.description || 'Office',
-      confidence: validation.confidence,
-      fraudDetected: validation.fraudDetected,
-      distance: validation.distance,
-      events: validation.events
-    };
-  } catch (error) {
-    console.error('Smart office validation failed:', error);
-    return { 
-      isValid: false, 
-      error: error instanceof Error ? error.message : 'Unknown error',
-      officeName: 'Unknown Office'
-    };
-  }
-}
+    const latField = locationConfig.latField || 'latitude';
+    const lngField = locationConfig.lngField || 'longitude';
+    const locationField = locationConfig.locationField || 'location';
+    const dealerIdField = locationConfig.dealerIdField;
 
-// ============================================
-// 🚀 ENHANCED AUTO-CRUD WITH RADAR.IO INTEGRATION
-// ============================================
-function createAutoCRUD(app: Express, config: {
-  endpoint: string,
-  table: any,
-  schema: z.ZodSchema,
-  tableName: string,
-  autoFields?: { [key: string]: () => any },
-  dateField?: string,
-  // 🎯 Radar integration based on exact schema
-  locationConfig?: {
-    enabled: boolean,
-    // Schema-specific field mapping
-    latField?: string,    // 'latitude' for DVR, 'inTimeLatitude' for attendance
-    lngField?: string,    // 'longitude' for DVR, 'inTimeLongitude' for attendance  
-    locationField?: string, // 'location' for DVR, 'locationName' for attendance
-    // Radar features
-    createGeofence?: boolean,
-    validateLocation?: boolean,
-    trackLocation?: boolean,
-    geofenceTag?: string,
-    geofenceRadius?: number,
-    requireLocationValidation?: boolean,
-    dealerIdField?: string  // field that contains dealer ID for validation
-  }
-}) {
-  const { endpoint, table, schema, tableName, autoFields = {}, dateField, locationConfig } = config;
+    const latitude = validatedData[latField];
+    const longitude = validatedData[lngField];
 
-  // CREATE - with Radar integration
-  app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
-    try {
-      const parseResult = schema.safeParse(req.body);
-
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: `Validation failed for ${tableName}`,
-          details: parseResult.error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message,
-            received: err.received
-          }))
-        });
-      }
-
-      let validatedData = parseResult.data;
-
-      // 🎯 RADAR INTEGRATION based on exact schema fields
-      if (locationConfig?.enabled) {
-        const latField = locationConfig.latField || 'latitude';
-        const lngField = locationConfig.lngField || 'longitude';
-        const locationField = locationConfig.locationField || 'location';
-
-        const lat = validatedData[latField];
-        const lng = validatedData[lngField];
-
-        if (lat && lng) {
+    if (latitude && longitude) {
+      // Location validation using validateDealerAttendance
+      if (locationConfig.validateLocation && dealerIdField && userId) {
+        const dealerId = validatedData[dealerIdField];
+        if (dealerId) {
+          console.log(`Validating location for user ${userId} at dealer ${dealerId}`);
           
-          // 1. Location validation for dealer visits
-          if (locationConfig.validateLocation && locationConfig.dealerIdField) {
-            const dealerId = validatedData[locationConfig.dealerIdField];
-            if (dealerId && validatedData.userId) {
-              try {
-                const validation = await radarService.validateAttendanceLocation(
-                  validatedData.userId.toString(),
-                  parseFloat(lat.toString()),
-                  parseFloat(lng.toString()),
-                  dealerId.toString()
-                );
+          const validation = await radarService.validateDealerAttendance(
+            userId,
+            parseFloat(latitude.toString()),
+            parseFloat(longitude.toString()),
+            dealerId.toString()
+          );
 
-                if (locationConfig.requireLocationValidation && !validation.isValid) {
-                  return res.status(400).json({
-                    success: false,
-                    error: 'Location validation failed - not within valid geofence area',
-                    details: {
-                      distance: validation.distance,
-                      fraudDetected: validation.fraudDetected,
-                      confidence: validation.confidence,
-                      suggestion: 'Move closer to the dealer location'
-                    }
-                  });
-                }
-
-                // Add validation results to response metadata
-                validatedData.locationValidated = validation.isValid;
-                validatedData.locationConfidence = validation.confidence;
-              } catch (error) {
-                console.warn('Radar location validation failed:', error);
-              }
-            }
+          if (!validation.isValid && locationConfig.requireLocationValidation) {
+            throw new Error('Location validation failed - not within dealer geofence');
           }
 
-          // 2. Reverse geocode for address if location field exists but is empty
-          if (locationField && !validatedData[locationField]) {
-            try {
-              const geocodeResult = await radarService.reverseGeocode(
-                parseFloat(lat.toString()),
-                parseFloat(lng.toString())
-              );
-              if (geocodeResult.addresses?.[0]?.formattedAddress) {
-                validatedData[locationField] = geocodeResult.addresses[0].formattedAddress;
-              }
-            } catch (error) {
-              console.warn('Reverse geocoding failed:', error);
-            }
-          }
-
-          // 3. Track location in Radar
-          if (locationConfig.trackLocation && validatedData.userId) {
-            try {
-              await radarService.trackUserLocation(
-                validatedData.userId.toString(),
-                parseFloat(lat.toString()),
-                parseFloat(lng.toString()),
-                {
-                  metadata: {
-                    action: `create_${endpoint}`,
-                    recordType: tableName,
-                    timestamp: new Date().toISOString()
-                  }
-                }
-              );
-            } catch (error) {
-              console.warn('Location tracking failed:', error);
-            }
-          }
+          // Add validation metadata
+          validatedData.locationValidation = {
+            isValid: validation.isValid,
+            confidence: validation.confidence,
+            fraudDetected: validation.fraudDetected,
+            timestamp: validation.timestamp
+          };
         }
       }
 
-      // Apply auto-generated fields
-      const finalData = { ...validatedData };
-      Object.entries(autoFields).forEach(([field, generator]) => {
-        if (finalData[field] === undefined || finalData[field] === null) {
-          finalData[field] = generator();
+      // Reverse geocoding to get address
+      if (locationConfig.reverseLookup && locationField) {
+        try {
+          const geocodeResult = await radarService.geocodeReverse(
+            parseFloat(latitude.toString()),
+            parseFloat(longitude.toString())
+          );
+          
+          if (geocodeResult.addresses && geocodeResult.addresses.length > 0) {
+            validatedData[locationField] = geocodeResult.addresses[0].formattedAddress;
+          }
+        } catch (error) {
+          console.error('Reverse geocoding failed:', error);
+        }
+      }
+
+      // Track location with comprehensive data
+      if (locationConfig.trackLocation && userId) {
+        try {
+          await radarService.trackLocationComplete({
+            userId: userId,
+            latitude: parseFloat(latitude.toString()),
+            longitude: parseFloat(longitude.toString()),
+            accuracy: 10,
+            locationType: isUpdate ? 'update' : 'create',
+            activityType: endpoint,
+            metadata: {
+              endpoint,
+              action: isUpdate ? 'update' : 'create',
+              timestamp: new Date().toISOString(),
+              dealerId: dealerIdField ? validatedData[dealerIdField] : undefined
+            }
+          });
+        } catch (error) {
+          console.error('Location tracking failed:', error);
+        }
+      }
+    }
+
+    return validatedData;
+  }
+
+  // LIST - GET /api/{endpoint}
+  app.get(`/api/${endpoint}`, async (req: Request, res: Response) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const offset = (page - 1) * limit;
+      
+      const search = req.query.search as string;
+      const sortBy = req.query.sortBy as string || 'id';
+      const sortOrder = req.query.sortOrder as string || 'desc';
+
+      let query = db.select().from(table);
+      
+      if (search) {
+        // Add search functionality (assumes name field exists)
+        const nameField = table.name || table.dealerName || table.locationName || table.description || table.id;
+        if (nameField) {
+          query = query.where(like(nameField, `%${search}%`));
+        }
+      }
+
+      // Add sorting
+      if (sortOrder === 'desc') {
+        query = query.orderBy(desc(table[sortBy] || table.id));
+      } else {
+        query = query.orderBy(table[sortBy] || table.id);
+      }
+
+      const records = await query.limit(limit).offset(offset);
+      
+      // Get total count
+      const [totalResult] = await db.select({ count: count() }).from(table);
+      const total = totalResult.count;
+
+      res.json({
+        data: records,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit)
         }
       });
+    } catch (error) {
+      console.error(`Error fetching ${endpoint}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
-      // Handle timestamps
-      if (table.createdAt && !finalData.createdAt) {
-        finalData.createdAt = new Date();
+  // GET BY ID - GET /api/{endpoint}/:id
+  app.get(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const id = req.params.id;
+      // Handle both numeric and UUID primary keys
+      const whereClause = typeof table.id.dataType === 'number' 
+        ? eq(table.id, parseInt(id))
+        : eq(table.id, id);
+      
+      const record = await db.select().from(table).where(whereClause).limit(1);
+      
+      if (record.length === 0) {
+        return res.status(404).json({ error: `${endpoint} not found` });
       }
-      if (table.updatedAt && !finalData.updatedAt) {
-        finalData.updatedAt = new Date();
-      }
 
-      const newRecord = await db.insert(table).values(finalData).returning();
+      res.json(record[0]);
+    } catch (error) {
+      console.error(`Error fetching ${endpoint}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 
-      // 🎯 POST-CREATE: Geofence creation for relevant records
-      if (locationConfig?.createGeofence && newRecord[0]) {
-        const record = newRecord[0];
+  // CREATE - POST /api/{endpoint}
+  app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
+    try {
+      const validatedData = insertSchema.parse(req.body);
+      
+      // Process location data with Radar integration
+      const processedData = await processLocationData(
+        validatedData,
+        validatedData.userId?.toString(),
+        false
+      );
+
+      const [newRecord] = await db.insert(table).values(processedData).returning();
+
+      // Post-creation Radar operations
+      if (locationConfig?.enabled && locationConfig.createGeofence) {
         const latField = locationConfig.latField || 'latitude';
         const lngField = locationConfig.lngField || 'longitude';
         
-        if (record[latField] && record[lngField]) {
+        const latitude = newRecord[latField];
+        const longitude = newRecord[lngField];
+        
+        if (latitude && longitude) {
           try {
+            console.log(`Creating geofence for ${endpoint} ${newRecord.id}`);
+            
             await radarService.createDealerGeofence({
-              externalId: record.id,
-              description: record.name || record.dealerName || `${tableName} ${record.id}`,
-              tag: locationConfig.geofenceTag || endpoint,
-              latitude: parseFloat(record[latField].toString()),
-              longitude: parseFloat(record[lngField].toString()),
-              radius: locationConfig.geofenceRadius || 100,
+              dealerId: newRecord.id.toString(),
+              name: newRecord.name || newRecord.dealerName || newRecord.locationName || `${endpoint}_${newRecord.id}`,
+              latitude: parseFloat(latitude.toString()),
+              longitude: parseFloat(longitude.toString()),
+              radius: 100,
+              dealerType: endpoint,
               metadata: {
-                recordType: tableName,
-                createdAt: new Date().toISOString()
+                endpoint,
+                createdAt: new Date().toISOString(),
+                source: 'auto_crud'
               }
             });
           } catch (error) {
-            console.warn('Geofence creation failed:', error);
+            console.error('Geofence creation failed:', error);
           }
         }
       }
 
-      res.json({
-        success: true,
-        data: newRecord[0],
-        message: `${tableName} created successfully`
-      });
-
+      res.status(201).json(newRecord);
     } catch (error) {
-      console.error(`Create ${tableName} error:`, error);
-      res.status(500).json({
-        success: false,
-        error: `Failed to create ${tableName}`,
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // GET ALL by User ID - with optional location context
-  app.get(`/api/${endpoint}/user/:userId`, async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, limit = '50', completed, lat, lng, ...filters } = req.query;
-
-      let whereCondition = eq(table.userId, parseInt(userId));
-
-      if (startDate && endDate && dateField && table[dateField]) {
-        whereCondition = and(
-          whereCondition,
-          gte(table[dateField], startDate as string),
-          lte(table[dateField], endDate as string)
-        );
-      }
-
-      if (completed === 'true' && table.status) {
-        whereCondition = and(whereCondition, eq(table.status, 'completed'));
-      }
-
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value && table[key]) {
-          whereCondition = and(whereCondition, eq(table[key], value));
-        }
-      });
-
-      const orderField = table[dateField] || table.createdAt || table.updatedAt;
-      const records = await db.select().from(table)
-        .where(whereCondition)
-        .orderBy(desc(orderField))
-        .limit(parseInt(limit as string));
-
-      // 🎯 Optional location context from Radar
-      let locationContext = null;
-      if (locationConfig?.enabled && lat && lng) {
-        try {
-          const tracking = await radarService.checkApproachingDealer(
-            userId,
-            parseFloat(lat as string),
-            parseFloat(lng as string)
-          );
-          locationContext = {
-            isApproaching: tracking.isApproaching,
-            hasArrived: tracking.hasArrived,
-            distance: tracking.distance,
-            eta: tracking.eta
-          };
-        } catch (error) {
-          console.warn('Location context failed:', error);
-        }
-      }
-
-      res.json({ 
-        success: true, 
-        data: records,
-        locationContext,
-        count: records.length
-      });
-
-    } catch (error) {
-      console.error(`Get ${tableName}s error:`, error);
-      res.status(500).json({
-        success: false,
-        error: `Failed to fetch ${tableName}s`,
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // GET BY ID
-  app.get(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const [record] = await db.select().from(table).where(eq(table.id, id)).limit(1);
-
-      if (!record) {
-        return res.status(404).json({
-          success: false,
-          error: `${tableName} not found`
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Validation error', 
+          details: error.errors 
         });
       }
-
-      res.json({ success: true, data: record });
-    } catch (error) {
-      console.error(`Get ${tableName} error:`, error);
-      res.status(500).json({
-        success: false,
-        error: `Failed to fetch ${tableName}`,
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      
+      if (error.message?.includes('Location validation failed')) {
+        return res.status(400).json({ error: error.message });
+      }
+      
+      console.error(`Error creating ${endpoint}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  // UPDATE - with location tracking on updates
+  // UPDATE - PUT /api/{endpoint}/:id
   app.put(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const partialSchema = schema.partial();
-      const parseResult = partialSchema.safeParse(req.body);
+      const id = req.params.id;
+      const validationSchema = updateSchema || insertSchema;
+      const validatedData = validationSchema.parse(req.body);
 
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: `Validation failed for ${tableName} update`,
-          details: parseResult.error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message,
-            received: err.received
-          }))
-        });
+      // Process location data with Radar integration
+      const processedData = await processLocationData(
+        validatedData,
+        validatedData.userId?.toString(),
+        true
+      );
+
+      // Handle both numeric and UUID primary keys
+      const whereClause = typeof table.id.dataType === 'number' 
+        ? eq(table.id, parseInt(id))
+        : eq(table.id, id);
+
+      const [updatedRecord] = await db
+        .update(table)
+        .set(processedData)
+        .where(whereClause)
+        .returning();
+
+      if (!updatedRecord) {
+        return res.status(404).json({ error: `${endpoint} not found` });
       }
 
-      let validatedData = parseResult.data;
-
-      // 🎯 Track location updates
-      if (locationConfig?.trackLocation && locationConfig?.enabled) {
+      // Update geofence if location changed
+      if (locationConfig?.enabled && locationConfig.createGeofence) {
         const latField = locationConfig.latField || 'latitude';
         const lngField = locationConfig.lngField || 'longitude';
         
-        if (validatedData[latField] && validatedData[lngField] && validatedData.userId) {
+        const latitude = updatedRecord[latField];
+        const longitude = updatedRecord[lngField];
+        
+        if (latitude && longitude) {
           try {
-            await radarService.trackUserLocation(
-              validatedData.userId.toString(),
-              parseFloat(validatedData[latField].toString()),
-              parseFloat(validatedData[lngField].toString()),
-              {
-                metadata: {
-                  action: `update_${endpoint}`,
-                  recordId: id,
-                  recordType: tableName,
-                  timestamp: new Date().toISOString()
-                }
+            await radarService.updateGeofence(updatedRecord.id.toString(), {
+              coordinates: [parseFloat(longitude.toString()), parseFloat(latitude.toString())],
+              description: updatedRecord.name || updatedRecord.dealerName || updatedRecord.locationName || `${endpoint}_${updatedRecord.id}`,
+              metadata: {
+                endpoint,
+                updatedAt: new Date().toISOString(),
+                source: 'auto_crud'
               }
-            );
+            });
           } catch (error) {
-            console.warn('Location tracking on update failed:', error);
+            console.error('Geofence update failed:', error);
           }
         }
       }
 
-      const updateData = {
-        ...validatedData,
-        updatedAt: new Date()
-      };
-
-      const updatedRecord = await db.update(table)
-        .set(updateData)
-        .where(eq(table.id, id))
-        .returning();
-
-      if (!updatedRecord || updatedRecord.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: `${tableName} not found`
+      res.json(updatedRecord);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ 
+          error: 'Validation error', 
+          details: error.errors 
         });
       }
-
-      res.json({
-        success: true,
-        data: updatedRecord[0],
-        message: `${tableName} updated successfully`
-      });
-
-    } catch (error) {
-      console.error(`Update ${tableName} error:`, error);
-      res.status(500).json({
-        success: false,
-        error: `Failed to update ${tableName}`,
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      
+      if (error.message?.includes('Location validation failed')) {
+        return res.status(400).json({ error: error.message });
+      }
+      
+      console.error(`Error updating ${endpoint}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 
-  // DELETE
+  // DELETE - DELETE /api/{endpoint}/:id
   app.delete(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
     try {
-      const { id } = req.params;
-      const deletedRecord = await db.delete(table).where(eq(table.id, id)).returning();
+      const id = req.params.id;
 
-      if (!deletedRecord || deletedRecord.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: `${tableName} not found`
-        });
+      // Delete geofence if it exists
+      if (locationConfig?.enabled && locationConfig.createGeofence) {
+        try {
+          await radarService.deleteGeofence(id);
+        } catch (error) {
+          console.error('Geofence deletion failed:', error);
+        }
       }
 
-      res.json({
-        success: true,
-        message: `${tableName} deleted successfully`,
-        data: deletedRecord[0]
-      });
+      // Handle both numeric and UUID primary keys
+      const whereClause = typeof table.id.dataType === 'number' 
+        ? eq(table.id, parseInt(id))
+        : eq(table.id, id);
+
+      const [deletedRecord] = await db
+        .delete(table)
+        .where(whereClause)
+        .returning();
+
+      if (!deletedRecord) {
+        return res.status(404).json({ error: `${endpoint} not found` });
+      }
+
+      res.json({ message: `${endpoint} deleted successfully`, data: deletedRecord });
     } catch (error) {
-      console.error(`Delete ${tableName} error:`, error);
-      res.status(500).json({
-        success: false,
-        error: `Failed to delete ${tableName}`,
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
+      console.error(`Error deleting ${endpoint}:`, error);
+      res.status(500).json({ error: 'Internal server error' });
     }
   });
 }
 
-export function setupWebRoutes(app: Express) {
-  // PWA route
-  app.get('/pwa', (req: Request, res: Response) => {
-    res.redirect('/login');
-  });
+// =================== AUTO CRUD ENDPOINTS WITH RADAR INTEGRATION ===================
 
-  // ==================== AUTH ====================
-  app.post('/api/auth/login', async (req: Request, res: Response) => {
-    try {
-      const { loginId, password } = req.body;
+// DEALERS - Full Radar integration
+createAutoCRUD(app, {
+  endpoint: 'dealers',
+  table: schema.dealers,
+  schema: schema.insertDealerSchema,
+  locationConfig: {
+    enabled: false, // ❌ DEALERS DON'T HAVE LATITUDE/LONGITUDE FIELDS!
+    createGeofence: false,
+    trackLocation: false,
+    reverseLookup: false
+  }
+});
 
-      if (!loginId || !password) {
-        return res.status(400).json({ error: 'Login ID and password are required' });
-      }
+// DAILY VISIT REPORTS - Location validation for dealer visits
+createAutoCRUD(app, {
+  endpoint: 'daily-visit-reports',
+  table: schema.dailyVisitReports,
+  schema: schema.insertDailyVisitReportSchema,
+  locationConfig: {
+    enabled: true,
+    latField: 'latitude',
+    lngField: 'longitude', 
+    locationField: 'location',
+    validateLocation: true,
+    trackLocation: true,
+    dealerIdField: 'dealerName',
+    reverseLookup: true
+  }
+});
 
-      const user = await db.query.users.findFirst({
-        where: or(
-          eq(users.salesmanLoginId, loginId),
-          eq(users.email, loginId)
-        ),
-        with: {
-          company: true
-        }
-      });
+// SALESMAN ATTENDANCE - Strict location validation
+createAutoCRUD(app, {
+  endpoint: 'salesman-attendance',
+  table: schema.salesmanAttendance,
+  schema: schema.insertSalesmanAttendanceSchema,
+  locationConfig: {
+    enabled: true,
+    latField: 'inTimeLatitude',
+    lngField: 'inTimeLongitude',
+    locationField: 'locationName',
+    validateLocation: true,
+    requireLocationValidation: true,
+    trackLocation: true,
+    dealerIdField: 'userId' // ❌ NO DEALER FIELD IN ATTENDANCE!
+  }
+});
 
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
+// GEO TRACKING - Pure tracking data
+createAutoCRUD(app, {
+  endpoint: 'geo-tracking',
+  table: schema.geoTracking,
+  schema: schema.insertGeoTrackingSchema,
+  locationConfig: {
+    enabled: true,
+    latField: 'latitude',
+    lngField: 'longitude',
+    locationField: 'siteName',
+    trackLocation: true,
+    reverseLookup: true
+  }
+});
 
-      if (user.status !== 'active') {
-        return res.status(401).json({ error: 'Account is not active' });
-      }
+// COMPANIES - No location data
+createAutoCRUD(app, {
+  endpoint: 'companies',
+  table: schema.companies,
+  schema: schema.insertCompanySchema,
+  locationConfig: { enabled: false }
+});
 
-      if (user.hashedPassword !== password) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
+// USERS - No location data  
+createAutoCRUD(app, {
+  endpoint: 'users',
+  table: schema.users,
+  schema: schema.insertUserSchema,
+  locationConfig: { enabled: false }
+});
 
-      const { hashedPassword, ...userWithoutPassword } = user;
+// TECHNICAL VISIT REPORTS - No location data
+createAutoCRUD(app, {
+  endpoint: 'technical-visit-reports',
+  table: schema.technicalVisitReports,
+  schema: schema.insertTechnicalVisitReportSchema,
+  locationConfig: { enabled: false }
+});
 
-      res.json({
-        success: true,
-        user: userWithoutPassword,
-        message: 'Login successful'
-      });
+// PERMANENT JOURNEY PLANS - No location data
+createAutoCRUD(app, {
+  endpoint: 'permanent-journey-plans', 
+  table: schema.permanentJourneyPlans,
+  schema: schema.insertPermanentJourneyPlanSchema,
+  locationConfig: { enabled: false }
+});
 
-    } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({ error: 'Login failed' });
-    }
-  });
+// SALESMAN LEAVE APPLICATIONS - No location data
+createAutoCRUD(app, {
+  endpoint: 'salesman-leave-applications',
+  table: schema.salesmanLeaveApplications,
+  schema: schema.insertSalesmanLeaveApplicationSchema,
+  locationConfig: { enabled: false }
+});
 
-  // ==================== ENHANCED AI/RAG ROUTES ====================
-  app.post('/api/rag/chat', async (req: Request, res: Response) => {
-    try {
-      const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
+// CLIENT REPORTS - No location data
+createAutoCRUD(app, {
+  endpoint: 'client-reports',
+  table: schema.clientReports,
+  schema: schema.insertClientReportSchema,
+  locationConfig: { enabled: false }
+});
 
-      if (!Array.isArray(messages) || messages.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Messages must be a non-empty array'
-        });
-      }
+// COMPETITION REPORTS - No location data
+createAutoCRUD(app, {
+  endpoint: 'competition-reports',
+  table: schema.competitionReports,
+  schema: schema.insertCompetitionReportSchema,
+  locationConfig: { enabled: false }
+});
 
-      for (const msg of messages) {
-        if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid message format. Each message must have role (user/assistant/system) and content.'
-          });
-        }
-      }
+// DAILY TASKS - No location data
+createAutoCRUD(app, {
+  endpoint: 'daily-tasks',
+  table: schema.dailyTasks,
+  schema: schema.insertDailyTaskSchema,
+  locationConfig: { enabled: false }
+});
 
-      const aiResponse = await EnhancedRAGService.chat(messages, userId);
+// DEALER REPORTS AND SCORES - No location data
+createAutoCRUD(app, {
+  endpoint: 'dealer-reports-and-scores',
+  table: schema.dealerReportsAndScores,
+  schema: schema.insertDealerReportsAndScoresSchema,
+  locationConfig: { enabled: false }
+});
 
-      res.json({
-        success: true,
-        message: aiResponse,
-        timestamp: new Date().toISOString(),
-        userId: userId,
-        messageCount: messages.length,
-        enhanced: true
-      });
-    } catch (error) {
-      console.error('Enhanced RAG Chat error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Enhanced RAG chat processing failed. Please try again.',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
+// =================== SPECIALIZED RADAR ENDPOINTS ===================
 
-  app.post('/api/rag/vector-chat', async (req: Request, res: Response) => {
-    try {
-      const { message, userId }: { message: string, userId?: number } = req.body;
+// Journey Management
+app.post('/api/radar/journey/start', async (req: Request, res: Response) => {
+  try {
+    const { userId, dealerId, mode = 'car', metadata } = req.body;
 
-      if (!message || typeof message !== 'string') {
-        return res.status(400).json({
-          success: false,
-          error: 'Message is required and must be a string'
-        });
-      }
+    const journeyId = `journey_${userId}_${dealerId}_${Date.now()}`;
+    
+    const trip = await radarService.startDealerJourney({
+      userId,
+      journeyId,
+      dealerId,
+      mode,
+      metadata
+    });
 
-      console.log(`🤖 Vector RAG request from user ${userId}: "${message.substring(0, 50)}..."`);
+    res.json({ 
+      success: true, 
+      trip,
+      journeyId 
+    });
+  } catch (error) {
+    console.error('Error starting journey:', error);
+    res.status(500).json({ error: 'Failed to start journey' });
+  }
+});
 
-      const result = await EnhancedRAGService.ragChat(message, userId);
+app.put('/api/radar/journey/:journeyId/complete', async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
+    
+    const result = await radarService.completeTrip(journeyId);
+    
+    res.json({ 
+      success: true, 
+      result 
+    });
+  } catch (error) {
+    console.error('Error completing journey:', error);
+    res.status(500).json({ error: 'Failed to complete journey' });
+  }
+});
 
-      res.json({
-        success: result.success,
-        message: result.message,
-        endpoint: result.endpoint,
-        similarity: result.similarity,
-        data: result.data,
-        guidance: result.guidance,
-        error: result.error,
-        suggestion: result.suggestion,
-        timestamp: new Date().toISOString(),
-        vectorSearch: true
-      });
-    } catch (error) {
-      console.error('Vector RAG Chat error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Vector RAG processing failed. Please try again.',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
+app.put('/api/radar/journey/:journeyId/cancel', async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
+    
+    const result = await radarService.cancelTrip(journeyId);
+    
+    res.json({ 
+      success: true, 
+      result 
+    });
+  } catch (error) {
+    console.error('Error canceling journey:', error);
+    res.status(500).json({ error: 'Failed to cancel journey' });
+  }
+});
 
-  app.post('/api/rag/find-endpoint', async (req: Request, res: Response) => {
-    try {
-      const { query }: { query: string } = req.body;
+app.get('/api/radar/journey/:journeyId', async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
+    
+    const trip = await radarService.getTrip(journeyId);
+    
+    res.json(trip);
+  } catch (error) {
+    console.error('Error fetching journey:', error);
+    res.status(500).json({ error: 'Failed to fetch journey' });
+  }
+});
 
-      if (!query || typeof query !== 'string') {
-        return res.status(400).json({
-          success: false,
-          error: 'Query is required and must be a string'
-        });
-      }
+// Location Tracking with proper database storage
+app.post('/api/radar/track', async (req: Request, res: Response) => {
+  try {
+    const trackingData = req.body;
+    
+    const result = await radarService.trackLocationComplete(trackingData);
+    
+    // Store in geo_tracking table with CORRECT field names
+    await db.insert(schema.geoTracking).values({
+      userId: trackingData.userId,
+      recordedAt: new Date(), // ✅ CORRECT FIELD NAME
+      latitude: trackingData.latitude.toString(),
+      longitude: trackingData.longitude.toString(),
+      accuracy: trackingData.accuracy?.toString(),
+      speed: trackingData.speed?.toString(),
+      heading: trackingData.heading?.toString(),
+      altitude: trackingData.altitude?.toString(),
+      batteryLevel: trackingData.batteryLevel,
+      isCharging: trackingData.isCharging,
+      networkStatus: trackingData.networkStatus,
+      appState: trackingData.appState,
+      siteName: trackingData.siteName,
+      activityType: trackingData.activityType,
+      locationType: trackingData.locationType,
+      ipAddress: trackingData.ipAddress
+    });
+    
+    res.json({ 
+      success: true, 
+      result 
+    });
+  } catch (error) {
+    console.error('Error tracking location:', error);
+    res.status(500).json({ error: 'Failed to track location' });
+  }
+});
 
-      console.log(`🔍 Vector endpoint search: "${query}"`);
+// Analytics
+app.get('/api/radar/analytics/region/:region', async (req: Request, res: Response) => {
+  try {
+    const { region } = req.params;
+    const { startDate, endDate } = req.query;
+    
+    const dateRange = startDate && endDate ? {
+      start: startDate as string,
+      end: endDate as string
+    } : undefined;
+    
+    const analytics = await radarService.getRegionAnalytics(region, dateRange);
+    
+    res.json(analytics);
+  } catch (error) {
+    console.error('Error fetching analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics' });
+  }
+});
 
-      const bestEndpoint = await EnhancedRAGService.findBestEndpoint(query);
+// Geofence Management
+app.get('/api/radar/geofences', async (req: Request, res: Response) => {
+  try {
+    const { tag, limit } = req.query;
+    
+    const geofences = await radarService.listGeofences({
+      tag: tag as string,
+      limit: limit ? parseInt(limit as string) : undefined
+    });
+    
+    res.json(geofences);
+  } catch (error) {
+    console.error('Error fetching geofences:', error);
+    res.status(500).json({ error: 'Failed to fetch geofences' });
+  }
+});
 
-      if (!bestEndpoint) {
-        return res.status(404).json({
-          success: false,
-          error: 'No relevant endpoint found via vector search',
-          suggestion: 'Try a more specific query about visits, reports, dealers, or attendance'
-        });
-      }
+// User Management
+app.get('/api/radar/users', async (req: Request, res: Response) => {
+  try {
+    const { limit } = req.query;
+    
+    const users = await radarService.listUsers({
+      limit: limit ? parseInt(limit as string) : undefined
+    });
+    
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
 
-      res.json({
-        success: true,
-        endpoint: bestEndpoint,
-        message: `✅ Found relevant endpoint: ${bestEndpoint.name}`,
-        similarity: bestEndpoint.similarity,
-        description: bestEndpoint.description,
-        requiredFields: bestEndpoint.requiredFields
-      });
-    } catch (error) {
-      console.error('Vector endpoint discovery error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Vector endpoint discovery failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
+app.get('/api/radar/users/:userId', async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    
+    const user = await radarService.getUser(userId);
+    
+    res.json(user);
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    res.status(500).json({ error: 'Failed to fetch user' });
+  }
+});
 
-  app.post('/api/rag/execute', async (req: Request, res: Response) => {
-    try {
-      const { endpoint, data, userId }: { endpoint: string, data: any, userId?: number } = req.body;
+// Events
+app.get('/api/radar/events', async (req: Request, res: Response) => {
+  try {
+    const { userId, deviceId, types, limit } = req.query;
+    
+    const events = await radarService.listEvents({
+      userId: userId as string,
+      deviceId: deviceId as string,
+      types: types as string,
+      limit: limit ? parseInt(limit as string) : undefined
+    });
+    
+    res.json(events);
+  } catch (error) {
+    console.error('Error fetching events:', error);
+    res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
 
-      if (!endpoint || !data) {
-        return res.status(400).json({
-          success: false,
-          error: 'Endpoint and data are required for direct execution'
-        });
-      }
-
-      console.log(`⚡ Direct execution: ${endpoint} for user ${userId}`);
-
-      const result = await EnhancedRAGService.executeEndpoint(endpoint, data, userId);
-
-      res.json({
-        success: result.success,
-        data: result.data,
-        endpoint: result.endpoint,
-        error: result.error,
-        details: result.details,
-        timestamp: new Date().toISOString(),
-        directExecution: true
-      });
-    } catch (error) {
-      console.error('Direct API execution error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Direct API execution failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  app.post('/api/rag/submit', async (req: Request, res: Response) => {
-    try {
-      const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
-
-      if (!Array.isArray(messages) || messages.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: 'Messages must be a non-empty array for data extraction'
-        });
-      }
-
-      if (!userId || typeof userId !== 'number') {
-        return res.status(400).json({
-          success: false,
-          error: 'Valid numeric userId is required for submission'
-        });
-      }
-
-      for (const msg of messages) {
-        if (!msg.role || !msg.content || !['user', 'assistant', 'system'].includes(msg.role)) {
-          return res.status(400).json({
-            success: false,
-            error: 'Invalid message format in conversation history'
-          });
-        }
-      }
-
-      console.log(`📋 Enhanced data extraction for user ${userId}`);
-
-      const extracted = await EnhancedRAGService.extractStructuredData(messages, userId);
-
-      if (!extracted || extracted.error) {
-        return res.status(400).json({
-          success: false,
-          error: extracted?.error || 'Unable to extract sufficient data from conversation.',
-          suggestion: 'Try providing specific information like dealer name, location, visit type, etc.',
-          vectorSearch: true
-        });
-      }
-
-      const executionResult = await EnhancedRAGService.executeEndpoint(
-        extracted.endpoint,
-        extracted.data,
-        userId
-      );
-
-      if (!executionResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: `Submission failed: ${executionResult.error}`,
-          details: executionResult.details,
-          endpoint: extracted.endpoint,
-          validationErrors: executionResult.details
-        });
-      }
-
-      const endpointName = extracted.endpoint.replace('/api/', '').toUpperCase();
-
-      res.json({
-        success: true,
-        endpoint: extracted.endpoint,
-        recordId: executionResult.data?.id,
-        data: executionResult.data,
-        message: `✅ Successfully submitted ${endpointName} via enhanced RAG!`,
-        submissionDetails: {
-          endpointName,
-          recordId: executionResult.data?.id,
-          submittedAt: new Date().toISOString(),
-          userId: userId,
-          fieldsSubmitted: Object.keys(extracted.data || {}).length,
-          vectorSearch: true,
-          directExecution: true
-        }
-      });
-    } catch (error) {
-      console.error('Enhanced RAG Submit error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Enhanced RAG submission processing failed. Please try again.',
-        details: error instanceof Error ? error.message : 'Unknown error',
-        suggestion: 'Check your data format and try submitting again'
-      });
-    }
-  });
-
-  app.get('/api/rag/fetch/:endpoint/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { endpoint, userId } = req.params;
-      const { limit = '10', ...filters } = req.query;
-
-      if (!endpoint || !userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Endpoint and userId are required'
-        });
-      }
-
-      console.log(`📊 Smart data fetch: ${endpoint} for user ${userId}`);
-
-      const data = await EnhancedRAGService.fetchData(
-        `/api/${endpoint}`,
-        parseInt(userId),
-        { limit, ...filters }
-      );
-
-      res.json({
-        success: true,
-        endpoint: `/api/${endpoint}`,
-        data: data,
-        count: data.length,
-        userId: parseInt(userId),
-        filters: filters,
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      console.error('Smart data fetch error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Smart data fetching failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  app.get('/api/rag/health', async (req: Request, res: Response) => {
-    try {
-      res.json({
-        success: true,
-        status: 'Enhanced RAG System Online',
-        features: {
-          vectorSearch: true,
-          directExecution: true,
-          autoCrudIntegration: true,
-          radarIntegration: true,
-          smartOfficeValidation: true,
-          uiAwareness: true
-        },
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        status: 'RAG System Degraded',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // ============================================
-  // 🚀 ENHANCED AUTO-CRUD ROUTES WITH RADAR INTEGRATION
-  // ============================================
-
-  // 1. ✅ AUTO-CRUD: Daily Visit Reports - with dealer location validation
-  createAutoCRUD(app, {
-    endpoint: 'dvr',
-    table: dailyVisitReports,
-    schema: insertDailyVisitReportSchema,
-    tableName: 'Daily Visit Report',
-    dateField: 'reportDate',
-    autoFields: {
-      reportDate: () => new Date().toISOString().split('T')[0],
-      checkInTime: () => new Date()
-    },
-    locationConfig: {
-      enabled: true,
-      latField: 'latitude',       // matches your schema
-      lngField: 'longitude',      // matches your schema  
-      locationField: 'location',  // matches your schema
-      validateLocation: true,
-      requireLocationValidation: true,
-      trackLocation: true,
-      dealerIdField: 'dealerName',
-      geofenceTag: 'dealer'
-    }
-  });
-
-  // 2. ✅ AUTO-CRUD: Technical Visit Reports - with location tracking
-  createAutoCRUD(app, {
-    endpoint: 'tvr',
-    table: technicalVisitReports,
-    schema: insertTechnicalVisitReportSchema,
-    tableName: 'Technical Visit Report',
-    dateField: 'reportDate',
-    autoFields: {
-      reportDate: () => new Date().toISOString().split('T')[0],
-      checkInTime: () => new Date()
-    },
-    locationConfig: {
-      enabled: true,
-      trackLocation: true,
-      geofenceTag: 'technical_visit'
-    }
-  });
-
-  // 3. ✅ AUTO-CRUD: Permanent Journey Plans - basic tracking
-  createAutoCRUD(app, {
-    endpoint: 'pjp',
-    table: permanentJourneyPlans,
-    schema: insertPermanentJourneyPlanSchema,
-    tableName: 'Permanent Journey Plan',
-    dateField: 'planDate',
-    autoFields: {
-      planDate: () => new Date().toISOString().split('T')[0],
-      status: () => 'planned'
-    }
-  });
-
-  // 4. ✅ AUTO-CRUD: Dealers - with address geocoding
-  createAutoCRUD(app, {
-    endpoint: 'dealers',
-    table: dealers,
-    schema: insertDealerSchema,
-    tableName: 'Dealer',
-    locationConfig: {
-      enabled: true,
-      locationField: 'address',
-      // Note: Enable geofence creation when adding lat/lng fields to dealer schema
-      createGeofence: false,
-      geofenceTag: 'dealer'
-    }
-  });
-
-  // 5. ✅ AUTO-CRUD: Daily Tasks - basic functionality
-  createAutoCRUD(app, {
-    endpoint: 'daily-tasks',
-    table: dailyTasks,
-    schema: insertDailyTaskSchema,
-    tableName: 'Daily Task',
-    dateField: 'taskDate',
-    autoFields: {
-      taskDate: () => new Date().toISOString().split('T')[0],
-      status: () => 'Assigned'
-    }
-  });
-
-  // 6. ✅ AUTO-CRUD: Leave Applications - basic functionality
-  createAutoCRUD(app, {
-    endpoint: 'leave-applications',
-    table: salesmanLeaveApplications,
-    schema: insertSalesmanLeaveApplicationSchema,
-    tableName: 'Leave Application',
-    dateField: 'startDate',
-    autoFields: {
-      status: () => 'Pending'
-    }
-  });
-
-  // 7. ✅ AUTO-CRUD: Client Reports - basic functionality
-  createAutoCRUD(app, {
-    endpoint: 'client-reports',
-    table: clientReports,
-    schema: insertClientReportSchema,
-    tableName: 'Client Report'
-  });
-
-  // 8. ✅ AUTO-CRUD: Competition Reports - basic functionality
-  createAutoCRUD(app, {
-    endpoint: 'competition-reports',
-    table: competitionReports,
-    schema: insertCompetitionReportSchema,
-    tableName: 'Competition Report',
-    dateField: 'reportDate',
-    autoFields: {
-      reportDate: () => new Date().toISOString().split('T')[0]
-    }
-  });
-
-  // 9. ✅ AUTO-CRUD: Geo Tracking - comprehensive location tracking
-  createAutoCRUD(app, {
-    endpoint: 'geo-tracking',
-    table: geoTracking,
-    schema: insertGeoTrackingSchema,
-    tableName: 'Geo Tracking',
-    dateField: 'recordedAt',
-    locationConfig: {
-      enabled: true,
-      latField: 'latitude',
-      lngField: 'longitude',
-      trackLocation: true,
-      geofenceTag: 'tracking'
-    }
-  });
-
-  // 10. ✅ AUTO-CRUD: Dealer Reports and Scores - basic functionality
-  createAutoCRUD(app, {
-    endpoint: 'dealer-reports-scores',
-    table: dealerReportsAndScores,
-    schema: insertDealerReportsAndScoresSchema,
-    tableName: 'Dealer Report and Score',
-    autoFields: {
-      lastUpdatedDate: () => new Date()
-    }
-  });
-
-  // ============================================
-  // 🔧 SPECIAL ROUTES (NOT AUTO-CRUD)
-  // ============================================
-
-  // 🏢 SMART OFFICE MANAGEMENT (Radar-powered)
-  app.post('/api/admin/create-office-geofence', async (req: Request, res: Response) => {
-    try {
-      const { name, address, latitude, longitude, radius = 100 } = req.body;
-
-      if (!name || !latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          error: 'Name, latitude, and longitude are required'
-        });
-      }
-
-      const geofence = await radarService.createDealerGeofence({
-        externalId: `office_${Date.now()}`,
-        description: name,
-        tag: 'office',
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        radius,
-        metadata: {
-          type: 'office',
-          address,
-          createdAt: new Date().toISOString()
-        }
-      });
-
-      res.json({
-        success: true,
-        data: geofence,
-        message: `Office geofence "${name}" created successfully`
-      });
-    } catch (error) {
-      console.error('Create office geofence error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to create office geofence'
+// Webhook Processing
+app.post('/api/radar/webhook', async (req: Request, res: Response) => {
+  try {
+    const eventData = req.body;
+    
+    const processedEvent = await radarService.processWebhookEvent(eventData);
+    
+    // Store processed webhook event in geo_tracking table with CORRECT field names
+    if (processedEvent.userId && processedEvent.location) {
+      await db.insert(schema.geoTracking).values({
+        userId: processedEvent.userId,
+        recordedAt: new Date(processedEvent.timestamp), // ✅ CORRECT FIELD NAME
+        latitude: processedEvent.location.coordinates?.[1]?.toString(),
+        longitude: processedEvent.location.coordinates?.[0]?.toString(),
+        siteName: processedEvent.dealerName || processedEvent.placeName,
+        activityType: processedEvent.eventType,
+        locationType: 'webhook_event'
       });
     }
+    
+    res.json({ 
+      success: true, 
+      processedEvent 
+    });
+  } catch (error) {
+    console.error('Error processing webhook:', error);
+    res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+// Geocoding Services
+app.post('/api/radar/geocode/forward', async (req: Request, res: Response) => {
+  try {
+    const { query, options } = req.body;
+    
+    const result = await radarService.geocodeForward(query, options);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error with forward geocoding:', error);
+    res.status(500).json({ error: 'Failed to geocode address' });
+  }
+});
+
+app.post('/api/radar/geocode/reverse', async (req: Request, res: Response) => {
+  try {
+    const { latitude, longitude, options } = req.body;
+    
+    const result = await radarService.geocodeReverse(latitude, longitude, options);
+    
+    res.json(result);
+  } catch (error) {
+    console.error('Error with reverse geocoding:', error);
+    res.status(500).json({ error: 'Failed to reverse geocode coordinates' });
+  }
+});
+
+// Context and Search
+app.get('/api/radar/context', async (req: Request, res: Response) => {
+  try {
+    const { latitude, longitude, userId } = req.query;
+    
+    const context = await radarService.getContext(
+      parseFloat(latitude as string),
+      parseFloat(longitude as string),
+      userId as string
+    );
+    
+    res.json(context);
+  } catch (error) {
+    console.error('Error fetching context:', error);
+    res.status(500).json({ error: 'Failed to fetch context' });
+  }
+});
+
+app.get('/api/radar/search/places', async (req: Request, res: Response) => {
+  try {
+    const options = req.query as any;
+    
+    const places = await radarService.searchPlaces(options);
+    
+    res.json(places);
+  } catch (error) {
+    console.error('Error searching places:', error);
+    res.status(500).json({ error: 'Failed to search places' });
+  }
+});
+
+app.get('/api/radar/publishable-key', (req: Request, res: Response) => {
+  res.json({ 
+    publishableKey: radarService.getPublishableKey() 
   });
+});
 
-  app.get('/api/admin/office-locations', async (req: Request, res: Response) => {
-    try {
-      const offices = await radarService.listGeofences('office', 50);
-      
-      res.json({
-        success: true,
-        data: offices.geofences || [],
-        count: offices.geofences?.length || 0
-      });
-    } catch (error) {
-      console.error('List office locations error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch office locations'
-      });
-    }
-  });
+// =================== UTILITY ENDPOINTS ===================
 
-  // 👤 ATTENDANCE ROUTES (Custom Logic - Smart Radar validation)
-  app.get('/api/attendance/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, limit = '50' } = req.query;
+app.post('/api/radar/distance', (req: Request, res: Response) => {
+  try {
+    const { lat1, lon1, lat2, lon2 } = req.body;
+    
+    const distance = radarService.calculateDistance(lat1, lon1, lat2, lon2);
+    
+    res.json({ 
+      distance,
+      unit: 'meters'
+    });
+  } catch (error) {
+    console.error('Error calculating distance:', error);
+    res.status(500).json({ error: 'Failed to calculate distance' });
+  }
+});
 
-      let whereCondition = eq(salesmanAttendance.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(salesmanAttendance.attendanceDate, startDate as string),
-          lte(salesmanAttendance.attendanceDate, endDate as string)
-        );
-      }
-
-      const records = await db.select().from(salesmanAttendance)
-        .where(whereCondition)
-        .orderBy(desc(salesmanAttendance.attendanceDate))
-        .limit(parseInt(limit as string));
-
-      res.json({ success: true, data: records });
-    } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to fetch attendance' });
-    }
-  });
-
-  // 🎯 SMART PUNCH-IN (Radar-powered office validation)
-  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
-
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId, latitude, and longitude are required'
-        });
-      }
-
-      // 🎯 Smart office validation using Radar (no hardcoded coordinates!)
-      const officeValidation = await validateOfficeLocation(
-        userId.toString(),
-        latitude,
-        longitude
-      );
-
-      if (!officeValidation.isValid) {
-        return res.status(400).json({
-          success: false,
-          error: 'Not within office premises',
-          details: {
-            distance: officeValidation.distance,
-            fraudDetected: officeValidation.fraudDetected,
-            confidence: officeValidation.confidence,
-            suggestion: 'Move closer to your office location'
-          }
-        });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-
-      const attendanceData = {
-        userId: parseInt(userId),
-        attendanceDate: today,
-        locationName: locationName || officeValidation.officeName,
-        inTimeTimestamp: new Date(),
-        inTimeImageCaptured: !!selfieUrl,
-        outTimeImageCaptured: false,
-        inTimeImageUrl: selfieUrl || null,
-        inTimeLatitude: latitude.toString(),
-        inTimeLongitude: longitude.toString(),
-        inTimeAccuracy: accuracy ? accuracy.toString() : null,
-      };
-
-      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Attendance data validation failed',
-          details: parseResult.error.errors
-        });
-      }
-
-      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
-      
-      res.json({
-        success: true,
-        data: result,
-        message: `Punched in at ${officeValidation.officeName}`,
-        radarInfo: {
-          officeName: officeValidation.officeName,
-          confidence: officeValidation.confidence,
-          fraudDetected: officeValidation.fraudDetected,
-          validated: true
-        }
-      });
-    } catch (error) {
-      console.error('Smart punch in error:', error);
-      res.status(500).json({ success: false, error: 'Punch in failed' });
-    }
-  });
-
-  // 🎯 SMART PUNCH-OUT
-  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, selfieUrl } = req.body;
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId is required'
-        });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-
-      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp)
-        ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-        .limit(1);
-
-      if (unpunchedRecord) {
-        const updateData = {
-          outTimeTimestamp: new Date(),
-          outTimeImageCaptured: !!selfieUrl,
-          outTimeImageUrl: selfieUrl || null,
-          outTimeLatitude: latitude ? latitude.toString() : null,
-          outTimeLongitude: longitude ? longitude.toString() : null,
-          updatedAt: new Date()
-        };
-
-        const [result] = await db.update(salesmanAttendance)
-          .set(updateData)
-          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-          .returning();
-
-        res.json({
-          success: true,
-          data: result,
-          message: 'Punched out successfully'
-        });
-      } else {
-        res.status(404).json({
-          success: false,
-          error: 'No active punch-in record found'
-        });
-      }
-    } catch (error) {
-      console.error('Punch out error:', error);
-      res.status(500).json({ success: false, error: 'Punch out failed' });
-    }
-  });
-
-  // 📊 DASHBOARD STATS (Custom aggregation logic)
-  app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
-    try {
-      const userId = parseInt(req.params.userId);
-      if (isNaN(userId)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid userId - must be a number'
-        });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-      const currentMonth = new Date().toISOString().slice(0, 7);
-
-      const [
-        todayAttendance,
-        monthlyReports,
-        pendingTasks,
-        totalDealers,
-        pendingLeaves
-      ] = await Promise.all([
-        db.select().from(salesmanAttendance)
-          .where(and(
-            eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, today)
-          )).limit(1),
-
-        db.select({ count: sql<number>`cast(count(*) as int)` })
-          .from(dailyVisitReports)
-          .where(and(
-            eq(dailyVisitReports.userId, userId),
-            like(dailyVisitReports.reportDate, `${currentMonth}%`)
-          )),
-
-        db.select({ count: sql<number>`cast(count(*) as int)` })
-          .from(dailyTasks)
-          .where(and(
-            eq(dailyTasks.userId, userId),
-            eq(dailyTasks.status, 'Assigned')
-          )),
-
-        db.select({ count: sql<number>`cast(count(*) as int)` })
-          .from(dealers)
-          .where(eq(dealers.userId, userId)),
-
-        db.select({ count: sql<number>`cast(count(*) as int)` })
-          .from(salesmanLeaveApplications)
-          .where(and(
-            eq(salesmanLeaveApplications.userId, userId),
-            eq(salesmanLeaveApplications.status, 'Pending')
-          ))
-      ]);
-
-      res.json({
-        success: true,
-        data: {
-          attendance: {
-            isPresent: todayAttendance?.length > 0,
-            punchInTime: todayAttendance?.[0]?.inTimeTimestamp,
-            punchOutTime: todayAttendance?.[0]?.outTimeTimestamp
-          },
-          stats: {
-            monthlyReports: monthlyReports[0]?.count || 0,
-            pendingTasks: pendingTasks[0]?.count || 0,
-            totalDealers: totalDealers[0]?.count || 0,
-            pendingLeaves: pendingLeaves[0]?.count || 0
-          }
-        }
-      });
-    } catch (error) {
-      console.error('Dashboard stats error:', error);
-      res.status(500).json({ success: false, error: 'Failed to fetch dashboard stats' });
-    }
-  });
-}
+export default app;
