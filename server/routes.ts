@@ -1180,9 +1180,9 @@ export function setupWebRoutes(app: Express) {
       const geoResult = await validateLocationInOffice(
         parseFloat(latitude),
         parseFloat(longitude),
-        String(companyId),
-        String(userId),             // ✅ pass deviceId
-        parseFloat(accuracy || 50)  // ✅ pass accuracy (default if missing)
+        String(userId),      // ✅ correct order
+        String(companyId),   // ✅ correct order
+        parseFloat(accuracy || 50)
       );
 
 
@@ -1260,9 +1260,9 @@ export function setupWebRoutes(app: Express) {
         const geoResult = await validateLocationInOffice(
           parseFloat(latitude),
           parseFloat(longitude),
-          String(companyId),
-          String(userId),             // ✅ pass deviceId
-          parseFloat(accuracy || 50)  // ✅ pass accuracy (default if missing)
+          String(userId),      // ✅ correct order
+          String(companyId),   // ✅ correct order
+          parseFloat(accuracy || 50)
         );
 
 
