@@ -137,12 +137,10 @@ export async function createOfficeGeofence(companyId: number) {
     throw new Error(error instanceof Error ? error.message : 'Unknown error');
   }
 }
-
-// Internal function for validating location
 async function validateLocationInOffice(
   latitude: number,
   longitude: number,
-  userId: number | string,
+  userId: number | string,     // still useful for your DB
   companyId: number | string,
   accuracy: number
 ) {
@@ -153,10 +151,10 @@ async function validateLocationInOffice(
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      userId: String(userId),   // ✅ must be string
+      deviceId: String(userId),   // ✅ Radar requires deviceId with server key
       latitude,
       longitude,
-      accuracy                  // ✅ Radar accepts float
+      accuracy
     })
   });
 
@@ -167,7 +165,7 @@ async function validateLocationInOffice(
 
   const data = await response.json();
 
-  // ✅ Find if inside the company’s geofence
+  // ✅ Find if inside office geofence
   const officeEvent = data.events?.find(
     (event: any) =>
       (event.type === "user.entered_geofence" ||
