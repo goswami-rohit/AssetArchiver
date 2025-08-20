@@ -33,210 +33,9 @@ import multer from 'multer';
 import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
-import EnhancedRAGService from 'server/bot/aiService';
-import axios from "axios";
+import PureRAGService from 'server/bot/aiService';
 import { telegramBot } from './bot/telegram';
 
-const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY;
-const RADAR_PUBLISHABLE_KEY = process.env.RADAR_PUBLISHABLE_KEY;
-
-// Internal function for geocoding address
-async function geocodeAddress(address: string) {
-  const response = await fetch(`https://api.radar.io/v1/geocode/forward?query=${encodeURIComponent(address)}`, {
-    headers: {
-      'Authorization': RADAR_PUBLISHABLE_KEY
-    }
-  });
-  if (!response.ok) {
-    throw new Error('Geocoding failed');
-  }
-  const data = await response.json();
-
-  if (!data.addresses || data.addresses.length === 0) {
-    throw new Error('Address not found');
-  }
-  const address_result = data.addresses[0];
-  return {
-    latitude: address_result.latitude,
-    longitude: address_result.longitude,
-    confidence: address_result.confidence,
-    formattedAddress: address_result.formattedAddress
-  };
-}
-export async function reverseGeocode(latitude: number, longitude: number) {
-  try {
-    const resp = await axios.get("https://api.radar.io/v1/geocode/reverse", {
-      params: { coordinates: `${latitude},${longitude}` },
-      headers: { Authorization: RADAR_PUBLISHABLE_KEY }
-    });
-
-    if (resp.data?.addresses?.length > 0) {
-      const addr = resp.data.addresses[0];
-      return addr.formattedAddress || addr.addressLabel || null;
-    }
-    return null;
-  } catch (err) {
-    console.error("Reverse geocode failed:", err.message);
-    return null;
-  }
-}
-
-// Internal function for creating office geofence
-export async function createOfficeGeofence(companyId: number) {
-  try {
-    // Get company data from database
-    const company = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
-
-    if (company.length === 0) {
-      throw new Error('Company not found');
-    }
-    const companyData = company[0];
-    // Geocode the office address
-    const geocoded = await geocodeAddress(companyData.officeAddress);
-    // Create geofence in Radar
-    const geofenceResponse = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': RADAR_SECRET_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        description: `${companyData.companyName} Office`,
-        type: 'circle',
-        coordinates: [geocoded.longitude, geocoded.latitude], // Note: longitude first!
-        radius: 100, // 100 meters default
-        tag: 'office',
-        externalId: companyId.toString(),
-        enabled: true,
-        operatingHours: {
-          Monday: [["09:00", "18:00"]],
-          Tuesday: [["09:00", "18:00"]],
-          Wednesday: [["09:00", "18:00"]],
-          Thursday: [["09:00", "18:00"]],
-          Friday: [["09:00", "18:00"]]
-        },
-        metadata: {
-          companyName: companyData.companyName,
-          region: companyData.region || '',
-          area: companyData.area || ''
-        }
-      })
-    });
-    if (!geofenceResponse.ok) {
-      const errorData = await geofenceResponse.json();
-      throw new Error(`Geofence creation failed: ${errorData.meta?.message || 'Unknown error'}`);
-    }
-    const geofenceData = await geofenceResponse.json();
-    return {
-      success: true,
-      geofence: geofenceData.geofence,
-      geocoded: geocoded,
-      company: companyData
-    };
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Unknown error');
-  }
-}
-async function validateLocationInOffice(
-  latitude: number,
-  longitude: number,
-  userId: number | string,
-  companyId: number | string,
-  accuracy: number
-) {
-  try {
-    const response = await fetch("https://api.radar.io/v1/track", {
-      method: "POST",
-      headers: {
-        "Authorization": RADAR_SECRET_KEY,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        deviceId: String(userId),
-        latitude,
-        longitude,
-        accuracy: Number(accuracy)
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Radar validation failed: ${response.status} - ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    // Check if user is inside the office geofence
-    const officeEvent = data.events?.find(
-      (event: any) =>
-        (event.type === "user.entered_geofence" ||
-          event.type === "user.inside_geofence") &&
-        event.geofence?.externalId === String(companyId)
-    );
-
-    // Calculate distance to office center if geofence exists
-    let distance = null;
-    let radius = null;
-    let officeName = null;
-
-    if (officeEvent?.geofence) {
-      const geofence = officeEvent.geofence;
-      radius = geofence.geometryRadius || 100;
-      officeName = geofence.description || "Office";
-      
-      // Calculate distance using geofence center
-      if (geofence.geometryCenter?.coordinates) {
-        const [centerLng, centerLat] = geofence.geometryCenter.coordinates;
-        distance = calculateDistance(latitude, longitude, centerLat, centerLng);
-      }
-    } else {
-      // If no geofence found, try to get office geofence info
-      try {
-        const geofenceResponse = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-          headers: { 'Authorization': RADAR_SECRET_KEY }
-        });
-        
-        if (geofenceResponse.ok) {
-          const geofenceData = await geofenceResponse.json();
-          const geofence = geofenceData.geofence;
-          
-          if (geofence?.geometryCenter?.coordinates) {
-            const [centerLng, centerLat] = geofence.geometryCenter.coordinates;
-            distance = calculateDistance(latitude, longitude, centerLat, centerLng);
-            radius = geofence.geometryRadius || 100;
-            officeName = geofence.description || "Office";
-          }
-        }
-      } catch (err) {
-        console.error("Failed to fetch geofence for distance calculation:", err);
-      }
-    }
-
-    return {
-      isInside: !!officeEvent, // ✅ Fixed property name
-      inside: !!officeEvent,   // ✅ Keep both for compatibility
-      geofence: officeEvent?.geofence || null,
-      distance: distance,
-      radius: radius,
-      officeName: officeName
-    };
-  } catch (error) {
-    console.error("Location validation error:", error);
-    throw error;
-  }
-}
-
-// Helper function to calculate distance between two points
-function calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000; // Earth's radius in meters
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLng = (lng2 - lng1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c); // Distance in meters
-}
 // Fix multer typing
 interface MulterRequest extends Request {
   file?: Express.Multer.File;
@@ -257,6 +56,15 @@ const upload = multer({
 });
 
 // Office location coordinates with geo-fencing polygons
+const OFFICE_LOCATIONS = [
+  {
+    name: "Head Office",
+    lat: 26.1200853,
+    lng: 91.7955807,
+    radius: 100,
+    polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
+  }
+];
 
 // ============================================
 // SCHEMA-PERFECT AUTO-CRUD GENERATOR
@@ -328,30 +136,6 @@ function createAutoCRUD(app: Express, config: {
     try {
       const { userId } = req.params;
       const { startDate, endDate, limit = '50', completed, ...filters } = req.query;
-
-      // ✅ ADD THIS CHECK RIGHT HERE - BEFORE THE PROBLEMATIC LINE
-      if (endpoint === 'dealer-reports-scores') {
-        // Special handling for dealer reports - join with dealers table
-        const records = await db.select({
-          id: dealerReportsAndScores.id,
-          dealerId: dealerReportsAndScores.dealerId,
-          dealerScore: dealerReportsAndScores.dealerScore,
-          trustWorthinessScore: dealerReportsAndScores.trustWorthinessScore,
-          creditWorthinessScore: dealerReportsAndScores.creditWorthinessScore,
-          orderHistoryScore: dealerReportsAndScores.orderHistoryScore,
-          visitFrequencyScore: dealerReportsAndScores.visitFrequencyScore,
-          lastUpdatedDate: dealerReportsAndScores.lastUpdatedDate,
-          createdAt: dealerReportsAndScores.createdAt,
-          updatedAt: dealerReportsAndScores.updatedAt,
-        })
-          .from(dealerReportsAndScores)
-          .innerJoin(dealers, eq(dealerReportsAndScores.dealerId, dealers.id))
-          .where(eq(dealers.userId, parseInt(userId)))
-          .orderBy(desc(dealerReportsAndScores.lastUpdatedDate))
-          .limit(parseInt(limit as string));
-
-        return res.json({ success: true, data: records });
-      }
 
       // Base condition - userId is integer in schema
       let whereCondition = eq(table.userId, parseInt(userId));
@@ -560,48 +344,9 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ===========USER INFO ENDPOINT to GET COMPANY ID==============
-  // Get user profile with company info
-  app.get('/api/users/:userId', async (req, res) => {
-    try {
-      const userId = parseInt(req.params.userId);
-
-      // Query your users table to get companyId
-      const user = await db.select({
-        id: users.id,
-        companyId: users.companyId,
-        email: users.email,
-        firstName: users.firstName,
-        lastName: users.lastName,
-        role: users.role,
-        region: users.region,
-        area: users.area
-      })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-
-      if (user.length === 0) {
-        return res.status(404).json({
-          success: false,
-          error: 'User not found'
-        });
-      }
-
-      res.json({
-        success: true,
-        data: user[0]
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
   // ==================== ENHANCED AI/RAG ROUTES ====================
   // Import the enhanced service
+  import EnhancedRAGService from 'server/bot/aiService';
 
   // 🚀 ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
@@ -1037,232 +782,6 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ============================================
-  // GEOFENCING ENDPOINTS for OFFICE creations and SO ON
-  // ============================================
-
-  // HTTP Endpoint: Create office geofence (for frontend)
-  // Create office geofence
-// Create office geofence
-app.post('/create-office', async (req, res) => {
-  try {
-    const { companyId, latitude, longitude, address } = req.body;
-
-    if (!companyId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Company ID is required'
-      });
-    }
-
-    // If coordinates are provided, use them; otherwise geocode the address
-    let finalLat = latitude;
-    let finalLng = longitude;
-
-    if (!latitude || !longitude) {
-      if (!address) {
-        return res.status(400).json({
-          success: false,
-          error: 'Either coordinates (latitude, longitude) or address is required'
-        });
-      }
-      
-      // Geocode the address
-      const geocoded = await geocodeAddress(address);
-      finalLat = geocoded.latitude;
-      finalLng = geocoded.longitude;
-    }
-
-    // Get company data
-    const company = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
-    if (company.length === 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Company not found'
-      });
-    }
-
-    const companyData = company[0];
-
-    // Create geofence in Radar
-    const geofenceResponse = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': RADAR_SECRET_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        description: `${companyData.companyName} Office`,
-        type: 'circle',
-        coordinates: [finalLng, finalLat], // Note: longitude first!
-        radius: 100, // 100 meters default
-        tag: 'office',
-        externalId: companyId.toString(),
-        enabled: true,
-        metadata: {
-          companyName: companyData.companyName,
-          region: companyData.region || '',
-          area: companyData.area || '',
-          address: address || `${finalLat}, ${finalLng}`
-        }
-      })
-    });
-
-    if (!geofenceResponse.ok) {
-      const errorData = await geofenceResponse.json();
-      throw new Error(`Geofence creation failed: ${errorData.meta?.message || 'Unknown error'}`);
-    }
-
-    const geofenceData = await geofenceResponse.json();
-    
-    res.json({
-      success: true,
-      message: 'Office geofence created successfully',
-      data: {
-        geofence: geofenceData.geofence,
-        company: companyData
-      }
-    });
-  } catch (error) {
-    console.error("Create office error:", error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-  // Validate location (uses Radar Track API ✅)
-// Validate location (uses Radar Track API ✅)
-app.post('/validate-location', async (req, res) => {
-  try {
-    const { companyId, latitude, longitude, userId, accuracy } = req.body;
-
-    if (!companyId || !latitude || !longitude || !userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Company ID, user ID, latitude, and longitude are required'
-      });
-    }
-
-    const result = await validateLocationInOffice(
-      parseFloat(latitude),
-      parseFloat(longitude),
-      String(userId),      // ✅ Fixed parameter order
-      String(companyId),   // ✅ Fixed parameter order
-      parseFloat(accuracy || 50)
-    );
-
-    res.json({ success: true, data: result });
-  } catch (error) {
-    console.error("Validation error:", error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-
-  // Get office geofence info
-  app.get('/office/:companyId', async (req, res) => {
-    try {
-      const companyId = req.params.companyId;
-
-      const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-        headers: { 'Authorization': RADAR_SECRET_KEY }
-      });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          return res.status(404).json({
-            success: false,
-            error: 'Office geofence not found'
-          });
-        }
-        throw new Error('Failed to get geofence');
-      }
-
-      const data = await response.json();
-      res.json({ success: true, data: data.geofence });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // Delete office geofence
-  app.delete('/office/:companyId', async (req, res) => {
-    try {
-      const companyId = req.params.companyId;
-
-      const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-        method: 'DELETE',
-        headers: { 'Authorization': RADAR_SECRET_KEY }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to delete geofence');
-      }
-
-      res.json({ success: true, message: 'Office geofence deleted successfully' });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // Geocode address
-  app.post('/geocode-address', async (req, res) => {
-    try {
-      const { address } = req.body;
-      if (!address) {
-        return res.status(400).json({ success: false, error: 'Address is required' });
-      }
-      const result = await geocodeAddress(address);
-      res.json({ success: true, data: result });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-  // Reverse geocode
-  app.post('/reverse-geocode', async (req, res) => {
-    try {
-      const { latitude, longitude } = req.body;
-      if (!latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          error: 'Latitude and longitude are required'
-        });
-      }
-
-      const response = await fetch(`https://api.radar.io/v1/geocode/reverse?coordinates=${latitude},${longitude}`, {
-        headers: { 'Authorization': RADAR_PUBLISHABLE_KEY }
-      });
-
-      if (!response.ok) {
-        throw new Error('Reverse geocoding failed');
-      }
-
-      const data = await response.json();
-      res.json({ success: true, data });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-    }
-  });
-
-
-  // ============================================
   // SPECIAL ATTENDANCE ROUTES (with schema validation)
   // ============================================
   app.get('/api/attendance/user/:userId', async (req: Request, res: Response) => {
@@ -1291,192 +810,133 @@ app.post('/validate-location', async (req, res) => {
     }
   });
 
-app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-  try {
-    const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
-    console.log("👉 Punch-in body received:", req.body);
+  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+    try {
+      // Validate input against schema expectations
+      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
 
-    if (!userId || !latitude || !longitude || !companyId) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "userId, companyId, latitude, and longitude are required" 
-      });
-    }
-
-    // Fixed geofence validation
-    const geoResult = await validateLocationInOffice(
-      parseFloat(latitude),
-      parseFloat(longitude),
-      String(userId),
-      String(companyId),
-      parseFloat(accuracy || 50)
-    );
-
-    console.log("👉 Geofence validation result:", geoResult);
-
-    if (!geoResult.isInside) {
-      return res.status(400).json({
-        success: false,
-        error: "Location not within valid office geofence",
-        details: {
-          distance: geoResult.distance ? `${geoResult.distance}m` : 'Unknown',
-          radius: geoResult.radius ? `${geoResult.radius}m` : 'Unknown',
-          message: geoResult.distance && geoResult.radius 
-            ? `You are ${geoResult.distance}m away from office (allowed radius: ${geoResult.radius}m)`
-            : 'Location validation failed'
-        }
-      });
-    }
-
-    // Get formatted address
-    const formattedAddress = await reverseGeocode(
-      parseFloat(latitude),
-      parseFloat(longitude)
-    );
-
-    const now = new Date();
-    
-    // ✅ FIX: Convert data types to match schema expectations
-    const attendanceData = {
-      userId: parseInt(userId),
-      attendanceDate: now.toISOString().split("T")[0], // ✅ Convert Date to string (YYYY-MM-DD)
-      locationName: geoResult.officeName || formattedAddress || "Mobile App",
-      inTimeTimestamp: now,
-      inTimeImageCaptured: !!selfieUrl,
-      outTimeImageCaptured: false,
-      inTimeImageUrl: selfieUrl || null,
-      inTimeLatitude: String(parseFloat(latitude)), // ✅ Convert number to string
-      inTimeLongitude: String(parseFloat(longitude)), // ✅ Convert number to string
-      inTimeAccuracy: accuracy ? String(parseFloat(accuracy)) : null // ✅ Convert number to string
-    };
-
-    const validated = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-    if (!validated.success) {
-      console.error("Schema validation failed:", validated.error.errors);
-      return res.status(400).json({ 
-        success: false, 
-        error: "Data validation failed",
-        details: validated.error.errors 
-      });
-    }
-
-    const [result] = await db.insert(salesmanAttendance).values(validated.data).returning();
-
-    res.json({ 
-      success: true, 
-      data: result, 
-      message: "Punched in successfully",
-      location: {
-        address: formattedAddress,
-        distance: geoResult.distance,
-        officeName: geoResult.officeName
+      if (!userId || !latitude || !longitude) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId, latitude, and longitude are required'
+        });
       }
-    });
-  } catch (error) {
-    console.error("Punch in error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Punch in failed",
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
 
-app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-  try {
-    const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
-    console.log("👉 Punch-out body received:", req.body);
+      // Geo-fencing validation
+      const userPoint = turf.point([longitude, latitude]);
+      let isValid = false;
+      let officeName = '';
 
-    if (!userId) {
-      return res.status(400).json({ success: false, error: "userId is required" });
-    }
-
-    const today = new Date().toISOString().split("T")[0];
-
-    const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-      .where(and(
-        eq(salesmanAttendance.userId, parseInt(userId)),
-        eq(salesmanAttendance.attendanceDate, today),
-        isNull(salesmanAttendance.outTimeTimestamp)
-      ))
-      .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-      .limit(1);
-
-    if (!unpunchedRecord) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "No active punch-in record found for today" 
-      });
-    }
-
-    let formattedAddress: string | null = null;
-    let geoValidation = null;
-
-    if (latitude && longitude && companyId) {
-      try {
-        geoValidation = await validateLocationInOffice(
-          parseFloat(latitude),
-          parseFloat(longitude),
-          String(userId),
-          String(companyId),
-          parseFloat(accuracy || 50)
-        );
-
-        console.log("👉 Punch-out geofence validation result:", geoValidation);
-        formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
-      } catch (geoError) {
-        console.error("Geofence validation failed for punch-out:", geoError);
-        formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
-      }
-    }
-
-    // ✅ FIX: Convert data types to match schema expectations
-    const updateData = {
-      outTimeTimestamp: new Date(),
-      outTimeImageCaptured: !!selfieUrl,
-      outTimeImageUrl: selfieUrl || null,
-      outTimeLatitude: latitude ? String(parseFloat(latitude)) : null, // ✅ Convert to string
-      outTimeLongitude: longitude ? String(parseFloat(longitude)) : null, // ✅ Convert to string
-      outTimeAccuracy: accuracy ? String(parseFloat(accuracy)) : null, // ✅ Convert to string
-      locationName: formattedAddress || unpunchedRecord.locationName || "Mobile App",
-      updatedAt: new Date()
-    };
-
-    const [result] = await db.update(salesmanAttendance)
-      .set(updateData)
-      .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-      .returning();
-
-    // Calculate total work duration
-    const workDuration = result.outTimeTimestamp && unpunchedRecord.inTimeTimestamp 
-      ? Math.round((result.outTimeTimestamp.getTime() - unpunchedRecord.inTimeTimestamp.getTime()) / (1000 * 60))
-      : null;
-
-    res.json({ 
-      success: true, 
-      data: result, 
-      message: "Punched out successfully",
-      details: {
-        workDuration: workDuration ? `${Math.floor(workDuration / 60)}h ${workDuration % 60}m` : null,
-        location: {
-          address: formattedAddress,
-          distance: geoValidation?.distance,
-          officeName: geoValidation?.officeName,
-          withinGeofence: geoValidation?.isInside
+      for (const office of OFFICE_LOCATIONS) {
+        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
+          isValid = true;
+          officeName = office.name;
+          break;
         }
       }
-    });
-  } catch (error) {
-    console.error("Punch out error:", error);
-    res.status(500).json({ 
-      success: false, 
-      error: "Punch out failed",
-      details: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
 
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'You are not within office premises'
+        });
+      }
 
+      const today = new Date().toISOString().split('T')[0];
+
+      // Build data matching exact schema
+      const attendanceData = {
+        userId: parseInt(userId), // integer type
+        attendanceDate: today, // date type
+        locationName: locationName || officeName, // varchar not null
+        inTimeTimestamp: new Date(), // timestamp not null
+        inTimeImageCaptured: !!selfieUrl, // boolean not null
+        outTimeImageCaptured: false, // boolean not null  
+        inTimeImageUrl: selfieUrl || null, // varchar nullable
+        inTimeLatitude: latitude.toString(), // decimal as string
+        inTimeLongitude: longitude.toString(), // decimal as string
+        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
+        // All other nullable fields will be null by default
+      };
+
+      // Validate against schema
+      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Attendance data validation failed',
+          details: parseResult.error.errors
+        });
+      }
+
+      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+      res.json({
+        success: true,
+        data: result,
+        message: `Punched in at ${officeName}`,
+        geoInfo: { officeName, isValid }
+      });
+    } catch (error) {
+      console.error('Punch in error:', error);
+      res.status(500).json({ success: false, error: 'Punch in failed' });
+    }
+  });
+
+  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
+    try {
+      const { userId, latitude, longitude, selfieUrl } = req.body;
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId is required'
+        });
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+
+      // Find unpunched record
+      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
+        .where(and(
+          eq(salesmanAttendance.userId, parseInt(userId)),
+          eq(salesmanAttendance.attendanceDate, today),
+          isNull(salesmanAttendance.outTimeTimestamp)
+        ))
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+        .limit(1);
+
+      if (unpunchedRecord) {
+        // Update with proper data types
+        const updateData = {
+          outTimeTimestamp: new Date(), // timestamp
+          outTimeImageCaptured: !!selfieUrl, // boolean
+          outTimeImageUrl: selfieUrl || null, // varchar nullable
+          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
+          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
+          updatedAt: new Date()
+        };
+
+        const [result] = await db.update(salesmanAttendance)
+          .set(updateData)
+          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
+          .returning();
+
+        res.json({
+          success: true,
+          data: result,
+          message: 'Punched out successfully'
+        });
+      } else {
+        res.status(404).json({
+          success: false,
+          error: 'No active punch-in record found'
+        });
+      }
+    } catch (error) {
+      console.error('Punch out error:', error);
+      res.status(500).json({ success: false, error: 'Punch out failed' });
+    }
+  });
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)
@@ -1507,12 +967,11 @@ app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
             eq(salesmanAttendance.attendanceDate, today)
           )).limit(1),
 
-        // ✅ FIXED LINE - using proper date filtering instead of like()
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            sql`date_trunc('month', ${dailyVisitReports.reportDate}) = ${currentMonth + '-01'}::date`
+            like(dailyVisitReports.reportDate, `${currentMonth}%`)
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
