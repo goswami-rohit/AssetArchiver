@@ -68,12 +68,35 @@ interface OfficeGeofence {
     region?: string;
     area?: string;
   };
+  address?: string;
 }
 
 interface GeofenceSettings {
   companyId: number | null;
   officeGeofence: OfficeGeofence | null;
   isSetupRequired: boolean;
+  currentAddress: string;
+  officeAddress: string;
+}
+
+interface AddressData {
+  formatted: string;
+  street?: string;
+  city?: string;
+  country?: string;
+}
+
+interface GeofenceValidationResult {
+  isInside: boolean;
+  distance: number;
+  message: string;
+}
+
+interface GeofenceEvent {
+  id: string;
+  type: 'entry' | 'exit';
+  timestamp: string;
+  location: string;
 }
 
 export default function JourneyTracker({ userId, onBack, onJourneyEnd }: JourneyTrackerProps) {
@@ -96,13 +119,23 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
-  // NEW: Geofencing State
+  // Enhanced Address and Geofence State
   const [showSettings, setShowSettings] = useState(false);
+  const [currentAddress, setCurrentAddress] = useState<string>('Getting location...');
+  const [isResolvingAddress, setIsResolvingAddress] = useState(false);
+  const [officeSetupMode, setOfficeSetupMode] = useState<'current' | 'address'>('current');
+  const [addressInput, setAddressInput] = useState('');
+  const [realtimeValidation, setRealtimeValidation] = useState<GeofenceValidationResult | null>(null);
+  const [geofenceEvents, setGeofenceEvents] = useState<GeofenceEvent[]>([]);
+  
   const [geofenceSettings, setGeofenceSettings] = useState<GeofenceSettings>({
     companyId: null,
     officeGeofence: null,
-    isSetupRequired: false
+    isSetupRequired: false,
+    currentAddress: '',
+    officeAddress: ''
   });
+  
   const [officeValidation, setOfficeValidation] = useState<{
     isValidating: boolean;
     result: any;
@@ -150,7 +183,112 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     };
   }, [userId]);
 
-  // NEW: Check office geofence status on initialization
+  // Enhanced address resolution
+  const resolveCurrentAddress = useCallback(async (lat: number, lng: number) => {
+    if (isResolvingAddress) return;
+    
+    setIsResolvingAddress(true);
+    try {
+      const response = await fetch('/reverse-geocode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          latitude: lat, 
+          longitude: lng 
+        })
+      });
+
+      const data = await response.json();
+      if (data.success && data.address) {
+        const formattedAddress = data.address.formatted || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        setCurrentAddress(formattedAddress);
+        
+        // Update geofence settings with current address
+        setGeofenceSettings(prev => ({
+          ...prev,
+          currentAddress: formattedAddress
+        }));
+      } else {
+        const coordsString = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        setCurrentAddress(coordsString);
+      }
+    } catch (error) {
+      console.error('Address resolution failed:', error);
+      const coordsString = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      setCurrentAddress(coordsString);
+    } finally {
+      setIsResolvingAddress(false);
+    }
+  }, [isResolvingAddress]);
+
+  // Convert address to coordinates
+  const geocodeAddress = async (address: string): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      const response = await fetch('/geocode-address', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        return {
+          lat: data.latitude,
+          lng: data.longitude
+        };
+      }
+    } catch (error) {
+      console.error('Geocoding failed:', error);
+      setErrorMessage('Failed to find address coordinates');
+    }
+    return null;
+  };
+
+  // Real-time location validation
+  const validateLocationRealtime = useCallback(async (lat: number, lng: number) => {
+    if (!geofenceSettings.companyId || !geofenceSettings.officeGeofence) return;
+
+    try {
+      const response = await fetch('/validate-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: geofenceSettings.companyId,
+          latitude: lat,
+          longitude: lng
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        const newValidation = data.data;
+        
+        // Check for geofence entry/exit events
+        if (realtimeValidation && realtimeValidation.isInside !== newValidation.isInside) {
+          const event: GeofenceEvent = {
+            id: Date.now().toString(),
+            type: newValidation.isInside ? 'entry' : 'exit',
+            timestamp: new Date().toLocaleTimeString(),
+            location: currentAddress
+          };
+          
+          setGeofenceEvents(prev => [event, ...prev.slice(0, 9)]); // Keep last 10 events
+          
+          setSuccessMessage(
+            newValidation.isInside 
+              ? '🏢 Entered office area' 
+              : '🚗 Left office area'
+          );
+        }
+        
+        setRealtimeValidation(newValidation);
+      }
+    } catch (error) {
+      console.error('Real-time validation failed:', error);
+    }
+  }, [geofenceSettings.companyId, geofenceSettings.officeGeofence, realtimeValidation, currentAddress]);
+
+  // Check office geofence status on initialization
   const checkOfficeGeofenceStatus = async () => {
     try {
       // First, get user's companyId from database
@@ -172,13 +310,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         setGeofenceSettings({
           companyId,
           officeGeofence: data.data,
-          isSetupRequired: false
+          isSetupRequired: false,
+          currentAddress: '',
+          officeAddress: data.data.address || ''
         });
       } else {
         setGeofenceSettings({
           companyId,
           officeGeofence: null,
-          isSetupRequired: true
+          isSetupRequired: true,
+          currentAddress: '',
+          officeAddress: ''
         });
       }
     } catch (error) {
@@ -186,20 +328,47 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       setGeofenceSettings({
         companyId: null,
         officeGeofence: null,
-        isSetupRequired: true
+        isSetupRequired: true,
+        currentAddress: '',
+        officeAddress: ''
       });
     }
   };
-  // NEW: Create office geofence
-  const handleCreateOfficeGeofence = async () => {
+
+  // Enhanced office geofence creation with address support
+  const handleCreateOfficeGeofence = async (useAddress = false) => {
     if (!geofenceSettings.companyId) return;
 
     setIsLoading(true);
     try {
+      let coordinates = null;
+      
+      if (useAddress && addressInput.trim()) {
+        coordinates = await geocodeAddress(addressInput.trim());
+        if (!coordinates) {
+          setErrorMessage('Could not find coordinates for the provided address');
+          setIsLoading(false);
+          return;
+        }
+      } else if (!currentLocation) {
+        setErrorMessage('Current location not available');
+        setIsLoading(false);
+        return;
+      }
+
+      const requestData = {
+        companyId: geofenceSettings.companyId,
+        ...(coordinates ? coordinates : {
+          latitude: currentLocation!.lat,
+          longitude: currentLocation!.lng
+        }),
+        address: useAddress ? addressInput.trim() : currentAddress
+      };
+
       const response = await fetch('/create-office', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyId: geofenceSettings.companyId })
+        body: JSON.stringify(requestData)
       });
 
       const data = await response.json();
@@ -207,9 +376,11 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         setGeofenceSettings(prev => ({
           ...prev,
           officeGeofence: data.data.geofence,
-          isSetupRequired: false
+          isSetupRequired: false,
+          officeAddress: data.data.geofence.address || currentAddress
         }));
         setSuccessMessage('✅ Office geofence created successfully!');
+        setAddressInput('');
       } else {
         setErrorMessage(data.error || 'Failed to create office geofence');
       }
@@ -220,7 +391,37 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     }
   };
 
-  // NEW: Validate current location against office
+  // Delete office geofence
+  const handleDeleteOfficeGeofence = async () => {
+    if (!geofenceSettings.companyId) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(`/office/${geofenceSettings.companyId}`, {
+        method: 'DELETE'
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setGeofenceSettings(prev => ({
+          ...prev,
+          officeGeofence: null,
+          isSetupRequired: true,
+          officeAddress: ''
+        }));
+        setSuccessMessage('Office geofence deleted successfully');
+        setRealtimeValidation(null);
+      } else {
+        setErrorMessage(data.error || 'Failed to delete office geofence');
+      }
+    } catch (error) {
+      setErrorMessage('Network error: Failed to delete office geofence');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Validate current location against office
   const handleValidateOfficeLocation = async () => {
     if (!currentLocation || !geofenceSettings.companyId) return;
 
@@ -254,15 +455,20 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   const getCurrentLocation = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentLocation({
+        async (position) => {
+          const newLocation = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
             accuracy: position.coords.accuracy,
             speed: position.coords.speed || 0,
             heading: position.coords.heading || 0,
             altitude: position.coords.altitude || 0
-          });
+          };
+          
+          setCurrentLocation(newLocation);
+          
+          // Resolve address for current location
+          await resolveCurrentAddress(newLocation.lat, newLocation.lng);
         },
         (error) => {
           console.error('Location error:', error);
@@ -359,7 +565,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     const options = getLocationOptions();
 
     const watchId = navigator.geolocation.watchPosition(
-      (position) => {
+      async (position) => {
         const newLocation: LocationData = {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
@@ -374,6 +580,14 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
         // Auto-adjust tracking mode based on speed
         autoAdjustTrackingMode(newLocation.speed || 0);
+
+        // Resolve address for current location
+        await resolveCurrentAddress(newLocation.lat, newLocation.lng);
+
+        // Real-time geofence validation during active journey
+        if (activeJourney && geofenceSettings.officeGeofence) {
+          await validateLocationRealtime(newLocation.lat, newLocation.lng);
+        }
 
         // Update active journey stats if available
         if (activeJourney) {
@@ -392,7 +606,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     );
 
     setLocationWatchId(watchId);
-  }, [activeJourney, trackingMode, getLocationOptions]);
+  }, [activeJourney, trackingMode, getLocationOptions, resolveCurrentAddress, validateLocationRealtime, geofenceSettings.officeGeofence]);
 
   // 🎯 AUTO-ADJUST TRACKING MODE BASED ON SPEED
   const autoAdjustTrackingMode = (speed: number) => {
@@ -580,7 +794,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         id: Date.now().toString(),
         dealerName: `Dealer ${dealerCheckins.length + 1}`,
         checkInTime: new Date().toLocaleTimeString(),
-        location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`
+        location: currentAddress
       };
 
       setDealerCheckins(prev => [...prev, newCheckIn]);
@@ -618,6 +832,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   size="sm"
                   onClick={onBack}
                   className="p-1 hover:bg-gray-100 rounded-full"
+                  data-testid="button-back"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </Button>
@@ -647,10 +862,11 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 size="sm"
                 className="p-2 rounded-full"
                 onClick={() => setShowSettings(true)}
+                data-testid="button-settings"
               >
                 <Settings className="w-5 h-5" />
               </Button>
-              <Button variant="ghost" size="sm" className="p-2 rounded-full">
+              <Button variant="ghost" size="sm" className="p-2 rounded-full" data-testid="button-more">
                 <MoreHorizontal className="w-5 h-5" />
               </Button>
             </div>
@@ -662,13 +878,13 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       <div className="flex-1 overflow-y-auto pb-6">
         {/* Success/Error Messages */}
         {successMessage && (
-          <div className="mx-4 mt-4 p-3 bg-green-100 border border-green-300 rounded-xl">
+          <div className="mx-4 mt-4 p-3 bg-green-100 border border-green-300 rounded-xl" data-testid="message-success">
             <p className="text-green-700 text-sm text-center">{successMessage}</p>
           </div>
         )}
 
         {errorMessage && (
-          <div className="mx-4 mt-4 p-3 bg-red-100 border border-red-300 rounded-xl">
+          <div className="mx-4 mt-4 p-3 bg-red-100 border border-red-300 rounded-xl" data-testid="message-error">
             <p className="text-red-700 text-sm text-center">{errorMessage}</p>
           </div>
         )}
@@ -686,7 +902,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               <p className="text-gray-600 text-lg">Start tracking your field visits</p>
             </div>
 
-            {/* Location Status */}
+            {/* Enhanced Location Status */}
             {currentLocation ? (
               <Card className="mb-6 bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-lg">
                 <CardContent className="p-6">
@@ -695,18 +911,62 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                         <MapPin className="w-6 h-6 text-green-600" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-gray-900">Location Ready</h3>
-                        <p className="text-sm text-gray-600">
-                          {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
-                        </p>
+                      <div className="flex-1">
+                        <h3 className="font-semibold text-gray-900">Current Location</h3>
+                        <div className="space-y-1">
+                          {/* Show readable address first */}
+                          <p className="text-sm text-gray-800 font-medium" data-testid="text-current-address">
+                            {isResolvingAddress ? (
+                              <span className="flex items-center space-x-2">
+                                <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                <span>Resolving address...</span>
+                              </span>
+                            ) : (
+                              currentAddress
+                            )}
+                          </p>
+                          {/* Show coordinates as secondary info */}
+                          <p className="text-xs text-gray-500" data-testid="text-coordinates">
+                            {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+                          </p>
+                          {currentLocation.speed && currentLocation.speed > 0 && (
+                            <p className="text-xs text-gray-500" data-testid="text-speed">
+                              Speed: {(currentLocation.speed * 3.6).toFixed(1)} km/h
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <Badge className="bg-green-100 text-green-800 border-green-300">
-                      <Signal className="w-3 h-3 mr-1" />
-                      {currentLocation.accuracy?.toFixed(0)}m
-                    </Badge>
+                    <div className="flex flex-col items-end space-y-2">
+                      <Badge className="bg-green-100 text-green-800 border-green-300" data-testid="badge-accuracy">
+                        <Signal className="w-3 h-3 mr-1" />
+                        {currentLocation.accuracy?.toFixed(0)}m
+                      </Badge>
+                      
+                      {/* Geofence status indicator */}
+                      {realtimeValidation && (
+                        <Badge className={`${
+                          realtimeValidation.isInside 
+                            ? 'bg-blue-100 text-blue-800 border-blue-300' 
+                            : 'bg-orange-100 text-orange-800 border-orange-300'
+                        }`} data-testid="badge-geofence-status">
+                          {realtimeValidation.isInside ? '🏢 At Office' : '🚗 Outside'}
+                        </Badge>
+                      )}
+                    </div>
                   </div>
+                  
+                  {/* Real-time distance to office */}
+                  {realtimeValidation && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">Distance to office:</span>
+                        <span className="font-medium text-gray-900" data-testid="text-office-distance">
+                          {realtimeValidation.distance}m
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ) : (
@@ -727,6 +987,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       size="sm"
                       variant="outline"
                       className="border-orange-300"
+                      data-testid="button-retry-location"
                     >
                       Retry
                     </Button>
@@ -742,17 +1003,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   <h3 className="font-semibold mb-2">Today's Activity</h3>
                   <div className="grid grid-cols-3 gap-4 text-center">
                     <div>
-                      <div className="text-xl font-bold text-blue-600">{geoTrackingHistory.length}</div>
+                      <div className="text-xl font-bold text-blue-600" data-testid="text-tracking-points">{geoTrackingHistory.length}</div>
                       <div className="text-xs text-gray-600">Tracking Points</div>
                     </div>
                     <div>
-                      <div className="text-xl font-bold text-purple-600">
+                      <div className="text-xl font-bold text-purple-600" data-testid="text-total-distance">
                         {calculateTotalDistance(geoTrackingHistory).toFixed(1)}km
                       </div>
                       <div className="text-xs text-gray-600">Distance</div>
                     </div>
                     <div>
-                      <div className="text-xl font-bold text-pink-600">
+                      <div className="text-xl font-bold text-pink-600" data-testid="text-completed-journeys">
                         {geoTrackingHistory.filter(h => h.checkOutTime).length}
                       </div>
                       <div className="text-xs text-gray-600">Completed</div>
@@ -767,13 +1028,13 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
                 <CardContent className="p-4 text-center">
                   <Battery className={`w-6 h-6 mx-auto mb-2 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
-                  <p className="text-sm font-medium">{batteryLevel}% Battery</p>
+                  <p className="text-sm font-medium" data-testid="text-battery-level">{batteryLevel}% Battery</p>
                 </CardContent>
               </Card>
               <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
                 <CardContent className="p-4 text-center">
                   <Wifi className={`w-6 h-6 mx-auto mb-2 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
-                  <p className="text-sm font-medium">{networkStatus === 'online' ? 'Online' : 'Offline'}</p>
+                  <p className="text-sm font-medium" data-testid="text-network-status">{networkStatus === 'online' ? 'Online' : 'Offline'}</p>
                 </CardContent>
               </Card>
             </div>
@@ -783,6 +1044,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               onClick={handleStartJourney}
               disabled={!currentLocation || isLoading}
               className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white text-lg font-semibold rounded-3xl shadow-2xl transform transition-all duration-200 hover:scale-105"
+              data-testid="button-start-journey"
             >
               {isLoading ? (
                 <div className="flex items-center space-x-2">
@@ -817,7 +1079,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                     {activeJourney.status === 'active' && (
                       <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
                     )}
-                    <Badge className="bg-white/20 text-white border-white/30">
+                    <Badge className="bg-white/20 text-white border-white/30" data-testid="badge-tracking-mode">
                       {trackingMode}
                     </Badge>
                   </div>
@@ -826,17 +1088,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 {/* Live Stats */}
                 <div className="grid grid-cols-3 gap-4">
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
+                    <div className="text-2xl font-bold" data-testid="text-journey-duration">
                       ⏱️ {activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m'}
                     </div>
                     <div className="text-white/80 text-sm">Duration</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">📍 {activeJourney.totalDistance}</div>
+                    <div className="text-2xl font-bold" data-testid="text-journey-distance">📍 {activeJourney.totalDistance}</div>
                     <div className="text-white/80 text-sm">Distance</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">🏪 {dealerCheckins.length}</div>
+                    <div className="text-2xl font-bold" data-testid="text-checkins-count">🏪 {dealerCheckins.length}</div>
                     <div className="text-white/80 text-sm">Check-ins</div>
                   </div>
                 </div>
@@ -852,19 +1114,29 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       <MapPin className="w-5 h-5 text-blue-600" />
                       <div>
                         <p className="font-medium">Current Location</p>
-                        <p className="text-sm text-gray-600">
+                        <p className="text-sm text-gray-800" data-testid="text-active-address">{currentAddress}</p>
+                        <p className="text-xs text-gray-500" data-testid="text-active-coordinates">
                           {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
                         </p>
                         {currentLocation.speed && currentLocation.speed > 0 && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-xs text-gray-500" data-testid="text-active-speed">
                             Speed: {(currentLocation.speed * 3.6).toFixed(1)} km/h
                           </p>
                         )}
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium">{currentLocation.accuracy?.toFixed(0)}m</p>
+                      <p className="text-sm font-medium" data-testid="text-active-accuracy">{currentLocation.accuracy?.toFixed(0)}m</p>
                       <p className="text-xs text-gray-500">accuracy</p>
+                      {realtimeValidation && (
+                        <Badge className={`mt-1 ${
+                          realtimeValidation.isInside 
+                            ? 'bg-blue-100 text-blue-800 border-blue-300' 
+                            : 'bg-orange-100 text-orange-800 border-orange-300'
+                        }`} data-testid="badge-active-geofence">
+                          {realtimeValidation.isInside ? '🏢' : '🚗'}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -882,6 +1154,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   } : null);
                 }}
                 className="h-16 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg"
+                data-testid="button-pause-resume"
               >
                 <div className="flex flex-col items-center space-y-1">
                   {activeJourney.status === 'active' ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
@@ -892,6 +1165,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               <Button
                 onClick={handleQuickCheckIn}
                 className="h-16 bg-purple-500 hover:bg-purple-600 text-white rounded-2xl shadow-lg"
+                data-testid="button-quick-checkin"
               >
                 <div className="flex flex-col items-center space-y-1">
                   <Store className="w-6 h-6" />
@@ -907,7 +1181,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   <h3 className="font-semibold mb-3">Recent Check-ins</h3>
                   <div className="space-y-2">
                     {dealerCheckins.slice(-3).map((checkin) => (
-                      <div key={checkin.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
+                      <div key={checkin.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg" data-testid={`checkin-${checkin.id}`}>
                         <div className="flex items-center space-x-2">
                           <CheckCircle className="w-4 h-4 text-green-600" />
                           <span className="text-sm font-medium">{checkin.dealerName}</span>
@@ -927,19 +1201,19 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   <div className="flex items-center space-x-4">
                     <div className="flex items-center space-x-2">
                       <Battery className={`w-4 h-4 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
-                      <span className="text-sm">{batteryLevel}%</span>
+                      <span className="text-sm" data-testid="text-active-battery">{batteryLevel}%</span>
                     </div>
                     <div className="flex items-center space-x-2">
                       <Wifi className={`w-4 h-4 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
-                      <span className="text-sm">{networkStatus}</span>
+                      <span className="text-sm" data-testid="text-active-network">{networkStatus}</span>
                     </div>
                     <div className="flex items-center space-x-2">
                       <Activity className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm">{activeJourney.trackingPoints} points</span>
+                      <span className="text-sm" data-testid="text-active-points">{activeJourney.trackingPoints} points</span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-gray-500" data-testid="text-last-update">
                       Updated {Math.round((new Date().getTime() - lastUpdate.getTime()) / 1000)}s ago
                     </p>
                   </div>
@@ -952,6 +1226,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
               onClick={handleEndJourney}
               disabled={isLoading}
               className="w-full h-16 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-lg font-semibold rounded-3xl shadow-2xl transform transition-all duration-200 hover:scale-105"
+              data-testid="button-end-journey"
             >
               {isLoading ? (
                 <div className="flex items-center space-x-2">
@@ -969,7 +1244,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         )}
       </div>
 
-      {/* NEW: Settings Modal */}
+      {/* ENHANCED: Settings Modal with Full API Integration */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <Card className="w-full max-w-md bg-white max-h-[90vh] overflow-y-auto">
@@ -981,6 +1256,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   size="sm"
                   onClick={() => setShowSettings(false)}
                   className="p-1 rounded-full"
+                  data-testid="button-close-settings"
                 >
                   <X className="w-5 h-5" />
                 </Button>
@@ -1000,13 +1276,63 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         <AlertCircle className="w-5 h-5 text-orange-600" />
                         <span className="text-sm font-medium">Setup Required</span>
                       </div>
+                      
+                      {/* Office setup mode selector */}
+                      <div className="mb-4">
+                        <div className="flex rounded-lg bg-gray-100 p-1">
+                          <button
+                            onClick={() => setOfficeSetupMode('current')}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                              officeSetupMode === 'current'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                            data-testid="button-setup-current"
+                          >
+                            Current Location
+                          </button>
+                          <button
+                            onClick={() => setOfficeSetupMode('address')}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
+                              officeSetupMode === 'address'
+                                ? 'bg-white text-gray-900 shadow-sm'
+                                : 'text-gray-600 hover:text-gray-900'
+                            }`}
+                            data-testid="button-setup-address"
+                          >
+                            Enter Address
+                          </button>
+                        </div>
+                      </div>
+
+                      {officeSetupMode === 'address' && (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Office Address
+                          </label>
+                          <input
+                            type="text"
+                            value={addressInput}
+                            onChange={(e) => setAddressInput(e.target.value)}
+                            placeholder="Enter office address..."
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            data-testid="input-office-address"
+                          />
+                        </div>
+                      )}
+
                       <p className="text-sm text-gray-600 mb-3">
-                        Create office geofence for location-based features
+                        {officeSetupMode === 'current' 
+                          ? 'Create office geofence at your current location'
+                          : 'Create office geofence at the specified address'
+                        }
                       </p>
+                      
                       <Button
-                        onClick={handleCreateOfficeGeofence}
-                        disabled={isLoading}
+                        onClick={() => handleCreateOfficeGeofence(officeSetupMode === 'address')}
+                        disabled={isLoading || (officeSetupMode === 'address' && !addressInput.trim())}
                         className="w-full bg-blue-600 hover:bg-blue-700"
+                        data-testid="button-create-geofence"
                       >
                         {isLoading ? 'Creating...' : 'Setup Office Geofence'}
                       </Button>
@@ -1015,14 +1341,33 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 ) : geofenceSettings.officeGeofence ? (
                   <Card className="bg-green-50 border-green-200">
                     <CardContent className="p-4">
-                      <div className="flex items-center space-x-3 mb-3">
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                        <span className="text-sm font-medium">Office Configured</span>
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-3">
+                          <CheckCircle className="w-5 h-5 text-green-600" />
+                          <span className="text-sm font-medium">Office Configured</span>
+                        </div>
+                        
+                        {/* Delete button */}
+                        <Button
+                          onClick={handleDeleteOfficeGeofence}
+                          disabled={isLoading}
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          data-testid="button-delete-geofence"
+                        >
+                          Delete
+                        </Button>
                       </div>
+                      
                       <div className="space-y-2 text-sm text-gray-600">
                         <p><strong>Company:</strong> {geofenceSettings.officeGeofence.metadata.companyName}</p>
                         <p><strong>Description:</strong> {geofenceSettings.officeGeofence.description}</p>
                         <p><strong>Radius:</strong> {geofenceSettings.officeGeofence.geometryRadius}m</p>
+                        {/* Show office address */}
+                        {geofenceSettings.officeAddress && (
+                          <p data-testid="text-office-address"><strong>Address:</strong> {geofenceSettings.officeAddress}</p>
+                        )}
                       </div>
 
                       <div className="mt-4 space-y-2">
@@ -1031,15 +1376,17 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                           disabled={!currentLocation || officeValidation?.isValidating}
                           variant="outline"
                           className="w-full"
+                          data-testid="button-test-location"
                         >
                           {officeValidation?.isValidating ? 'Checking...' : 'Test Current Location'}
                         </Button>
 
                         {officeValidation?.result && (
-                          <div className={`p-3 rounded-lg text-sm ${officeValidation.result.isInside
+                          <div className={`p-3 rounded-lg text-sm ${
+                            officeValidation.result.isInside
                               ? 'bg-green-100 text-green-800'
                               : 'bg-red-100 text-red-800'
-                            }`}>
+                          }`} data-testid="validation-result">
                             <div className="flex items-center space-x-2">
                               {officeValidation.result.isInside ? (
                                 <CheckCircle className="w-4 h-4" />
@@ -1072,6 +1419,30 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                   </Card>
                 )}
 
+                {/* Geofence Events History */}
+                {geofenceEvents.length > 0 && (
+                  <Card className="bg-blue-50 border-blue-200">
+                    <CardContent className="p-4">
+                      <h4 className="font-medium text-blue-900 mb-3">Recent Events</h4>
+                      <div className="space-y-2 max-h-32 overflow-y-auto">
+                        {geofenceEvents.map((event) => (
+                          <div key={event.id} className="flex items-center justify-between text-xs" data-testid={`event-${event.id}`}>
+                            <div className="flex items-center space-x-2">
+                              <div className={`w-2 h-2 rounded-full ${
+                                event.type === 'entry' ? 'bg-green-500' : 'bg-orange-500'
+                              }`} />
+                              <span className="text-blue-800">
+                                {event.type === 'entry' ? 'Entered' : 'Left'} office
+                              </span>
+                            </div>
+                            <span className="text-blue-600">{event.timestamp}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Tracking Mode Section */}
                 <div className="pt-4 border-t">
                   <div className="flex items-center space-x-2 mb-3">
@@ -1085,6 +1456,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         onClick={() => setTrackingMode(mode)}
                         variant={trackingMode === mode ? 'default' : 'outline'}
                         className="w-full justify-start"
+                        data-testid={`button-mode-${mode}`}
                       >
                         <div className="text-left">
                           <div className="font-medium capitalize">{mode}</div>
