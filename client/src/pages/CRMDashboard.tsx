@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import {
   Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar, 
   Building2, Target, Send, Mic, Search, Filter, MoreHorizontal,
@@ -25,7 +26,8 @@ import {
   Wifi, WifiOff, RefreshCw, X, Check, AlertCircle, Award,
   Calendar as CalendarIcon, DollarSign, TrendingDown, Star,
   Map, Locate, Globe, TrendingDown as Score, Camera, 
-  UserCheck, Phone, Mail, Clock3, MapPinned, Receipt
+  UserCheck, Phone, Mail, Clock3, MapPinned, Receipt,
+  History, CheckCheck, AlertTriangle, Info
 } from 'lucide-react';
 
 // Import your custom components
@@ -49,6 +51,7 @@ interface AppState {
   isLoading: boolean;
   isOnline: boolean;
   lastSync: Date | null;
+  refreshing: boolean;
   
   // Enhanced Data
   dailyTasks: any[];
@@ -72,6 +75,8 @@ interface AppState {
   showDetailModal: boolean;
   searchQuery: string;
   filterType: string;
+  searchHistory: string[];
+  errors: Record<string, string>;
   
   // Actions
   setUser: (user: User | null) => void;
@@ -83,6 +88,9 @@ interface AppState {
   setData: (key: string, data: any) => void;
   setUIState: (key: string, value: any) => void;
   resetModals: () => void;
+  setRefreshing: (refreshing: boolean) => void;
+  addToSearchHistory: (query: string) => void;
+  setErrors: (errors: Record<string, string>) => void;
 }
 
 const useAppStore = create<AppState>((set, get) => ({
@@ -92,6 +100,7 @@ const useAppStore = create<AppState>((set, get) => ({
   isLoading: false,
   isOnline: true,
   lastSync: null,
+  refreshing: false,
   
   dailyTasks: [],
   pjps: [],
@@ -113,6 +122,8 @@ const useAppStore = create<AppState>((set, get) => ({
   showDetailModal: false,
   searchQuery: '',
   filterType: 'all',
+  searchHistory: [],
+  errors: {},
   
   setUser: (user) => set({ user }),
   setCurrentPage: (page) => set({ currentPage: page }),
@@ -126,15 +137,24 @@ const useAppStore = create<AppState>((set, get) => ({
     showCreateModal: false, 
     showDetailModal: false, 
     selectedItem: null 
-  })
+  }),
+  setRefreshing: (refreshing) => set({ refreshing }),
+  addToSearchHistory: (query) => {
+    const history = get().searchHistory;
+    if (!history.includes(query)) {
+      set({ searchHistory: [query, ...history].slice(0, 10) });
+    }
+  },
+  setErrors: (errors) => set({ errors })
 }));
 
 // ============= ENHANCED API HOOKS =============
 const useAPI = () => {
-  const { user, setLoading, setData, updateLastSync } = useAppStore();
+  const { user, setLoading, setData, updateLastSync, setOnlineStatus } = useAppStore();
   
   const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
     try {
+      setOnlineStatus(true);
       const response = await fetch(endpoint, {
         headers: {
           'Content-Type': 'application/json',
@@ -152,9 +172,10 @@ const useAPI = () => {
       return data;
     } catch (error) {
       console.error('API call failed:', error);
+      setOnlineStatus(false);
       throw error;
     }
-  }, [updateLastSync]);
+  }, [updateLastSync, setOnlineStatus]);
 
   const fetchAllData = useCallback(async () => {
     if (!user) return;
@@ -173,16 +194,16 @@ const useAPI = () => {
         competitionRes,
         dealerScoresRes
       ] = await Promise.allSettled([
-        apiCall(`/api/daily-tasks/user/${user.id}`),
-        apiCall(`/api/pjp/user/${user.id}`),
-        apiCall(`/api/dealers/user/${user.id}`),
-        apiCall(`/api/daily-visit-reports/user/${user.id}?limit=20`),
-        apiCall(`/api/technical-visit-reports/user/${user.id}`),
-        apiCall(`/api/salesman-attendance/user/${user.id}`),
-        apiCall(`/api/leave-applications/user/${user.id}`),
-        apiCall(`/api/client-reports/user/${user.id}`),
-        apiCall(`/api/competition-reports/user/${user.id}`),
-        apiCall(`/api/dealer-reports-and-scores/user/${user.id}`)
+        apiCall(`/api/daily-tasks?userId=${user.id}`),
+        apiCall(`/api/permanent-journey-plans?userId=${user.id}`),
+        apiCall(`/api/dealers?userId=${user.id}`),
+        apiCall(`/api/daily-visit-reports?userId=${user.id}&limit=20`),
+        apiCall(`/api/technical-visit-reports?userId=${user.id}`),
+        apiCall(`/api/salesman-attendance?userId=${user.id}`),
+        apiCall(`/api/salesman-leave-applications?userId=${user.id}`),
+        apiCall(`/api/client-reports?userId=${user.id}`),
+        apiCall(`/api/competition-reports?userId=${user.id}`),
+        apiCall(`/api/dealer-reports-and-scores?userId=${user.id}`)
       ]);
 
       if (tasksRes.status === 'fulfilled') setData('dailyTasks', tasksRes.value.data || []);
@@ -190,7 +211,16 @@ const useAPI = () => {
       if (dealersRes.status === 'fulfilled') setData('dealers', dealersRes.value.data || []);
       if (dvrRes.status === 'fulfilled') setData('dailyVisitReports', dvrRes.value.data || []);
       if (tvrRes.status === 'fulfilled') setData('technicalVisitReports', tvrRes.value.data || []);
-      if (attendanceRes.status === 'fulfilled') setData('attendance', attendanceRes.value.data || []);
+      if (attendanceRes.status === 'fulfilled') {
+        setData('attendance', attendanceRes.value.data || []);
+        // Set attendance status based on latest record
+        const latestAttendance = attendanceRes.value.data?.[0];
+        if (latestAttendance && !latestAttendance.outTime) {
+          useAppStore.getState().setAttendanceStatus('in');
+        } else {
+          useAppStore.getState().setAttendanceStatus('out');
+        }
+      }
       if (leaveRes.status === 'fulfilled') setData('leaveApplications', leaveRes.value.data || []);
       if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
       if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
@@ -209,33 +239,40 @@ const useAPI = () => {
     try {
       setLoading(true);
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
       });
 
       const { latitude, longitude } = position.coords;
-      const endpoint = useAppStore.getState().attendanceStatus === 'out' 
-        ? '/api/salesman-attendance/punch-in' 
-        : '/api/salesman-attendance/punch-out';
+      const currentStatus = useAppStore.getState().attendanceStatus;
 
-      const response = await apiCall(endpoint, {
+      const requestData = {
+        userId: user.id,
+        inTimeLatitude: latitude,
+        inTimeLongitude: longitude,
+        locationName: 'Mobile App Location',
+        accuracy: position.coords.accuracy
+      };
+
+      const response = await apiCall('/api/salesman-attendance', {
         method: 'POST',
-        body: JSON.stringify({
-          userId: user.id,
-          inTimeLatitude: latitude,
-          inTimeLongitude: longitude,
-          locationName: 'Mobile App Location',
-          accuracy: position.coords.accuracy
-        })
+        body: JSON.stringify(requestData)
       });
 
-      if (response.success) {
-        useAppStore.getState().setAttendanceStatus(
-          useAppStore.getState().attendanceStatus === 'out' ? 'in' : 'out'
-        );
+      if (response) {
+        useAppStore.getState().setAttendanceStatus(currentStatus === 'out' ? 'in' : 'out');
         await fetchAllData();
+        
+        // Success feedback
+        const message = currentStatus === 'out' ? 'Successfully punched in!' : 'Successfully punched out!';
+        console.log(message);
       }
     } catch (error) {
       console.error('Attendance punch failed:', error);
+      alert('Attendance punch failed. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -246,11 +283,11 @@ const useAPI = () => {
 
     const endpoints = {
       task: '/api/daily-tasks',
-      pjp: '/api/pjp',
+      pjp: '/api/permanent-journey-plans',
       dealer: '/api/dealers',
       dvr: '/api/daily-visit-reports',
       tvr: '/api/technical-visit-reports',
-      leave: '/api/leave-applications',
+      leave: '/api/salesman-leave-applications',
       'client-report': '/api/client-reports',
       'competition-report': '/api/competition-reports',
       'dealer-score': '/api/dealer-reports-and-scores'
@@ -263,7 +300,7 @@ const useAPI = () => {
         body: JSON.stringify({ ...data, userId: user.id })
       });
 
-      if (response.success) {
+      if (response) {
         useAppStore.getState().resetModals();
         await fetchAllData();
         return response;
@@ -281,11 +318,11 @@ const useAPI = () => {
 
     const endpoints = {
       task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
+      pjp: `/api/permanent-journey-plans/${id}`,
       dealer: `/api/dealers/${id}`,
       dvr: `/api/daily-visit-reports/${id}`,
       tvr: `/api/technical-visit-reports/${id}`,
-      leave: `/api/leave-applications/${id}`,
+      leave: `/api/salesman-leave-applications/${id}`,
       'client-report': `/api/client-reports/${id}`,
       'competition-report': `/api/competition-reports/${id}`,
       'dealer-score': `/api/dealer-reports-and-scores/${id}`
@@ -298,7 +335,7 @@ const useAPI = () => {
         body: JSON.stringify(data)
       });
 
-      if (response.success) {
+      if (response) {
         await fetchAllData();
         return response;
       }
@@ -315,11 +352,11 @@ const useAPI = () => {
 
     const endpoints = {
       task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
+      pjp: `/api/permanent-journey-plans/${id}`,
       dealer: `/api/dealers/${id}`,
       dvr: `/api/daily-visit-reports/${id}`,
       tvr: `/api/technical-visit-reports/${id}`,
-      leave: `/api/leave-applications/${id}`,
+      leave: `/api/salesman-leave-applications/${id}`,
       'client-report': `/api/client-reports/${id}`,
       'competition-report': `/api/competition-reports/${id}`,
       'dealer-score': `/api/dealer-reports-and-scores/${id}`
@@ -331,7 +368,7 @@ const useAPI = () => {
         method: 'DELETE'
       });
 
-      if (response.success) {
+      if (response) {
         await fetchAllData();
         return response;
       }
@@ -380,7 +417,6 @@ const LocationPicker = ({
       const { latitude, longitude } = position.coords;
       setCoordinates({ lat: latitude, lng: longitude });
       
-      // Enhanced location name with Radar.io integration
       const locationName = `📍 Current Location (${latitude.toFixed(4)}, ${longitude.toFixed(4)})`;
       onLocationSelect(locationName, { lat: latitude, lng: longitude });
       setSearchQuery(locationName);
@@ -444,9 +480,132 @@ const LocationPicker = ({
   );
 };
 
+// ============= PULL TO REFRESH COMPONENT =============
+const PullToRefresh = ({ onRefresh, children }: { onRefresh: () => Promise<void>; children: React.ReactNode }) => {
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [startY, setStartY] = useState(0);
+  const { refreshing } = useAppStore();
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setStartY(e.touches[0].clientY);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const currentY = e.touches[0].clientY;
+    const distance = currentY - startY;
+    
+    if (distance > 0 && window.scrollY === 0) {
+      e.preventDefault();
+      setPullDistance(Math.min(distance, 100));
+      setIsPulling(distance > 60);
+    }
+  };
+
+  const handleTouchEnd = async () => {
+    if (isPulling && !refreshing) {
+      useAppStore.getState().setRefreshing(true);
+      await onRefresh();
+      useAppStore.getState().setRefreshing(false);
+    }
+    setPullDistance(0);
+    setIsPulling(false);
+  };
+
+  return (
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{ transform: `translateY(${pullDistance * 0.5}px)` }}
+      className="transition-transform duration-200"
+    >
+      <AnimatePresence>
+        {(pullDistance > 0 || refreshing) && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="flex justify-center py-4"
+          >
+            <RefreshCw className={`w-6 h-6 text-blue-400 ${(isPulling || refreshing) ? 'animate-spin' : ''}`} />
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {children}
+    </div>
+  );
+};
+
+// ============= SMART SEARCH WITH HISTORY =============
+const SmartSearchInput = ({ onSearch, placeholder }: { onSearch: (query: string) => void; placeholder: string }) => {
+  const [query, setQuery] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
+  const { searchHistory, addToSearchHistory } = useAppStore();
+
+  const handleSearch = (searchQuery: string) => {
+    onSearch(searchQuery);
+    if (searchQuery.trim()) {
+      addToSearchHistory(searchQuery);
+    }
+    setShowHistory(false);
+  };
+
+  return (
+    <div className="relative">
+      <div className="flex items-center space-x-2">
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => setShowHistory(true)}
+          onBlur={() => setTimeout(() => setShowHistory(false), 200)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              handleSearch(query);
+            }
+          }}
+          placeholder={placeholder}
+          className="bg-gray-900/50 border-gray-600 text-white"
+        />
+        <Button
+          onClick={() => handleSearch(query)}
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          <Search className="w-4 h-4" />
+        </Button>
+      </div>
+      
+      <AnimatePresence>
+        {showHistory && searchHistory.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-600 rounded-lg shadow-lg z-50"
+          >
+            {searchHistory.slice(0, 5).map((item, index) => (
+              <button
+                key={index}
+                onClick={() => {
+                  setQuery(item);
+                  handleSearch(item);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-gray-700 text-gray-300 first:rounded-t-lg last:rounded-b-lg transition-colors"
+              >
+                <History className="w-4 h-4 inline mr-2" />
+                {item}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
 // ============= ENHANCED STATUS BAR =============
 const StatusBar = () => {
-  const { isOnline, lastSync } = useAppStore();
+  const { isOnline, lastSync, refreshing } = useAppStore();
   
   return (
     <motion.div 
@@ -455,10 +614,11 @@ const StatusBar = () => {
       className="flex items-center justify-between px-4 py-2 bg-gray-900/50 backdrop-blur-lg border-b border-gray-800"
     >
       <div className="flex items-center space-x-2">
-        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
+        <div className={`w-2 h-2 rounded-full transition-colors ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
         <span className="text-xs text-gray-400">
-          {isOnline ? 'Online' : 'Offline'}
+          {refreshing ? 'Syncing...' : isOnline ? 'Online' : 'Offline'}
         </span>
+        {refreshing && <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />}
       </div>
       
       {lastSync && (
@@ -529,6 +689,18 @@ export default function AdvancedCRM() {
       if (userData) {
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
+      } else {
+        // Mock user for demo
+        const mockUser = {
+          id: 1,
+          firstName: 'John',
+          lastName: 'Doe',
+          email: 'john.doe@company.com',
+          role: 'Sales Representative',
+          company: { companyName: 'ABC Corporation' }
+        };
+        setUser(mockUser);
+        localStorage.setItem('user', JSON.stringify(mockUser));
       }
     };
 
@@ -544,7 +716,10 @@ export default function AdvancedCRM() {
 
   // Network status monitoring
   useEffect(() => {
-    const handleOnline = () => useAppStore.getState().setOnlineStatus(true);
+    const handleOnline = () => {
+      useAppStore.getState().setOnlineStatus(true);
+      if (user) fetchAllData();
+    };
     const handleOffline = () => useAppStore.getState().setOnlineStatus(false);
 
     window.addEventListener('online', handleOnline);
@@ -554,7 +729,7 @@ export default function AdvancedCRM() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [user, fetchAllData]);
 
   // Memoized filtered data
   const filteredTasks = useMemo(() => 
@@ -577,299 +752,307 @@ export default function AdvancedCRM() {
     <div className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
       <StatusBar />
       
-      <div className="flex-1 overflow-y-auto">
-        {/* Header Section */}
-        <div className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
-          <div className="relative px-6 py-8">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-4">
-                <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
-                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
-                    {user?.firstName?.[0]}{user?.lastName?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <motion.h1 
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-2xl font-bold text-white"
+      <PullToRefresh onRefresh={fetchAllData}>
+        <div className="flex-1 overflow-y-auto">
+          {/* Header Section */}
+          <div className="relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
+            <div className="relative px-6 py-8">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-4">
+                  <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
+                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
+                      {user?.firstName?.[0]}{user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <motion.h1 
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="text-2xl font-bold text-white"
+                    >
+                      {user?.firstName} {user?.lastName}
+                    </motion.h1>
+                    <p className="text-blue-200">{user?.company?.companyName}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center space-x-3">
+                  <Button
+                    onClick={handleAttendancePunch}
+                    disabled={isLoading}
+                    className={`px-6 py-2 rounded-xl font-medium transition-all duration-200 shadow-lg ${
+                      attendanceStatus === 'in' 
+                        ? 'bg-red-600 hover:bg-red-700 text-white' 
+                        : 'bg-green-600 hover:bg-green-700 text-white'
+                    }`}
                   >
-                    {user?.firstName} {user?.lastName}
-                  </motion.h1>
-                  <p className="text-blue-200">{user?.company?.companyName}</p>
+                    {isLoading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                    ) : attendanceStatus === 'in' ? (
+                      <LogOut className="w-4 h-4 mr-2" />
+                    ) : (
+                      <LogIn className="w-4 h-4 mr-2" />
+                    )}
+                    {attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/10"
+                  >
+                    <Bell className="w-5 h-5" />
+                  </Button>
                 </div>
               </div>
-              
-              <div className="flex items-center space-x-3">
-                <Button
-                  onClick={handleAttendancePunch}
-                  disabled={isLoading}
-                  className={`px-6 py-2 rounded-xl font-medium transition-all duration-200 shadow-lg ${
-                    attendanceStatus === 'in' 
-                      ? 'bg-red-600 hover:bg-red-700 text-white' 
-                      : 'bg-green-600 hover:bg-green-700 text-white'
-                  }`}
-                >
-                  {isLoading ? (
-                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                  ) : attendanceStatus === 'in' ? (
-                    <LogOut className="w-4 h-4 mr-2" />
-                  ) : (
-                    <LogIn className="w-4 h-4 mr-2" />
-                  )}
-                  {attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-white hover:bg-white/10"
-                >
-                  <Bell className="w-5 h-5" />
-                </Button>
-              </div>
-            </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                { 
-                  label: "Today's Tasks", 
-                  value: filteredTasks.length, 
-                  icon: CheckCircle, 
-                  color: "from-blue-500 to-blue-600" 
-                },
-                { 
-                  label: "Active PJPs", 
-                  value: activePJPs.length, 
-                  icon: Calendar, 
-                  color: "from-purple-500 to-purple-600" 
-                },
-                { 
-                  label: "Total Dealers", 
-                  value: dealers.length, 
-                  icon: Building2, 
-                  color: "from-orange-500 to-orange-600" 
-                },
-                { 
-                  label: "Total Reports", 
-                  value: recentReports.length, 
-                  icon: BarChart3, 
-                  color: "from-green-500 to-green-600" 
-                }
-              ].map((stat, index) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                >
-                  <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">{stat.label}</p>
-                          <p className="text-2xl font-bold text-white">{stat.value}</p>
+              {/* Quick Stats */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { 
+                    label: "Today's Tasks", 
+                    value: filteredTasks.length, 
+                    icon: CheckCircle, 
+                    color: "from-blue-500 to-blue-600" 
+                  },
+                  { 
+                    label: "Active PJPs", 
+                    value: activePJPs.length, 
+                    icon: Calendar, 
+                    color: "from-purple-500 to-purple-600" 
+                  },
+                  { 
+                    label: "Total Dealers", 
+                    value: dealers.length, 
+                    icon: Building2, 
+                    color: "from-orange-500 to-orange-600" 
+                  },
+                  { 
+                    label: "Total Reports", 
+                    value: recentReports.length, 
+                    icon: BarChart3, 
+                    color: "from-green-500 to-green-600" 
+                  }
+                ].map((stat, index) => (
+                  <motion.div
+                    key={stat.label}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.1 }}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                  >
+                    <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300 cursor-pointer">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-gray-400 text-sm">{stat.label}</p>
+                            <p className="text-2xl font-bold text-white">{stat.value}</p>
+                          </div>
+                          <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
+                            <stat.icon className="w-6 h-6 text-white" />
+                          </div>
                         </div>
-                        <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
-                          <stat.icon className="w-6 h-6 text-white" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                ))}
+              </div>
             </div>
           </div>
+
+          {/* Content Sections */}
+          <div className="px-6 pb-32 space-y-8">
+            {/* Enhanced Reports Section with All Types */}
+            <Section
+              title="Reports & Visits"
+              icon={FileText}
+              onAdd={() => {
+                setUIState('createType', 'dvr');
+                setUIState('showCreateModal', true);
+              }}
+            >
+              <div className="flex space-x-2 mb-4 overflow-x-auto pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUIState('createType', 'dvr');
+                    setUIState('showCreateModal', true);
+                  }}
+                  className="border-blue-600 text-blue-400 hover:bg-blue-400/10 whitespace-nowrap"
+                >
+                  <Receipt className="w-4 h-4 mr-2" />
+                  Daily Visit Report
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUIState('createType', 'tvr');
+                    setUIState('showCreateModal', true);
+                  }}
+                  className="border-purple-600 text-purple-400 hover:bg-purple-400/10 whitespace-nowrap"
+                >
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  Technical Visit Report
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUIState('createType', 'client-report');
+                    setUIState('showCreateModal', true);
+                  }}
+                  className="border-green-600 text-green-400 hover:bg-green-400/10 whitespace-nowrap"
+                >
+                  <Users className="w-4 h-4 mr-2" />
+                  Client Report
+                </Button>
+              </div>
+              
+              {recentReports.length > 0 ? (
+                <AnimatePresence>
+                  {recentReports.map((report, index) => (
+                    <ReportCard 
+                      key={report.id} 
+                      report={report} 
+                      index={index}
+                      onView={(report) => {
+                        setUIState('selectedItem', report);
+                        setUIState('showDetailModal', true);
+                      }}
+                    />
+                  ))}
+                </AnimatePresence>
+              ) : (
+                <EmptyState 
+                  icon={FileText} 
+                  title="No reports yet" 
+                  description="Create your first report to get started"
+                />
+              )}
+            </Section>
+
+            {/* Tasks Section */}
+            <Section
+              title="Today's Tasks"
+              icon={CheckCircle}
+              onAdd={() => {
+                setUIState('createType', 'task');
+                setUIState('showCreateModal', true);
+              }}
+            >
+              {isLoading ? (
+                <LoadingSkeleton rows={3} />
+              ) : filteredTasks.length > 0 ? (
+                <AnimatePresence>
+                  {filteredTasks.map((task, index) => (
+                    <TaskCard 
+                      key={task.id} 
+                      task={task} 
+                      index={index}
+                      onEdit={(task) => {
+                        setUIState('selectedItem', task);
+                        setUIState('createType', 'task');
+                        setUIState('showCreateModal', true);
+                      }}
+                      onDelete={(taskId) => deleteRecord('task', taskId)}
+                    />
+                  ))}
+                </AnimatePresence>
+              ) : (
+                <EmptyState 
+                  icon={CheckCircle} 
+                  title="No tasks for today" 
+                  description="Add your first task to stay organized"
+                />
+              )}
+            </Section>
+
+            {/* Journey Plans Section */}
+            <Section
+              title="Journey Plans"
+              icon={Navigation}
+              onAdd={() => {
+                setUIState('createType', 'pjp');
+                setUIState('showCreateModal', true);
+              }}
+            >
+              {activePJPs.length > 0 ? (
+                <AnimatePresence>
+                  {activePJPs.map((pjp, index) => (
+                    <PJPCard 
+                      key={pjp.id} 
+                      pjp={pjp} 
+                      index={index}
+                      onEdit={(pjp) => {
+                        setUIState('selectedItem', pjp);
+                        setUIState('createType', 'pjp');
+                        setUIState('showCreateModal', true);
+                      }}
+                      onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
+                      onView={(pjp) => {
+                        setUIState('selectedItem', pjp);
+                        setUIState('showDetailModal', true);
+                      }}
+                    />
+                  ))}
+                </AnimatePresence>
+              ) : (
+                <EmptyState 
+                  icon={Navigation} 
+                  title="No active journey plans" 
+                  description="Plan your next field visit"
+                />
+              )}
+            </Section>
+
+            {/* Dealers Section */}
+            <Section
+              title="Dealers & Clients"
+              icon={Building2}
+              onAdd={() => {
+                setUIState('createType', 'dealer');
+                setUIState('showCreateModal', true);
+              }}
+            >
+              {dealers.length > 0 ? (
+                <AnimatePresence>
+                  {dealers.slice(0, 5).map((dealer, index) => (
+                    <DealerCard 
+                      key={dealer.id} 
+                      dealer={dealer} 
+                      index={index}
+                      onEdit={(dealer) => {
+                        setUIState('selectedItem', dealer);
+                        setUIState('createType', 'dealer');
+                        setUIState('showCreateModal', true);
+                      }}
+                      onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
+                      onView={(dealer) => {
+                        setUIState('selectedItem', dealer);
+                        setUIState('showDetailModal', true);
+                      }}
+                      onScore={(dealer) => {
+                        setUIState('selectedItem', dealer);
+                        setUIState('createType', 'dealer-score');
+                        setUIState('showCreateModal', true);
+                      }}
+                    />
+                  ))}
+                </AnimatePresence>
+              ) : (
+                <EmptyState 
+                  icon={Building2} 
+                  title="No dealers added yet" 
+                  description="Add your first dealer to start managing relationships"
+                />
+              )}
+            </Section>
+          </div>
         </div>
-
-        {/* Content Sections */}
-        <div className="px-6 pb-32 space-y-8">
-          {/* Enhanced Reports Section with All Types */}
-          <Section
-            title="Reports & Visits"
-            icon={FileText}
-            onAdd={() => {
-              setUIState('createType', 'dvr');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            <div className="flex space-x-2 mb-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'dvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-blue-600 text-blue-400 hover:bg-blue-400/10"
-              >
-                <Receipt className="w-4 h-4 mr-2" />
-                Daily Visit Report
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'tvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-purple-600 text-purple-400 hover:bg-purple-400/10"
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Technical Visit Report
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'client-report');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-green-600 text-green-400 hover:bg-green-400/10"
-              >
-                <Users className="w-4 h-4 mr-2" />
-                Client Report
-              </Button>
-            </div>
-            
-            {recentReports.length > 0 ? (
-              <AnimatePresence>
-                {recentReports.map((report, index) => (
-                  <ReportCard 
-                    key={report.id} 
-                    report={report} 
-                    index={index}
-                    onView={(report) => {
-                      setUIState('selectedItem', report);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No reports yet</p>
-              </div>
-            )}
-          </Section>
-
-          {/* Tasks Section */}
-          <Section
-            title="Today's Tasks"
-            icon={CheckCircle}
-            onAdd={() => {
-              setUIState('createType', 'task');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : filteredTasks.length > 0 ? (
-              <AnimatePresence>
-                {filteredTasks.map((task, index) => (
-                  <TaskCard 
-                    key={task.id} 
-                    task={task} 
-                    index={index}
-                    onEdit={(task) => {
-                      setUIState('selectedItem', task);
-                      setUIState('createType', 'task');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(taskId) => deleteRecord('task', taskId)}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No tasks for today</p>
-              </div>
-            )}
-          </Section>
-
-          {/* Journey Plans Section */}
-          <Section
-            title="Journey Plans"
-            icon={Navigation}
-            onAdd={() => {
-              setUIState('createType', 'pjp');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {activePJPs.length > 0 ? (
-              <AnimatePresence>
-                {activePJPs.map((pjp, index) => (
-                  <PJPCard 
-                    key={pjp.id} 
-                    pjp={pjp} 
-                    index={index}
-                    onEdit={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('createType', 'pjp');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
-                    onView={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No active journey plans</p>
-              </div>
-            )}
-          </Section>
-
-          {/* Dealers Section */}
-          <Section
-            title="Dealers & Clients"
-            icon={Building2}
-            onAdd={() => {
-              setUIState('createType', 'dealer');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {dealers.length > 0 ? (
-              <AnimatePresence>
-                {dealers.slice(0, 5).map((dealer, index) => (
-                  <DealerCard 
-                    key={dealer.id} 
-                    dealer={dealer} 
-                    index={index}
-                    onEdit={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
-                    onView={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('showDetailModal', true);
-                    }}
-                    onScore={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer-score');
-                      setUIState('showCreateModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <Building2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No dealers added yet</p>
-              </div>
-            )}
-          </Section>
-        </div>
-      </div>
+      </PullToRefresh>
     </div>
   );
 
@@ -936,6 +1119,27 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
+  // ============= EMPTY STATE COMPONENT =============
+  const EmptyState = ({ 
+    icon: Icon, 
+    title, 
+    description 
+  }: { 
+    icon: any; 
+    title: string; 
+    description: string; 
+  }) => (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="text-center py-8 text-gray-400"
+    >
+      <Icon className="w-12 h-12 mx-auto mb-4 opacity-50" />
+      <p className="font-medium mb-1">{title}</p>
+      <p className="text-sm">{description}</p>
+    </motion.div>
+  );
+
   // ============= SECTION COMPONENT =============
   const Section = ({ 
     title, 
@@ -988,12 +1192,13 @@ export default function AdvancedCRM() {
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.1 }}
       whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
     >
       <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex-1">
-              <h3 className="font-semibold text-white">{task.visitType || task.title}</h3>
+              <h3 className="font-semibold text-white">{task.visitType || task.title || task.siteName}</h3>
               <p className="text-sm text-gray-400 mt-1">{task.description}</p>
               <div className="flex items-center space-x-2 mt-3">
                 <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
@@ -1044,13 +1249,14 @@ export default function AdvancedCRM() {
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.1 }}
       whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
     >
       <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
         <CardContent className="p-4">
           <div className="flex items-center justify-between">
             <div className="flex-1" onClick={() => onView(pjp)} style={{ cursor: 'pointer' }}>
               <h3 className="font-semibold text-white">{pjp.objective}</h3>
-              <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
+              <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.areaToBeVisited}</p>
               <div className="flex items-center space-x-2 mt-3">
                 <Badge 
                   variant="outline" 
@@ -1117,6 +1323,7 @@ export default function AdvancedCRM() {
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.1 }}
       whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
     >
       <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
         <CardContent className="p-4">
@@ -1175,6 +1382,7 @@ export default function AdvancedCRM() {
       animate={{ opacity: 1, x: 0 }}
       transition={{ delay: index * 0.1 }}
       whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
     >
       <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
         <CardContent className="p-4">
@@ -1203,7 +1411,7 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  // Other pages (AI, Journey) remain the same
+  // Other pages remain the same
   const AIPage = () => (
     <div className="h-full">
       <ChatInterface
@@ -1318,7 +1526,88 @@ const CreateModal = ({
   const [formData, setFormData] = useState<any>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
   const { user, dealers } = useAppStore();
+
+  const validateField = (name: string, value: any) => {
+    const newErrors = { ...errors };
+    
+    switch (name) {
+      case 'phoneNo':
+      case 'contactPersonPhoneNo':
+        if (!/^\d{10}$/.test(value)) {
+          newErrors[name] = 'Phone number must be 10 digits';
+        } else {
+          delete newErrors[name];
+        }
+        break;
+      case 'emailId':
+        if (value && !/\S+@\S+\.\S+/.test(value)) {
+          newErrors[name] = 'Invalid email format';
+        } else {
+          delete newErrors[name];
+        }
+        break;
+      default:
+        delete newErrors[name];
+    }
+    
+    setErrors(newErrors);
+  };
+
+  const ValidatedInput = ({ 
+    name, 
+    label, 
+    type = 'text', 
+    required = false, 
+    placeholder,
+    value,
+    onChange,
+    ...props 
+  }: any) => {
+    const hasError = errors[name];
+    const isTouched = touched[name];
+    
+    return (
+      <div>
+        <Label className="text-gray-300">
+          {label} {required && <span className="text-red-400">*</span>}
+        </Label>
+        <Input
+          type={type}
+          value={value || ''}
+          placeholder={placeholder}
+          className={`bg-gray-900/50 border-gray-600 text-white mt-1 transition-all duration-200 ${
+            hasError && isTouched ? 'border-red-500 focus:border-red-500' : 'focus:border-blue-500'
+          }`}
+          onBlur={() => {
+            setTouched({ ...touched, [name]: true });
+            validateField(name, value);
+          }}
+          onChange={(e) => {
+            onChange(e.target.value);
+            if (touched[name]) {
+              validateField(name, e.target.value);
+            }
+          }}
+          {...props}
+        />
+        <AnimatePresence>
+          {hasError && isTouched && (
+            <motion.p
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="text-red-400 text-sm mt-1"
+            >
+              {hasError}
+            </motion.p>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1358,7 +1647,9 @@ const CreateModal = ({
           collectionAmount: formData.collectionAmount || '0',
           marketFeedback: formData.marketFeedback || '',
           competitorActivity: formData.competitorActivity || '',
-          nextActionPlan: formData.nextActionPlan || ''
+          nextActionPlan: formData.nextActionPlan || '',
+          latitude: formData.latitude?.toString(),
+          longitude: formData.longitude?.toString()
         };
       }
 
@@ -1414,7 +1705,7 @@ const CreateModal = ({
         };
       }
 
-      // Other forms remain the same
+      // Task
       if (type === 'task') {
         transformedData = {
           userId: user?.id || 1,
@@ -1427,6 +1718,7 @@ const CreateModal = ({
         };
       }
 
+      // PJP
       if (type === 'pjp') {
         transformedData = {
           userId: user?.id || 1,
@@ -1440,6 +1732,7 @@ const CreateModal = ({
         };
       }
 
+      // Dealer
       if (type === 'dealer') {
         transformedData = {
           userId: user?.id || 1,
@@ -1517,19 +1810,17 @@ const CreateModal = ({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           
-          {/* TECHNICAL VISIT REPORT (TVR) FORM - Exact Schema Alignment */}
+          {/* TECHNICAL VISIT REPORT (TVR) FORM */}
           {type === 'tvr' && (
             <>
-              <div>
-                <Label className="text-gray-300">Report Date *</Label>
-                <Input 
-                  type="date"
-                  value={formData.reportDate || ''}
-                  onChange={(e) => setFormData({...formData, reportDate: e.target.value})}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="reportDate"
+                label="Report Date"
+                type="date"
+                required
+                value={formData.reportDate}
+                onChange={(value: string) => setFormData({...formData, reportDate: value})}
+              />
               <div>
                 <Label className="text-gray-300">Visit Type *</Label>
                 <Select 
@@ -1549,36 +1840,30 @@ const CreateModal = ({
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-gray-300">Site Name / Concerned Person *</Label>
-                <Input 
-                  value={formData.siteNameConcernedPerson || ''}
-                  onChange={(e) => setFormData({...formData, siteNameConcernedPerson: e.target.value})}
-                  placeholder="Site name or person to meet"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Phone Number *</Label>
-                <Input 
-                  value={formData.phoneNo || ''}
-                  onChange={(e) => setFormData({...formData, phoneNo: e.target.value})}
-                  placeholder="Contact phone number"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Email ID</Label>
-                <Input 
-                  type="email"
-                  value={formData.emailId || ''}
-                  onChange={(e) => setFormData({...formData, emailId: e.target.value})}
-                  placeholder="Contact email address"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
+              <ValidatedInput
+                name="siteNameConcernedPerson"
+                label="Site Name / Concerned Person"
+                required
+                placeholder="Site name or person to meet"
+                value={formData.siteNameConcernedPerson}
+                onChange={(value: string) => setFormData({...formData, siteNameConcernedPerson: value})}
+              />
+              <ValidatedInput
+                name="phoneNo"
+                label="Phone Number"
+                required
+                placeholder="Contact phone number"
+                value={formData.phoneNo}
+                onChange={(value: string) => setFormData({...formData, phoneNo: value})}
+              />
+              <ValidatedInput
+                name="emailId"
+                label="Email ID"
+                type="email"
+                placeholder="Contact email address"
+                value={formData.emailId}
+                onChange={(value: string) => setFormData({...formData, emailId: value})}
+              />
               <div>
                 <Label className="text-gray-300">Client's Remarks *</Label>
                 <Textarea 
@@ -1602,25 +1887,21 @@ const CreateModal = ({
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Check In Time *</Label>
-                  <Input 
-                    type="datetime-local"
-                    value={formData.checkInTime || ''}
-                    onChange={(e) => setFormData({...formData, checkInTime: e.target.value})}
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Check Out Time</Label>
-                  <Input 
-                    type="datetime-local"
-                    value={formData.checkOutTime || ''}
-                    onChange={(e) => setFormData({...formData, checkOutTime: e.target.value})}
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  />
-                </div>
+                <ValidatedInput
+                  name="checkInTime"
+                  label="Check In Time"
+                  type="datetime-local"
+                  required
+                  value={formData.checkInTime}
+                  onChange={(value: string) => setFormData({...formData, checkInTime: value})}
+                />
+                <ValidatedInput
+                  name="checkOutTime"
+                  label="Check Out Time"
+                  type="datetime-local"
+                  value={formData.checkOutTime}
+                  onChange={(value: string) => setFormData({...formData, checkOutTime: value})}
+                />
               </div>
               <div>
                 <Label className="text-gray-300">Location</Label>
@@ -1643,16 +1924,14 @@ const CreateModal = ({
           {/* DAILY VISIT REPORT (DVR) FORM */}
           {type === 'dvr' && (
             <>
-              <div>
-                <Label className="text-gray-300">Report Date *</Label>
-                <Input 
-                  type="date"
-                  value={formData.reportDate || ''}
-                  onChange={(e) => setFormData({...formData, reportDate: e.target.value})}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="reportDate"
+                label="Report Date"
+                type="date"
+                required
+                value={formData.reportDate}
+                onChange={(value: string) => setFormData({...formData, reportDate: value})}
+              />
               <div>
                 <Label className="text-gray-300">Location *</Label>
                 <LocationPicker 
@@ -1667,16 +1946,14 @@ const CreateModal = ({
                   }}
                 />
               </div>
-              <div>
-                <Label className="text-gray-300">Dealer Name *</Label>
-                <Input 
-                  value={formData.dealerName || ''}
-                  onChange={(e) => setFormData({...formData, dealerName: e.target.value})}
-                  placeholder="Dealer or client name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="dealerName"
+                label="Dealer Name"
+                required
+                placeholder="Dealer or client name"
+                value={formData.dealerName}
+                onChange={(value: string) => setFormData({...formData, dealerName: value})}
+              />
               <div>
                 <Label className="text-gray-300">Visit Purpose *</Label>
                 <Select 
@@ -1708,26 +1985,22 @@ const CreateModal = ({
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Order Value (₹)</Label>
-                  <Input 
-                    type="number"
-                    value={formData.orderValue || ''}
-                    onChange={(e) => setFormData({...formData, orderValue: e.target.value})}
-                    placeholder="0"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Collection Amount (₹)</Label>
-                  <Input 
-                    type="number"
-                    value={formData.collectionAmount || ''}
-                    onChange={(e) => setFormData({...formData, collectionAmount: e.target.value})}
-                    placeholder="0"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  />
-                </div>
+                <ValidatedInput
+                  name="orderValue"
+                  label="Order Value (₹)"
+                  type="number"
+                  placeholder="0"
+                  value={formData.orderValue}
+                  onChange={(value: string) => setFormData({...formData, orderValue: value})}
+                />
+                <ValidatedInput
+                  name="collectionAmount"
+                  label="Collection Amount (₹)"
+                  type="number"
+                  placeholder="0"
+                  value={formData.collectionAmount}
+                  onChange={(value: string) => setFormData({...formData, collectionAmount: value})}
+                />
               </div>
               <div>
                 <Label className="text-gray-300">Market Feedback</Label>
@@ -1752,7 +2025,7 @@ const CreateModal = ({
             </>
           )}
 
-          {/* CLIENT REPORT FORM - Exact Schema Alignment */}
+          {/* CLIENT REPORT FORM */}
           {type === 'client-report' && (
             <>
               <div>
@@ -1772,16 +2045,14 @@ const CreateModal = ({
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-gray-300">Dealer/Sub Dealer Name *</Label>
-                <Input 
-                  value={formData.dealerSubDealerName || ''}
-                  onChange={(e) => setFormData({...formData, dealerSubDealerName: e.target.value})}
-                  placeholder="Business name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="dealerSubDealerName"
+                label="Dealer/Sub Dealer Name"
+                required
+                placeholder="Business name"
+                value={formData.dealerSubDealerName}
+                onChange={(value: string) => setFormData({...formData, dealerSubDealerName: value})}
+              />
               <div>
                 <Label className="text-gray-300">Location *</Label>
                 <LocationPicker 
@@ -1805,30 +2076,26 @@ const CreateModal = ({
                 </Select>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Total Potential (₹) *</Label>
-                  <Input 
-                    type="number"
-                    step="0.01"
-                    value={formData.dealerTotalPotential || ''}
-                    onChange={(e) => setFormData({...formData, dealerTotalPotential: e.target.value})}
-                    placeholder="0.00"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Best Potential (₹) *</Label>
-                  <Input 
-                    type="number"
-                    step="0.01"
-                    value={formData.dealerBestPotential || ''}
-                    onChange={(e) => setFormData({...formData, dealerBestPotential: e.target.value})}
-                    placeholder="0.00"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
+                <ValidatedInput
+                  name="dealerTotalPotential"
+                  label="Total Potential (₹)"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={formData.dealerTotalPotential}
+                  onChange={(value: string) => setFormData({...formData, dealerTotalPotential: value})}
+                />
+                <ValidatedInput
+                  name="dealerBestPotential"
+                  label="Best Potential (₹)"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={formData.dealerBestPotential}
+                  onChange={(value: string) => setFormData({...formData, dealerBestPotential: value})}
+                />
               </div>
               <div>
                 <Label className="text-gray-300">Brands Selling *</Label>
@@ -1846,52 +2113,44 @@ const CreateModal = ({
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Contact Person *</Label>
-                  <Input 
-                    value={formData.contactPerson || ''}
-                    onChange={(e) => setFormData({...formData, contactPerson: e.target.value})}
-                    placeholder="Contact name"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Phone Number *</Label>
-                  <Input 
-                    value={formData.contactPersonPhoneNo || ''}
-                    onChange={(e) => setFormData({...formData, contactPersonPhoneNo: e.target.value})}
-                    placeholder="Phone number"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
+                <ValidatedInput
+                  name="contactPerson"
+                  label="Contact Person"
+                  required
+                  placeholder="Contact name"
+                  value={formData.contactPerson}
+                  onChange={(value: string) => setFormData({...formData, contactPerson: value})}
+                />
+                <ValidatedInput
+                  name="contactPersonPhoneNo"
+                  label="Phone Number"
+                  required
+                  placeholder="Phone number"
+                  value={formData.contactPersonPhoneNo}
+                  onChange={(value: string) => setFormData({...formData, contactPersonPhoneNo: value})}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Today Order MT *</Label>
-                  <Input 
-                    type="number"
-                    step="0.01"
-                    value={formData.todayOrderMT || ''}
-                    onChange={(e) => setFormData({...formData, todayOrderMT: e.target.value})}
-                    placeholder="0.00"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Today Collection (₹) *</Label>
-                  <Input 
-                    type="number"
-                    step="0.01"
-                    value={formData.todayCollection || ''}
-                    onChange={(e) => setFormData({...formData, todayCollection: e.target.value})}
-                    placeholder="0.00"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
+                <ValidatedInput
+                  name="todayOrderMT"
+                  label="Today Order MT"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={formData.todayOrderMT}
+                  onChange={(value: string) => setFormData({...formData, todayOrderMT: value})}
+                />
+                <ValidatedInput
+                  name="todayCollection"
+                  label="Today Collection (₹)"
+                  type="number"
+                  step="0.01"
+                  required
+                  placeholder="0.00"
+                  value={formData.todayCollection}
+                  onChange={(value: string) => setFormData({...formData, todayCollection: value})}
+                />
               </div>
               <div>
                 <Label className="text-gray-300">Feedbacks *</Label>
@@ -1932,16 +2191,14 @@ const CreateModal = ({
           {/* COMPETITION REPORT FORM */}
           {type === 'competition-report' && (
             <>
-              <div>
-                <Label className="text-gray-300">Competitor Name *</Label>
-                <Input 
-                  value={formData.competitorName || ''}
-                  onChange={(e) => setFormData({...formData, competitorName: e.target.value})}
-                  placeholder="Competitor business name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="competitorName"
+                label="Competitor Name"
+                required
+                placeholder="Competitor business name"
+                value={formData.competitorName}
+                onChange={(value: string) => setFormData({...formData, competitorName: value})}
+              />
               <div>
                 <Label className="text-gray-300">Location *</Label>
                 <LocationPicker 
@@ -1981,15 +2238,13 @@ const CreateModal = ({
                   rows={2}
                 />
               </div>
-              <div>
-                <Label className="text-gray-300">Market Share Estimate</Label>
-                <Input 
-                  value={formData.marketShare || ''}
-                  onChange={(e) => setFormData({...formData, marketShare: e.target.value})}
-                  placeholder="Estimated market share percentage"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
+              <ValidatedInput
+                name="marketShare"
+                label="Market Share Estimate"
+                placeholder="Estimated market share percentage"
+                value={formData.marketShare}
+                onChange={(value: string) => setFormData({...formData, marketShare: value})}
+              />
               <div>
                 <Label className="text-gray-300">Strengths</Label>
                 <Textarea 
@@ -2033,7 +2288,7 @@ const CreateModal = ({
             </>
           )}
 
-          {/* DEALER SCORING FORM - Exact Schema Alignment */}
+          {/* DEALER SCORING FORM */}
           {type === 'dealer-score' && (
             <>
               <div className="mb-4">
@@ -2109,19 +2364,17 @@ const CreateModal = ({
             </>
           )}
 
-          {/* OTHER FORMS (Task, PJP, Dealer) remain the same as before */}
+          {/* TASK FORM */}
           {type === 'task' && (
             <>
-              <div>
-                <Label className="text-gray-300">Task Title</Label>
-                <Input 
-                  value={formData.title || ''}
-                  onChange={(e) => setFormData({...formData, title: e.target.value})}
-                  placeholder="Enter task title"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="title"
+                label="Task Title"
+                required
+                placeholder="Enter task title"
+                value={formData.title}
+                onChange={(value: string) => setFormData({...formData, title: value})}
+              />
               <div>
                 <Label className="text-gray-300">Description</Label>
                 <Textarea 
@@ -2131,15 +2384,13 @@ const CreateModal = ({
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
-              <div>
-                <Label className="text-gray-300">Task Date</Label>
-                <Input 
-                  type="date"
-                  value={formData.taskDate || ''}
-                  onChange={(e) => setFormData({...formData, taskDate: e.target.value})}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
+              <ValidatedInput
+                name="taskDate"
+                label="Task Date"
+                type="date"
+                value={formData.taskDate}
+                onChange={(value: string) => setFormData({...formData, taskDate: value})}
+              />
               <div>
                 <Label className="text-gray-300">Site/Location</Label>
                 <LocationPicker 
@@ -2150,18 +2401,17 @@ const CreateModal = ({
             </>
           )}
 
+          {/* PJP FORM */}
           {type === 'pjp' && (
             <>
-              <div>
-                <Label className="text-gray-300">Objective</Label>
-                <Input 
-                  value={formData.objective || ''}
-                  onChange={(e) => setFormData({...formData, objective: e.target.value})}
-                  placeholder="Journey objective"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="objective"
+                label="Objective"
+                required
+                placeholder="Journey objective"
+                value={formData.objective}
+                onChange={(value: string) => setFormData({...formData, objective: value})}
+              />
               <div>
                 <Label className="text-gray-300">Location</Label>
                 <LocationPicker 
@@ -2169,16 +2419,14 @@ const CreateModal = ({
                   onLocationSelect={(location) => setFormData({...formData, location})}
                 />
               </div>
-              <div>
-                <Label className="text-gray-300">Planned Date</Label>
-                <Input 
-                  type="date"
-                  value={formData.plannedDate || ''}
-                  onChange={(e) => setFormData({...formData, plannedDate: e.target.value})}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="plannedDate"
+                label="Planned Date"
+                type="date"
+                required
+                value={formData.plannedDate}
+                onChange={(value: string) => setFormData({...formData, plannedDate: value})}
+              />
               <div>
                 <Label className="text-gray-300">Expected Outcome</Label>
                 <Textarea 
@@ -2191,38 +2439,33 @@ const CreateModal = ({
             </>
           )}
 
+          {/* DEALER FORM */}
           {type === 'dealer' && (
             <>
-              <div>
-                <Label className="text-gray-300">Dealer Name</Label>
-                <Input 
-                  value={formData.name || ''}
-                  onChange={(e) => setFormData({...formData, name: e.target.value})}
-                  placeholder="Dealer name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Region</Label>
-                <Input 
-                  value={formData.region || ''}
-                  onChange={(e) => setFormData({...formData, region: e.target.value})}
-                  placeholder="Region"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Area</Label>
-                <Input 
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({...formData, area: e.target.value})}
-                  placeholder="Area"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
+              <ValidatedInput
+                name="name"
+                label="Dealer Name"
+                required
+                placeholder="Dealer name"
+                value={formData.name}
+                onChange={(value: string) => setFormData({...formData, name: value})}
+              />
+              <ValidatedInput
+                name="region"
+                label="Region"
+                required
+                placeholder="Region"
+                value={formData.region}
+                onChange={(value: string) => setFormData({...formData, region: value})}
+              />
+              <ValidatedInput
+                name="area"
+                label="Area"
+                required
+                placeholder="Area"
+                value={formData.area}
+                onChange={(value: string) => setFormData({...formData, area: value})}
+              />
               <div>
                 <Label className="text-gray-300">Address/Location</Label>
                 <LocationPicker 
@@ -2230,23 +2473,21 @@ const CreateModal = ({
                   onLocationSelect={(location) => setFormData({...formData, location})}
                 />
               </div>
-              <div>
-                <Label className="text-gray-300">Contact</Label>
-                <Input 
-                  value={formData.contact || ''}
-                  onChange={(e) => setFormData({...formData, contact: e.target.value})}
-                  placeholder="Phone number"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
+              <ValidatedInput
+                name="contact"
+                label="Contact"
+                placeholder="Phone number"
+                value={formData.contact}
+                onChange={(value: string) => setFormData({...formData, contact: value})}
+              />
             </>
           )}
 
           <div className="flex space-x-3 pt-4">
             <Button 
               type="submit" 
-              disabled={isSubmitting} 
-              className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+              disabled={isSubmitting || Object.keys(errors).length > 0} 
+              className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white disabled:opacity-50"
             >
               {isSubmitting ? (
                 <RefreshCw className="w-4 h-4 animate-spin mr-2" />
