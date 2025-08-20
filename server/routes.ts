@@ -154,7 +154,7 @@ async function validateLocationInOffice(
       deviceId: String(userId),   // ✅ Radar requires deviceId with server key
       latitude,
       longitude,
-      accuracy
+      accuracy: Number(accuracy)
     })
   });
 
