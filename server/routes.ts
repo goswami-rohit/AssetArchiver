@@ -34,6 +34,7 @@ import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
 import EnhancedRAGService from 'server/bot/aiService';
+import axios from "axios";
 import { telegramBot } from './bot/telegram';
 
 const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY;
@@ -61,6 +62,23 @@ async function geocodeAddress(address: string) {
     confidence: address_result.confidence,
     formattedAddress: address_result.formattedAddress
   };
+}
+export async function reverseGeocode(latitude: number, longitude: number) {
+  try {
+    const resp = await axios.get("https://api.radar.io/v1/geocode/reverse", {
+      params: { coordinates: `${latitude},${longitude}` },
+      headers: { Authorization: RADAR_PUBLISHABLE_KEY }
+    });
+
+    if (resp.data?.addresses?.length > 0) {
+      const addr = resp.data.addresses[0];
+      return addr.formattedAddress || addr.addressLabel || null;
+    }
+    return null;
+  } catch (err) {
+    console.error("Reverse geocode failed:", err.message);
+    return null;
+  }
 }
 
 // Internal function for creating office geofence
@@ -1053,6 +1071,72 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  app.delete('/office/:companyId', async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+
+      const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': RADAR_SECRET_KEY }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete geofence');
+      }
+
+      res.json({ success: true, message: 'Office geofence deleted successfully' });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+
+  app.post('/geocode-address', async (req, res) => {
+    try {
+      const { address } = req.body;
+      if (!address) {
+        return res.status(400).json({ success: false, error: 'Address is required' });
+      }
+      const result = await geocodeAddress(address);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  app.post('/reverse-geocode', async (req, res) => {
+    try {
+      const { latitude, longitude } = req.body;
+      if (!latitude || !longitude) {
+        return res.status(400).json({ success: false, error: 'Latitude and longitude are required' });
+      }
+
+      const response = await fetch(`https://api.radar.io/v1/geocode/reverse?coordinates=${latitude},${longitude}`, {
+        headers: { 'Authorization': RADAR_PUBLISHABLE_KEY }
+      });
+
+      if (!response.ok) {
+        throw new Error('Reverse geocoding failed');
+      }
+
+      const data = await response.json();
+      res.json({ success: true, data });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+
+
   // ============================================
   // SPECIAL ATTENDANCE ROUTES (with schema validation)
   // ============================================
@@ -1084,36 +1168,32 @@ export function setupWebRoutes(app: Express) {
 
   app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
     try {
-      const { userId, latitude, longitude, locationName, accuracy, selfieUrl, companyId } = req.body;
+      const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
 
-      if (!userId || !latitude || !longitude || !companyId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId, latitude, longitude, and companyId are required'
-        });
+      if (!userId || !latitude || !longitude) {
+        return res.status(400).json({ success: false, error: "userId, latitude, and longitude are required" });
       }
 
-      // Validate location against Radar geofence
+      // geofence validation
       const geoResult = await validateLocationInOffice(
-        parseInt(companyId),
         parseFloat(latitude),
-        parseFloat(longitude)
+        parseFloat(longitude),
+        companyId
       );
 
-      if (!geoResult.isInside) {
-        return res.status(400).json({
-          success: false,
-          error: `You are not within office premises. Distance: ${geoResult.distance}m / Radius: ${geoResult.radius}m`
-        });
+      if (!geoResult.isValid) {
+        return res.status(400).json({ success: false, error: "Location not within valid office geofence" });
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      // reverse geocode
+      const formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
 
+      const now = new Date();
       const attendanceData = {
         userId: parseInt(userId),
-        attendanceDate: today,
-        locationName: locationName || geoResult.officeName,
-        inTimeTimestamp: new Date(),
+        attendanceDate: now, // DB will cast to DATE
+        locationName: geoResult.officeName || formattedAddress || "Mobile App",
+        inTimeTimestamp: now,
         inTimeImageCaptured: !!selfieUrl,
         outTimeImageCaptured: false,
         inTimeImageUrl: selfieUrl || null,
@@ -1122,45 +1202,30 @@ export function setupWebRoutes(app: Express) {
         inTimeAccuracy: accuracy ? parseFloat(accuracy) : null
       };
 
-      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-      if (!parseResult.success) {
-        console.error("Schema validation failed:", parseResult.error.flatten());
-        return res.status(400).json({
-          success: false,
-          error: 'Attendance data validation failed',
-          details: parseResult.error.errors
-        });
+      const validated = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+      if (!validated.success) {
+        return res.status(400).json({ success: false, error: validated.error.errors });
       }
 
-      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+      const [result] = await db.insert(salesmanAttendance).values(validated.data).returning();
 
-      res.json({
-        success: true,
-        data: result,
-        message: `Punched in at ${geoResult.officeName}`,
-        geoInfo: geoResult
-      });
-
-    } catch (error: any) {
-      console.error('Punch in error:', error.message, error.stack);
-      res.status(500).json({ success: false, error: error.message });
+      res.json({ success: true, data: result, message: "Punched in successfully" });
+    } catch (error) {
+      console.error("Punch in error:", error);
+      res.status(500).json({ success: false, error: "Punch in failed" });
     }
   });
 
   app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
-      const { userId, latitude, longitude, selfieUrl, companyId } = req.body;
+      const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
 
-      if (!userId || !companyId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId and companyId are required'
-        });
+      if (!userId) {
+        return res.status(400).json({ success: false, error: "userId is required" });
       }
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = new Date().toISOString().split("T")[0];
 
-      // Find today's active punch-in record
       const [unpunchedRecord] = await db.select().from(salesmanAttendance)
         .where(and(
           eq(salesmanAttendance.userId, parseInt(userId)),
@@ -1171,27 +1236,14 @@ export function setupWebRoutes(app: Express) {
         .limit(1);
 
       if (!unpunchedRecord) {
-        return res.status(404).json({
-          success: false,
-          error: 'No active punch-in record found'
-        });
+        return res.status(404).json({ success: false, error: "No active punch-in record found" });
       }
 
-      // Validate location against Radar geofence before allowing punch-out
-      const geoResult = await validateLocationInOffice(
-        parseInt(companyId),
-        parseFloat(latitude),
-        parseFloat(longitude)
-      );
+      // reverse geocode for exit location
+      const formattedAddress = latitude && longitude
+        ? await reverseGeocode(parseFloat(latitude), parseFloat(longitude))
+        : null;
 
-      if (!geoResult.isInside) {
-        return res.status(400).json({
-          success: false,
-          error: `You are not within office premises. Distance: ${geoResult.distance}m / Radius: ${geoResult.radius}m`
-        });
-      }
-
-      // Prepare update
       const updateData = {
         outTimeTimestamp: new Date(),
         outTimeImageCaptured: !!selfieUrl,
@@ -1199,6 +1251,7 @@ export function setupWebRoutes(app: Express) {
         outTimeLatitude: latitude ? parseFloat(latitude) : null,
         outTimeLongitude: longitude ? parseFloat(longitude) : null,
         outTimeAccuracy: accuracy ? parseFloat(accuracy) : null,
+        locationName: formattedAddress || unpunchedRecord.locationName || "Mobile App",
         updatedAt: new Date()
       };
 
@@ -1207,18 +1260,13 @@ export function setupWebRoutes(app: Express) {
         .where(eq(salesmanAttendance.id, unpunchedRecord.id))
         .returning();
 
-      res.json({
-        success: true,
-        data: result,
-        message: `Punched out successfully at ${geoResult.officeName}`,
-        geoInfo: geoResult
-      });
-
-    } catch (error: any) {
-      console.error('Punch out error:', error.message, error.stack);
-      res.status(500).json({ success: false, error: error.message });
+      res.json({ success: true, data: result, message: "Punched out successfully" });
+    } catch (error) {
+      console.error("Punch out error:", error);
+      res.status(500).json({ success: false, error: "Punch out failed" });
     }
   });
+
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)
