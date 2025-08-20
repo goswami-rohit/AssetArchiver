@@ -966,11 +966,12 @@ export function setupWebRoutes(app: Express) {
             eq(salesmanAttendance.attendanceDate, today)
           )).limit(1),
 
+        // ✅ FIXED LINE - using proper date filtering instead of like()
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            like(dailyVisitReports.reportDate, `${currentMonth}%`)
+            sql`date_trunc('month', ${dailyVisitReports.reportDate}) = ${currentMonth + '-01'}::date`
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
