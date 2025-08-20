@@ -139,19 +139,23 @@ export async function createOfficeGeofence(companyId: number) {
 }
 
 // Internal function for validating location
-export async function validateLocationInOffice(latitude: number, longitude: number, companyId: number | string) {
+export async function validateLocationInOffice(
+  latitude: number,
+  longitude: number,
+  companyId: number | string
+) {
   try {
-    const response = await fetch(`https://api.radar.io/v1/geofences/match`, {
+    const response = await fetch("https://api.radar.io/v1/track", {
       method: "POST",
       headers: {
-        "Authorization": RADAR_SECRET_KEY,
+        "Authorization": RADAR_SECRET_KEY, // make sure this is your secret key
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
+        userId: `user-${companyId}`, // 👈 you can use userId or companyId to track uniquely
         latitude,
         longitude,
-        tags: ["office"],
-        externalId: String(companyId), // 🔑 force it to string
+        accuracy
       })
     });
 
@@ -162,17 +166,16 @@ export async function validateLocationInOffice(latitude: number, longitude: numb
     const data = await response.json();
 
     return {
-      isInside: data.matchedGeofences.length > 0,
-      matchedGeofences: data.matchedGeofences,
-      officeName: data.matchedGeofences[0]?.description || null,
-      distance: data.matchedGeofences[0]?.distance || null,
-      radius: data.matchedGeofences[0]?.geometryRadius || null,
+      isInside: data.geofences && data.geofences.length > 0,
+      matchedGeofences: data.geofences || [],
+      officeName: data.geofences?.[0]?.description || null,
+      distance: data.geofences?.[0]?.distance || null,
+      radius: data.geofences?.[0]?.geometryRadius || null,
     };
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "Location validation failed");
   }
 }
-
 
 // Fix multer typing
 interface MulterRequest extends Request {
@@ -978,16 +981,19 @@ export function setupWebRoutes(app: Express) {
   // ============================================
 
   // HTTP Endpoint: Create office geofence (for frontend)
+  // Create office geofence
   app.post('/create-office', async (req, res) => {
     try {
-      const { companyId } = req.body;
-      if (!companyId) {
+      const { companyId, latitude, longitude } = req.body;
+
+      if (!companyId || !latitude || !longitude) {
         return res.status(400).json({
           success: false,
-          error: 'Company ID is required'
+          error: 'Company ID, latitude, and longitude are required'
         });
       }
-      const result = await createOfficeGeofence(companyId);
+
+      const result = await createOfficeGeofence(companyId, latitude, longitude);
       res.json({
         success: true,
         message: 'Office geofence created successfully',
@@ -1000,21 +1006,20 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // HTTP Endpoint: Validate location (for frontend)
+
+  // Validate location (uses Radar Track API ✅)
   app.post('/validate-location', async (req, res) => {
     try {
-      const { companyId, latitude, longitude } = req.body;
-      if (!companyId || !latitude || !longitude) {
+      const { companyId, latitude, longitude, userId } = req.body;
+      if (!companyId || !latitude || !longitude || !userId) {
         return res.status(400).json({
           success: false,
-          error: 'Company ID, latitude, and longitude are required'
+          error: 'Company ID, user ID, latitude, and longitude are required'
         });
       }
-      const result = await validateLocationInOffice(companyId, latitude, longitude);
-      res.json({
-        success: true,
-        data: result
-      });
+
+      const result = await validateLocationInOffice(latitude, longitude, userId, companyId);
+      res.json({ success: true, data: result });
     } catch (error) {
       res.status(500).json({
         success: false,
@@ -1022,15 +1027,16 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-  // HTTP Endpoint: Get office geofence info
+
+  // Get office geofence info
   app.get('/office/:companyId', async (req, res) => {
     try {
-      const companyId = parseInt(req.params.companyId);
+      const companyId = req.params.companyId;
+
       const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-        headers: {
-          'Authorization': RADAR_SECRET_KEY
-        }
+        headers: { 'Authorization': RADAR_SECRET_KEY }
       });
+
       if (!response.ok) {
         if (response.status === 404) {
           return res.status(404).json({
@@ -1040,11 +1046,9 @@ export function setupWebRoutes(app: Express) {
         }
         throw new Error('Failed to get geofence');
       }
+
       const data = await response.json();
-      res.json({
-        success: true,
-        data: data.geofence
-      });
+      res.json({ success: true, data: data.geofence });
     } catch (error) {
       res.status(500).json({
         success: false,
@@ -1053,9 +1057,10 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  // Delete office geofence
   app.delete('/office/:companyId', async (req, res) => {
     try {
-      const companyId = parseInt(req.params.companyId);
+      const companyId = req.params.companyId;
 
       const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
         method: 'DELETE',
@@ -1075,7 +1080,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-
+  // Geocode address
   app.post('/geocode-address', async (req, res) => {
     try {
       const { address } = req.body;
@@ -1092,11 +1097,15 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  // Reverse geocode
   app.post('/reverse-geocode', async (req, res) => {
     try {
       const { latitude, longitude } = req.body;
       if (!latitude || !longitude) {
-        return res.status(400).json({ success: false, error: 'Latitude and longitude are required' });
+        return res.status(400).json({
+          success: false,
+          error: 'Latitude and longitude are required'
+        });
       }
 
       const response = await fetch(`https://api.radar.io/v1/geocode/reverse?coordinates=${latitude},${longitude}`, {
@@ -1116,7 +1125,6 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
-
 
 
   // ============================================
