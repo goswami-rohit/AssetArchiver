@@ -57,7 +57,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
         const dealerId = validatedData[dealerIdField];
         if (dealerId) {
           console.log(`Validating location for user ${userId} at dealer ${dealerId}`);
-          
+
           const validation = await radarService.validateDealerAttendance(
             userId,
             parseFloat(latitude.toString()),
@@ -86,7 +86,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
             parseFloat(latitude.toString()),
             parseFloat(longitude.toString())
           );
-          
+
           if (geocodeResult.addresses && geocodeResult.addresses.length > 0) {
             validatedData[locationField] = geocodeResult.addresses[0].formattedAddress;
           }
@@ -127,13 +127,13 @@ function createAutoCRUD<T extends { id?: string | number }>(
       const page = parseInt(req.query.page as string) || 1;
       const limit = parseInt(req.query.limit as string) || 10;
       const offset = (page - 1) * limit;
-      
+
       const search = req.query.search as string;
       const sortBy = req.query.sortBy as string || 'id';
       const sortOrder = req.query.sortOrder as string || 'desc';
 
       let query = db.select().from(table);
-      
+
       if (search) {
         // Add search functionality (assumes name field exists)
         const nameField = table.name || table.dealerName || table.locationName || table.description || table.id;
@@ -150,7 +150,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
       }
 
       const records = await query.limit(limit).offset(offset);
-      
+
       // Get total count
       const [totalResult] = await db.select({ count: count() }).from(table);
       const total = totalResult.count;
@@ -175,12 +175,12 @@ function createAutoCRUD<T extends { id?: string | number }>(
     try {
       const id = req.params.id;
       // Handle both numeric and UUID primary keys
-      const whereClause = typeof table.id.dataType === 'number' 
+      const whereClause = typeof table.id.dataType === 'number'
         ? eq(table.id, parseInt(id))
         : eq(table.id, id);
-      
+
       const record = await db.select().from(table).where(whereClause).limit(1);
-      
+
       if (record.length === 0) {
         return res.status(404).json({ error: `${endpoint} not found` });
       }
@@ -196,7 +196,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
   app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
     try {
       const validatedData = insertSchema.parse(req.body);
-      
+
       // Process location data with Radar integration
       const processedData = await processLocationData(
         validatedData,
@@ -210,14 +210,14 @@ function createAutoCRUD<T extends { id?: string | number }>(
       if (locationConfig?.enabled && locationConfig.createGeofence) {
         const latField = locationConfig.latField || 'latitude';
         const lngField = locationConfig.lngField || 'longitude';
-        
+
         const latitude = newRecord[latField];
         const longitude = newRecord[lngField];
-        
+
         if (latitude && longitude) {
           try {
             console.log(`Creating geofence for ${endpoint} ${newRecord.id}`);
-            
+
             await radarService.createDealerGeofence({
               dealerId: newRecord.id.toString(),
               name: newRecord.name || newRecord.dealerName || newRecord.locationName || `${endpoint}_${newRecord.id}`,
@@ -240,16 +240,16 @@ function createAutoCRUD<T extends { id?: string | number }>(
       res.status(201).json(newRecord);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: 'Validation error', 
-          details: error.errors 
+        return res.status(400).json({
+          error: 'Validation error',
+          details: error.errors
         });
       }
-      
+
       if (error.message?.includes('Location validation failed')) {
         return res.status(400).json({ error: error.message });
       }
-      
+
       console.error(`Error creating ${endpoint}:`, error);
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -270,7 +270,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
       );
 
       // Handle both numeric and UUID primary keys
-      const whereClause = typeof table.id.dataType === 'number' 
+      const whereClause = typeof table.id.dataType === 'number'
         ? eq(table.id, parseInt(id))
         : eq(table.id, id);
 
@@ -288,10 +288,10 @@ function createAutoCRUD<T extends { id?: string | number }>(
       if (locationConfig?.enabled && locationConfig.createGeofence) {
         const latField = locationConfig.latField || 'latitude';
         const lngField = locationConfig.lngField || 'longitude';
-        
+
         const latitude = updatedRecord[latField];
         const longitude = updatedRecord[lngField];
-        
+
         if (latitude && longitude) {
           try {
             await radarService.updateGeofence(updatedRecord.id.toString(), {
@@ -312,16 +312,16 @@ function createAutoCRUD<T extends { id?: string | number }>(
       res.json(updatedRecord);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        return res.status(400).json({ 
-          error: 'Validation error', 
-          details: error.errors 
+        return res.status(400).json({
+          error: 'Validation error',
+          details: error.errors
         });
       }
-      
+
       if (error.message?.includes('Location validation failed')) {
         return res.status(400).json({ error: error.message });
       }
-      
+
       console.error(`Error updating ${endpoint}:`, error);
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -342,7 +342,7 @@ function createAutoCRUD<T extends { id?: string | number }>(
       }
 
       // Handle both numeric and UUID primary keys
-      const whereClause = typeof table.id.dataType === 'number' 
+      const whereClause = typeof table.id.dataType === 'number'
         ? eq(table.id, parseInt(id))
         : eq(table.id, id);
 
@@ -386,7 +386,7 @@ createAutoCRUD(app, {
   locationConfig: {
     enabled: true,
     latField: 'latitude',
-    lngField: 'longitude', 
+    lngField: 'longitude',
     locationField: 'location',
     validateLocation: true,
     trackLocation: true,
@@ -396,23 +396,36 @@ createAutoCRUD(app, {
 });
 
 // SALESMAN ATTENDANCE - Strict location validation
+// SALESMAN ATTENDANCE - FIXED SCHEMA
 createAutoCRUD(app, {
   endpoint: 'salesman-attendance',
   table: schema.salesmanAttendance,
-  schema: schema.insertSalesmanAttendanceSchema,
+  schema: schema.insertSalesmanAttendanceSchema.partial({
+    inTimeAccuracy: true,
+    inTimeSpeed: true,
+    inTimeHeading: true,
+    inTimeAltitude: true,
+    inTimeImageUrl: true,
+    outTimeTimestamp: true,
+    outTimeLatitude: true,
+    outTimeLongitude: true,
+    outTimeAccuracy: true,
+    outTimeSpeed: true,
+    outTimeHeading: true,
+    outTimeAltitude: true,
+    outTimeImageUrl: true
+  }),
   locationConfig: {
     enabled: true,
     latField: 'inTimeLatitude',
     lngField: 'inTimeLongitude',
     locationField: 'locationName',
-    validateLocation: false, // ✅ NO DEALER VALIDATION FOR ATTENDANCE
-    requireLocationValidation: false, // ✅ ATTENDANCE IS NOT DEALER-SPECIFIC
+    validateLocation: false,
+    requireLocationValidation: false,
     trackLocation: true,
     reverseLookup: true
-    // ✅ NO dealerIdField - attendance is not dealer-specific
   }
 });
-
 // GEO TRACKING - Pure tracking data
 createAutoCRUD(app, {
   endpoint: 'geo-tracking',
@@ -454,7 +467,7 @@ createAutoCRUD(app, {
 
 // PERMANENT JOURNEY PLANS - No location data
 createAutoCRUD(app, {
-  endpoint: 'permanent-journey-plans', 
+  endpoint: 'permanent-journey-plans',
   table: schema.permanentJourneyPlans,
   schema: schema.insertPermanentJourneyPlanSchema,
   locationConfig: { enabled: false }
@@ -508,7 +521,7 @@ app.post('/api/radar/journey/start', async (req: Request, res: Response) => {
     const { userId, dealerId, mode = 'car', metadata } = req.body;
 
     const journeyId = `journey_${userId}_${dealerId}_${Date.now()}`;
-    
+
     const trip = await radarService.startDealerJourney({
       userId,
       journeyId,
@@ -517,10 +530,10 @@ app.post('/api/radar/journey/start', async (req: Request, res: Response) => {
       metadata
     });
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       trip,
-      journeyId 
+      journeyId
     });
   } catch (error) {
     console.error('Error starting journey:', error);
@@ -531,12 +544,12 @@ app.post('/api/radar/journey/start', async (req: Request, res: Response) => {
 app.put('/api/radar/journey/:journeyId/complete', async (req: Request, res: Response) => {
   try {
     const { journeyId } = req.params;
-    
+
     const result = await radarService.completeTrip(journeyId);
-    
-    res.json({ 
-      success: true, 
-      result 
+
+    res.json({
+      success: true,
+      result
     });
   } catch (error) {
     console.error('Error completing journey:', error);
@@ -547,12 +560,12 @@ app.put('/api/radar/journey/:journeyId/complete', async (req: Request, res: Resp
 app.put('/api/radar/journey/:journeyId/cancel', async (req: Request, res: Response) => {
   try {
     const { journeyId } = req.params;
-    
+
     const result = await radarService.cancelTrip(journeyId);
-    
-    res.json({ 
-      success: true, 
-      result 
+
+    res.json({
+      success: true,
+      result
     });
   } catch (error) {
     console.error('Error canceling journey:', error);
@@ -563,9 +576,9 @@ app.put('/api/radar/journey/:journeyId/cancel', async (req: Request, res: Respon
 app.get('/api/radar/journey/:journeyId', async (req: Request, res: Response) => {
   try {
     const { journeyId } = req.params;
-    
+
     const trip = await radarService.getTrip(journeyId);
-    
+
     res.json(trip);
   } catch (error) {
     console.error('Error fetching journey:', error);
@@ -577,9 +590,9 @@ app.get('/api/radar/journey/:journeyId', async (req: Request, res: Response) => 
 app.post('/api/radar/track', async (req: Request, res: Response) => {
   try {
     const trackingData = req.body;
-    
+
     const result = await radarService.trackLocationComplete(trackingData);
-    
+
     // Store in geo_tracking table with CORRECT field names
     await db.insert(schema.geoTracking).values({
       userId: trackingData.userId,
@@ -599,10 +612,10 @@ app.post('/api/radar/track', async (req: Request, res: Response) => {
       locationType: trackingData.locationType,
       ipAddress: trackingData.ipAddress
     });
-    
-    res.json({ 
-      success: true, 
-      result 
+
+    res.json({
+      success: true,
+      result
     });
   } catch (error) {
     console.error('Error tracking location:', error);
@@ -615,14 +628,14 @@ app.get('/api/radar/analytics/region/:region', async (req: Request, res: Respons
   try {
     const { region } = req.params;
     const { startDate, endDate } = req.query;
-    
+
     const dateRange = startDate && endDate ? {
       start: startDate as string,
       end: endDate as string
     } : undefined;
-    
+
     const analytics = await radarService.getRegionAnalytics(region, dateRange);
-    
+
     res.json(analytics);
   } catch (error) {
     console.error('Error fetching analytics:', error);
@@ -634,12 +647,12 @@ app.get('/api/radar/analytics/region/:region', async (req: Request, res: Respons
 app.get('/api/radar/geofences', async (req: Request, res: Response) => {
   try {
     const { tag, limit } = req.query;
-    
+
     const geofences = await radarService.listGeofences({
       tag: tag as string,
       limit: limit ? parseInt(limit as string) : undefined
     });
-    
+
     res.json(geofences);
   } catch (error) {
     console.error('Error fetching geofences:', error);
@@ -651,11 +664,11 @@ app.get('/api/radar/geofences', async (req: Request, res: Response) => {
 app.get('/api/radar/users', async (req: Request, res: Response) => {
   try {
     const { limit } = req.query;
-    
+
     const users = await radarService.listUsers({
       limit: limit ? parseInt(limit as string) : undefined
     });
-    
+
     res.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
@@ -666,9 +679,9 @@ app.get('/api/radar/users', async (req: Request, res: Response) => {
 app.get('/api/radar/users/:userId', async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
-    
+
     const user = await radarService.getUser(userId);
-    
+
     res.json(user);
   } catch (error) {
     console.error('Error fetching user:', error);
@@ -680,14 +693,14 @@ app.get('/api/radar/users/:userId', async (req: Request, res: Response) => {
 app.get('/api/radar/events', async (req: Request, res: Response) => {
   try {
     const { userId, deviceId, types, limit } = req.query;
-    
+
     const events = await radarService.listEvents({
       userId: userId as string,
       deviceId: deviceId as string,
       types: types as string,
       limit: limit ? parseInt(limit as string) : undefined
     });
-    
+
     res.json(events);
   } catch (error) {
     console.error('Error fetching events:', error);
@@ -699,9 +712,9 @@ app.get('/api/radar/events', async (req: Request, res: Response) => {
 app.post('/api/radar/webhook', async (req: Request, res: Response) => {
   try {
     const eventData = req.body;
-    
+
     const processedEvent = await radarService.processWebhookEvent(eventData);
-    
+
     // Store processed webhook event in geo_tracking table with CORRECT field names
     if (processedEvent.userId && processedEvent.location) {
       await db.insert(schema.geoTracking).values({
@@ -714,10 +727,10 @@ app.post('/api/radar/webhook', async (req: Request, res: Response) => {
         locationType: 'webhook_event'
       });
     }
-    
-    res.json({ 
-      success: true, 
-      processedEvent 
+
+    res.json({
+      success: true,
+      processedEvent
     });
   } catch (error) {
     console.error('Error processing webhook:', error);
@@ -729,9 +742,9 @@ app.post('/api/radar/webhook', async (req: Request, res: Response) => {
 app.post('/api/radar/geocode/forward', async (req: Request, res: Response) => {
   try {
     const { query, options } = req.body;
-    
+
     const result = await radarService.geocodeForward(query, options);
-    
+
     res.json(result);
   } catch (error) {
     console.error('Error with forward geocoding:', error);
@@ -742,9 +755,9 @@ app.post('/api/radar/geocode/forward', async (req: Request, res: Response) => {
 app.post('/api/radar/geocode/reverse', async (req: Request, res: Response) => {
   try {
     const { latitude, longitude, options } = req.body;
-    
+
     const result = await radarService.geocodeReverse(latitude, longitude, options);
-    
+
     res.json(result);
   } catch (error) {
     console.error('Error with reverse geocoding:', error);
@@ -756,13 +769,13 @@ app.post('/api/radar/geocode/reverse', async (req: Request, res: Response) => {
 app.get('/api/radar/context', async (req: Request, res: Response) => {
   try {
     const { latitude, longitude, userId } = req.query;
-    
+
     const context = await radarService.getContext(
       parseFloat(latitude as string),
       parseFloat(longitude as string),
       userId as string
     );
-    
+
     res.json(context);
   } catch (error) {
     console.error('Error fetching context:', error);
@@ -773,9 +786,9 @@ app.get('/api/radar/context', async (req: Request, res: Response) => {
 app.get('/api/radar/search/places', async (req: Request, res: Response) => {
   try {
     const options = req.query as any;
-    
+
     const places = await radarService.searchPlaces(options);
-    
+
     res.json(places);
   } catch (error) {
     console.error('Error searching places:', error);
@@ -784,8 +797,8 @@ app.get('/api/radar/search/places', async (req: Request, res: Response) => {
 });
 
 app.get('/api/radar/publishable-key', (req: Request, res: Response) => {
-  res.json({ 
-    publishableKey: radarService.getPublishableKey() 
+  res.json({
+    publishableKey: radarService.getPublishableKey()
   });
 });
 
@@ -794,10 +807,10 @@ app.get('/api/radar/publishable-key', (req: Request, res: Response) => {
 app.post('/api/radar/distance', (req: Request, res: Response) => {
   try {
     const { lat1, lon1, lat2, lon2 } = req.body;
-    
+
     const distance = radarService.calculateDistance(lat1, lon1, lat2, lon2);
-    
-    res.json({ 
+
+    res.json({
       distance,
       unit: 'meters'
     });
