@@ -1151,6 +1151,7 @@ export function setupWebRoutes(app: Express) {
   app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
     try {
       const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
+      console.log("👉 Punch-in body received:", req.body);
 
       if (!userId || !latitude || !longitude || !companyId) {
         return res.status(400).json({ success: false, error: "userId, companyId, latitude, and longitude are required" });
