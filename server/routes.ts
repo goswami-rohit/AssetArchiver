@@ -140,7 +140,7 @@ export async function createOfficeGeofence(companyId: number) {
 async function validateLocationInOffice(
   latitude: number,
   longitude: number,
-  userId: number | string,     // still useful for your DB
+  userId: number | string,
   companyId: number | string,
   accuracy: number
 ) {
@@ -151,7 +151,7 @@ async function validateLocationInOffice(
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      deviceId: String(userId),   // ✅ Radar requires deviceId with server key
+      deviceId: String(userId),   // Radar requires this
       latitude,
       longitude,
       accuracy: Number(accuracy)
@@ -165,7 +165,7 @@ async function validateLocationInOffice(
 
   const data = await response.json();
 
-  // ✅ Find if inside office geofence
+  // Check if user is inside the office geofence
   const officeEvent = data.events?.find(
     (event: any) =>
       (event.type === "user.entered_geofence" ||
@@ -173,13 +173,9 @@ async function validateLocationInOffice(
       event.geofence?.externalId === String(companyId)
   );
 
-  if (!officeEvent) {
-    throw new Error("User is not inside the office geofence");
-  }
-
   return {
-    inside: true,
-    geofence: officeEvent.geofence
+    inside: !!officeEvent,
+    geofence: officeEvent?.geofence || null
   };
 }
 
@@ -1175,8 +1171,11 @@ export function setupWebRoutes(app: Express) {
       const geoResult = await validateLocationInOffice(
         parseFloat(latitude),
         parseFloat(longitude),
-        String(companyId)
+        String(companyId),
+        String(userId),             // ✅ pass deviceId
+        parseFloat(accuracy || 50)  // ✅ pass accuracy (default if missing)
       );
+
 
       if (!geoResult.isInside) {
         return res.status(400).json({
@@ -1252,8 +1251,11 @@ export function setupWebRoutes(app: Express) {
         const geoResult = await validateLocationInOffice(
           parseFloat(latitude),
           parseFloat(longitude),
-          String(companyId)
+          String(companyId),
+          String(userId),             // ✅ pass deviceId
+          parseFloat(accuracy || 50)  // ✅ pass accuracy (default if missing)
         );
+
 
         if (!geoResult.isInside) {
           return res.status(400).json({
