@@ -139,24 +139,20 @@ export async function createOfficeGeofence(companyId: number) {
 }
 
 // Internal function for validating location
-export async function validateLocationInOffice(
-  companyId: number,
-  latitude: number,
-  longitude: number
-) {
+export async function validateLocationInOffice(latitude: number, longitude: number, companyId: number | string) {
   try {
-    const response = await fetch("https://api.radar.io/v1/geofences/match", {
+    const response = await fetch(`https://api.radar.io/v1/geofences/match`, {
       method: "POST",
       headers: {
-        Authorization: RADAR_SECRET_KEY,
-        "Content-Type": "application/json",
+        "Authorization": RADAR_SECRET_KEY,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         latitude,
         longitude,
-        tags: ["office"], // filter to office geofences only
-        externalId: String(companyId),
-      }),
+        tags: ["office"],
+        externalId: String(companyId), // 🔑 force it to string
+      })
     });
 
     if (!response.ok) {
@@ -165,31 +161,15 @@ export async function validateLocationInOffice(
 
     const data = await response.json();
 
-    // Pick first matched office geofence
-    const matched = data.geofences?.[0];
-
-    if (!matched) {
-      return {
-        isInside: false,
-        distance: null,
-        radius: null,
-        officeName: null,
-        matchedGeofences: [],
-      };
-    }
-
     return {
-      isInside: true,
-      distance: matched.geometryRadius || null, // Radar gives radius on circle geofences
-      radius: matched.geometryRadius || null,
-      officeName: matched.description || matched._id || "Office",
-      matchedGeofences: data.geofences,
+      isInside: data.matchedGeofences.length > 0,
+      matchedGeofences: data.matchedGeofences,
+      officeName: data.matchedGeofences[0]?.description || null,
+      distance: data.matchedGeofences[0]?.distance || null,
+      radius: data.matchedGeofences[0]?.geometryRadius || null,
     };
   } catch (error) {
-    console.error("validateLocationInOffice error:", error);
-    throw new Error(
-      error instanceof Error ? error.message : "Location validation failed"
-    );
+    throw new Error(error instanceof Error ? error.message : "Location validation failed");
   }
 }
 
