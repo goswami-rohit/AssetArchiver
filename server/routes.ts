@@ -1084,56 +1084,47 @@ export function setupWebRoutes(app: Express) {
 
   app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
     try {
-      // Validate input against schema expectations
-      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
+      const { userId, latitude, longitude, locationName, accuracy, selfieUrl, companyId } = req.body;
 
-      if (!userId || !latitude || !longitude) {
+      if (!userId || !latitude || !longitude || !companyId) {
         return res.status(400).json({
           success: false,
-          error: 'userId, latitude, and longitude are required'
+          error: 'userId, latitude, longitude, and companyId are required'
         });
       }
 
-      // Geo-fencing validation
-      const userPoint = turf.point([longitude, latitude]);
-      let isValid = false;
-      let officeName = '';
+      // Validate location against Radar geofence
+      const geoResult = await validateLocationInOffice(
+        parseInt(companyId),
+        parseFloat(latitude),
+        parseFloat(longitude)
+      );
 
-      for (const office of OFFICE_LOCATIONS) {
-        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
-          isValid = true;
-          officeName = office.name;
-          break;
-        }
-      }
-
-      if (!isValid) {
+      if (!geoResult.isInside) {
         return res.status(400).json({
           success: false,
-          error: 'You are not within office premises'
+          error: `You are not within office premises. Distance: ${geoResult.distance}m / Radius: ${geoResult.radius}m`
         });
       }
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Build data matching exact schema
       const attendanceData = {
-        userId: parseInt(userId), // integer type
-        attendanceDate: today, // date type
-        locationName: locationName || officeName, // varchar not null
-        inTimeTimestamp: new Date(), // timestamp not null
-        inTimeImageCaptured: !!selfieUrl, // boolean not null
-        outTimeImageCaptured: false, // boolean not null  
-        inTimeImageUrl: selfieUrl || null, // varchar nullable
-        inTimeLatitude: latitude.toString(), // decimal as string
-        inTimeLongitude: longitude.toString(), // decimal as string
-        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
-        // All other nullable fields will be null by default
+        userId: parseInt(userId),
+        attendanceDate: today,
+        locationName: locationName || geoResult.officeName,
+        inTimeTimestamp: new Date(),
+        inTimeImageCaptured: !!selfieUrl,
+        outTimeImageCaptured: false,
+        inTimeImageUrl: selfieUrl || null,
+        inTimeLatitude: parseFloat(latitude),
+        inTimeLongitude: parseFloat(longitude),
+        inTimeAccuracy: accuracy ? parseFloat(accuracy) : null
       };
 
-      // Validate against schema
       const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
       if (!parseResult.success) {
+        console.error("Schema validation failed:", parseResult.error.flatten());
         return res.status(400).json({
           success: false,
           error: 'Attendance data validation failed',
@@ -1142,32 +1133,34 @@ export function setupWebRoutes(app: Express) {
       }
 
       const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+
       res.json({
         success: true,
         data: result,
-        message: `Punched in at ${officeName}`,
-        geoInfo: { officeName, isValid }
+        message: `Punched in at ${geoResult.officeName}`,
+        geoInfo: geoResult
       });
-    } catch (error) {
-      console.error('Punch in error:', error);
-      res.status(500).json({ success: false, error: 'Punch in failed' });
+
+    } catch (error: any) {
+      console.error('Punch in error:', error.message, error.stack);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
   app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
-      const { userId, latitude, longitude, selfieUrl } = req.body;
+      const { userId, latitude, longitude, selfieUrl, companyId } = req.body;
 
-      if (!userId) {
+      if (!userId || !companyId) {
         return res.status(400).json({
           success: false,
-          error: 'userId is required'
+          error: 'userId and companyId are required'
         });
       }
 
       const today = new Date().toISOString().split('T')[0];
 
-      // Find unpunched record
+      // Find today's active punch-in record
       const [unpunchedRecord] = await db.select().from(salesmanAttendance)
         .where(and(
           eq(salesmanAttendance.userId, parseInt(userId)),
@@ -1177,36 +1170,53 @@ export function setupWebRoutes(app: Express) {
         .orderBy(desc(salesmanAttendance.inTimeTimestamp))
         .limit(1);
 
-      if (unpunchedRecord) {
-        // Update with proper data types
-        const updateData = {
-          outTimeTimestamp: new Date(), // timestamp
-          outTimeImageCaptured: !!selfieUrl, // boolean
-          outTimeImageUrl: selfieUrl || null, // varchar nullable
-          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
-          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
-          updatedAt: new Date()
-        };
-
-        const [result] = await db.update(salesmanAttendance)
-          .set(updateData)
-          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-          .returning();
-
-        res.json({
-          success: true,
-          data: result,
-          message: 'Punched out successfully'
-        });
-      } else {
-        res.status(404).json({
+      if (!unpunchedRecord) {
+        return res.status(404).json({
           success: false,
           error: 'No active punch-in record found'
         });
       }
-    } catch (error) {
-      console.error('Punch out error:', error);
-      res.status(500).json({ success: false, error: 'Punch out failed' });
+
+      // Validate location against Radar geofence before allowing punch-out
+      const geoResult = await validateLocationInOffice(
+        parseInt(companyId),
+        parseFloat(latitude),
+        parseFloat(longitude)
+      );
+
+      if (!geoResult.isInside) {
+        return res.status(400).json({
+          success: false,
+          error: `You are not within office premises. Distance: ${geoResult.distance}m / Radius: ${geoResult.radius}m`
+        });
+      }
+
+      // Prepare update
+      const updateData = {
+        outTimeTimestamp: new Date(),
+        outTimeImageCaptured: !!selfieUrl,
+        outTimeImageUrl: selfieUrl || null,
+        outTimeLatitude: latitude ? parseFloat(latitude) : null,
+        outTimeLongitude: longitude ? parseFloat(longitude) : null,
+        outTimeAccuracy: accuracy ? parseFloat(accuracy) : null,
+        updatedAt: new Date()
+      };
+
+      const [result] = await db.update(salesmanAttendance)
+        .set(updateData)
+        .where(eq(salesmanAttendance.id, unpunchedRecord.id))
+        .returning();
+
+      res.json({
+        success: true,
+        data: result,
+        message: `Punched out successfully at ${geoResult.officeName}`,
+        geoInfo: geoResult
+      });
+
+    } catch (error: any) {
+      console.error('Punch out error:', error.message, error.stack);
+      res.status(500).json({ success: false, error: error.message });
     }
   });
 
