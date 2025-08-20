@@ -8,15 +8,16 @@ console.log("TELEGRAM_BOT_TOKEN:", process.env.TELEGRAM_BOT_TOKEN ? "Found" : "N
 console.log("Token preview:", process.env.TELEGRAM_BOT_TOKEN?.substring(0, 10) + "..." || "undefined");
 
 import express, { type Request, Response, NextFunction } from "express";
-import routes from "./routes"; // Import the router from routes.ts
+import {setupWebRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import { telegramBot } from './bot/telegram';
 import cors from 'cors';
 import { QdrantClient } from "@qdrant/js-client-rest"
+import { testQdrant } from "./qdrant";
 
-// Since it's in the same folder
+  // Since it's in the same folder
 export const qdrantClient = new QdrantClient({
   url: "https://159aa838-50db-435a-b6d7-46b432c554ba.eu-west-1-0.aws.cloud.qdrant.io:6333",
   apiKey: process.env.QDRANT_API_KEY,
@@ -42,7 +43,6 @@ export async function testQdrant() {
     return false;
   }
 }
-
 // Function to search for similar endpoints
 export async function searchSimilarEndpoints(queryEmbedding, limit = 3) {
   try {
@@ -69,7 +69,6 @@ export async function searchSimilarEndpoints(queryEmbedding, limit = 3) {
 testQdrant();
 
 const app = express();
-
 // ADD CORS CONFIGURATION HERE (before other middleware)
 app.use(cors({
   origin: [
@@ -101,10 +100,10 @@ app.use(cors({
   preflightContinue: false,
   optionsSuccessStatus: 204
 }));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
+
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -137,10 +136,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Mount the routes from routes.ts
-  app.use(routes);
-  console.log('✅ API routes mounted');
-
+  await setupWebRoutes(app);
   const server = createServer(app);
   const io = new SocketIOServer(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
