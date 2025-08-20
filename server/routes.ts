@@ -405,10 +405,11 @@ createAutoCRUD(app, {
     latField: 'inTimeLatitude',
     lngField: 'inTimeLongitude',
     locationField: 'locationName',
-    validateLocation: true,
-    requireLocationValidation: true,
+    validateLocation: false, // ✅ NO DEALER VALIDATION FOR ATTENDANCE
+    requireLocationValidation: false, // ✅ ATTENDANCE IS NOT DEALER-SPECIFIC
     trackLocation: true,
-    dealerIdField: 'userId' // ❌ NO DEALER FIELD IN ATTENDANCE!
+    reverseLookup: true
+    // ✅ NO dealerIdField - attendance is not dealer-specific
   }
 });
 
