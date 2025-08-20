@@ -140,57 +140,25 @@ export async function createOfficeGeofence(companyId: number) {
 
 // Internal function for validating location
 export async function validateLocationInOffice(companyId: number, latitude: number, longitude: number) {
-  try {
-    // Get the geofence for this company
-    const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
-      headers: {
-        'Authorization': RADAR_SECRET_KEY
-      }
-    });
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new Error('Office geofence not found. Please create office geofence first.');
-      }
-      throw new Error('Failed to get office geofence');
+  const response = await fetch(
+    `https://api.radar.io/v1/geofences/search?tags=office&externalId=${companyId}&latitude=${latitude}&longitude=${longitude}`,
+    {
+      headers: { Authorization: RADAR_SECRET_KEY }
     }
-    const geofenceData = await response.json();
-    const geofence = geofenceData.geofence;
-    // Calculate distance between user location and geofence center
-    const centerLat = geofence.geometryCenter.coordinates[1];
-    const centerLng = geofence.geometryCenter.coordinates[0];
-    const radius = geofence.geometryRadius;
-    // Simple distance calculation (approximate)
-    const distance = getDistanceFromLatLonInMeters(latitude, longitude, centerLat, centerLng);
-    const isInside = distance <= radius;
-    return {
-      isInside,
-      distance: Math.round(distance),
-      radius,
-      officeName: geofence.description,
-      geofenceId: geofence._id
-    };
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Location validation failed');
+  );
+
+  if (!response.ok) {
+    throw new Error(`Radar validation failed: ${response.status}`);
   }
-}
-// Helper function to calculate distance
-function getDistanceFromLatLonInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371000; // Radius of the earth in meters
-  const dLat = deg2rad(lat2 - lat1);
-  const dLon = deg2rad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c; // Distance in meters
-  return d;
-}
-function deg2rad(deg: number) {
-  return deg * (Math.PI / 180);
-}
 
+  const data = await response.json();
 
+  const isInside = data.geofences && data.geofences.length > 0;
+  return {
+    isInside,
+    matchedGeofences: data.geofences,
+  };
+}
 
 // Fix multer typing
 interface MulterRequest extends Request {
