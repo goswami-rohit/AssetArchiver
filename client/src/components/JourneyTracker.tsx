@@ -7,7 +7,7 @@ import {
   Square, MapPin, Clock, Navigation, Pause, Play, ArrowLeft,
   Users, CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
   Target, Route, Store, TrendingUp, Camera, Share, Heart,
-  Zap, Signal, Smartphone, Activity, Eye, Settings
+  Zap, Signal, Smartphone, Activity, Eye, Settings, X
 } from 'lucide-react';
 
 interface JourneyTrackerProps {
@@ -56,6 +56,26 @@ interface GeoTrackingEntry {
   notes?: string;
 }
 
+interface OfficeGeofence {
+  _id: string;
+  description: string;
+  geometryRadius: number;
+  geometryCenter: {
+    coordinates: [number, number];
+  };
+  metadata: {
+    companyName: string;
+    region?: string;
+    area?: string;
+  };
+}
+
+interface GeofenceSettings {
+  companyId: number | null;
+  officeGeofence: OfficeGeofence | null;
+  isSetupRequired: boolean;
+}
+
 export default function JourneyTracker({ userId, onBack, onJourneyEnd }: JourneyTrackerProps) {
   // Core State
   const [isLoading, setIsLoading] = useState(false);
@@ -75,6 +95,18 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
+
+  // NEW: Geofencing State
+  const [showSettings, setShowSettings] = useState(false);
+  const [geofenceSettings, setGeofenceSettings] = useState<GeofenceSettings>({
+    companyId: null,
+    officeGeofence: null,
+    isSetupRequired: false
+  });
+  const [officeValidation, setOfficeValidation] = useState<{
+    isValidating: boolean;
+    result: any;
+  } | null>(null);
 
   // 🔋 BATTERY OPTIMIZED LOCATION OPTIONS
   const getLocationOptions = useCallback(() => {
@@ -106,7 +138,8 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     initializeJourneyTracker();
     setupBatteryMonitoring();
     getCurrentLocation();
-    
+    checkOfficeGeofenceStatus();
+
     return () => {
       if (locationWatchId) {
         navigator.geolocation.clearWatch(locationWatchId);
@@ -116,6 +149,106 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       }
     };
   }, [userId]);
+
+  // NEW: Check office geofence status on initialization
+  const checkOfficeGeofenceStatus = async () => {
+    try {
+      // First, get user's companyId from database
+      const userResponse = await fetch(`/api/users/${userId}`);
+      const userData = await userResponse.json();
+
+      if (!userData.success) {
+        console.error('Failed to fetch user data:', userData.error);
+        return;
+      }
+
+      const companyId = userData.data.companyId;
+
+      // Now check if office geofence exists for this company
+      const response = await fetch(`/office/${companyId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setGeofenceSettings({
+          companyId,
+          officeGeofence: data.data,
+          isSetupRequired: false
+        });
+      } else {
+        setGeofenceSettings({
+          companyId,
+          officeGeofence: null,
+          isSetupRequired: true
+        });
+      }
+    } catch (error) {
+      console.error('Office geofence check failed:', error);
+      setGeofenceSettings({
+        companyId: null,
+        officeGeofence: null,
+        isSetupRequired: true
+      });
+    }
+  };
+  // NEW: Create office geofence
+  const handleCreateOfficeGeofence = async () => {
+    if (!geofenceSettings.companyId) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/create-office', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ companyId: geofenceSettings.companyId })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setGeofenceSettings(prev => ({
+          ...prev,
+          officeGeofence: data.data.geofence,
+          isSetupRequired: false
+        }));
+        setSuccessMessage('✅ Office geofence created successfully!');
+      } else {
+        setErrorMessage(data.error || 'Failed to create office geofence');
+      }
+    } catch (error) {
+      setErrorMessage('Network error: Failed to create office geofence');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // NEW: Validate current location against office
+  const handleValidateOfficeLocation = async () => {
+    if (!currentLocation || !geofenceSettings.companyId) return;
+
+    setOfficeValidation({ isValidating: true, result: null });
+
+    try {
+      const response = await fetch('/validate-location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyId: geofenceSettings.companyId,
+          latitude: currentLocation.lat,
+          longitude: currentLocation.lng
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setOfficeValidation({ isValidating: false, result: data.data });
+      } else {
+        setErrorMessage(data.error || 'Location validation failed');
+        setOfficeValidation({ isValidating: false, result: null });
+      }
+    } catch (error) {
+      setErrorMessage('Network error: Location validation failed');
+      setOfficeValidation({ isValidating: false, result: null });
+    }
+  };
 
   // 📍 GET CURRENT LOCATION
   const getCurrentLocation = () => {
@@ -150,14 +283,14 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
       if (data.success && data.data && data.data.length > 0) {
         setGeoTrackingHistory(data.data);
-        
+
         // Check if there's an active journey (no checkout time)
         const activeGeoTracking = data.data.find((track: GeoTrackingEntry) => !track.checkOutTime);
-        
+
         if (activeGeoTracking) {
           const duration = calculateDuration(activeGeoTracking.checkInTime);
           const distance = calculateTotalDistance(data.data);
-          
+
           setActiveJourney({
             id: activeGeoTracking.id,
             startTime: activeGeoTracking.checkInTime,
@@ -187,23 +320,23 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   // 📏 CALCULATE TOTAL DISTANCE FROM TRACKING POINTS
   const calculateTotalDistance = (trackingData: GeoTrackingEntry[]): number => {
     if (trackingData.length < 2) return 0;
-    
+
     let totalDistance = 0;
     for (let i = 1; i < trackingData.length; i++) {
       const prev = trackingData[i - 1];
       const curr = trackingData[i];
-      
+
       // Haversine formula for distance calculation
       const R = 6371; // Earth's radius in km
       const dLat = (curr.latitude - prev.latitude) * Math.PI / 180;
       const dLon = (curr.longitude - prev.longitude) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(prev.latitude * Math.PI / 180) * Math.cos(curr.latitude * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(prev.latitude * Math.PI / 180) * Math.cos(curr.latitude * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       totalDistance += R * c;
     }
-    
+
     return totalDistance;
   };
 
@@ -241,7 +374,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
         // Auto-adjust tracking mode based on speed
         autoAdjustTrackingMode(newLocation.speed || 0);
-        
+
         // Update active journey stats if available
         if (activeJourney) {
           setActiveJourney(prev => prev ? {
@@ -314,7 +447,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       });
 
       const data = await response.json();
-      
+
       if (data.success && data.data) {
         setActiveJourney({
           id: data.data.id,
@@ -374,7 +507,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         // Release wake lock
         if (journeyWakeLock) {
@@ -480,9 +613,9 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               {onBack && (
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={onBack}
                   className="p-1 hover:bg-gray-100 rounded-full"
                 >
@@ -499,11 +632,22 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                 <div className="flex items-center space-x-2 text-sm text-gray-500">
                   <div className={`w-2 h-2 rounded-full ${networkStatus === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
                   <span>GPS Tracking • {batteryLevel}%</span>
+                  {geofenceSettings.officeGeofence && (
+                    <>
+                      <span>•</span>
+                      <span className="text-blue-600">Office Ready</span>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
             <div className="flex items-center space-x-2">
-              <Button variant="ghost" size="sm" className="p-2 rounded-full">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="p-2 rounded-full"
+                onClick={() => setShowSettings(true)}
+              >
                 <Settings className="w-5 h-5" />
               </Button>
               <Button variant="ghost" size="sm" className="p-2 rounded-full">
@@ -522,7 +666,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             <p className="text-green-700 text-sm text-center">{successMessage}</p>
           </div>
         )}
-        
+
         {errorMessage && (
           <div className="mx-4 mt-4 p-3 bg-red-100 border border-red-300 rounded-xl">
             <p className="text-red-700 text-sm text-center">{errorMessage}</p>
@@ -578,7 +722,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         <p className="text-sm text-gray-600">Please enable GPS access</p>
                       </div>
                     </div>
-                    <Button 
+                    <Button
                       onClick={getCurrentLocation}
                       size="sm"
                       variant="outline"
@@ -824,6 +968,141 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
           </div>
         )}
       </div>
+
+      {/* NEW: Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md bg-white max-h-[90vh] overflow-y-auto">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold">Journey Settings</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowSettings(false)}
+                  className="p-1 rounded-full"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              {/* Office Geofence Section */}
+              <div className="space-y-4">
+                <div className="flex items-center space-x-2">
+                  <MapPin className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-semibold">Office Geofence</h3>
+                </div>
+
+                {geofenceSettings.isSetupRequired ? (
+                  <Card className="bg-orange-50 border-orange-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center space-x-3 mb-3">
+                        <AlertCircle className="w-5 h-5 text-orange-600" />
+                        <span className="text-sm font-medium">Setup Required</span>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">
+                        Create office geofence for location-based features
+                      </p>
+                      <Button
+                        onClick={handleCreateOfficeGeofence}
+                        disabled={isLoading}
+                        className="w-full bg-blue-600 hover:bg-blue-700"
+                      >
+                        {isLoading ? 'Creating...' : 'Setup Office Geofence'}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : geofenceSettings.officeGeofence ? (
+                  <Card className="bg-green-50 border-green-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center space-x-3 mb-3">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                        <span className="text-sm font-medium">Office Configured</span>
+                      </div>
+                      <div className="space-y-2 text-sm text-gray-600">
+                        <p><strong>Company:</strong> {geofenceSettings.officeGeofence.metadata.companyName}</p>
+                        <p><strong>Description:</strong> {geofenceSettings.officeGeofence.description}</p>
+                        <p><strong>Radius:</strong> {geofenceSettings.officeGeofence.geometryRadius}m</p>
+                      </div>
+
+                      <div className="mt-4 space-y-2">
+                        <Button
+                          onClick={handleValidateOfficeLocation}
+                          disabled={!currentLocation || officeValidation?.isValidating}
+                          variant="outline"
+                          className="w-full"
+                        >
+                          {officeValidation?.isValidating ? 'Checking...' : 'Test Current Location'}
+                        </Button>
+
+                        {officeValidation?.result && (
+                          <div className={`p-3 rounded-lg text-sm ${officeValidation.result.isInside
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                            }`}>
+                            <div className="flex items-center space-x-2">
+                              {officeValidation.result.isInside ? (
+                                <CheckCircle className="w-4 h-4" />
+                              ) : (
+                                <AlertCircle className="w-4 h-4" />
+                              )}
+                              <span className="font-medium">
+                                {officeValidation.result.isInside ? 'At Office' : 'Outside Office'}
+                              </span>
+                            </div>
+                            <p className="mt-1">
+                              Distance: {officeValidation.result.distance}m from office center
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="bg-gray-50 border-gray-200">
+                    <CardContent className="p-4">
+                      <div className="flex items-center space-x-3 mb-3">
+                        <Clock className="w-5 h-5 text-gray-600" />
+                        <span className="text-sm font-medium">Loading...</span>
+                      </div>
+                      <p className="text-sm text-gray-600">
+                        Checking office geofence status...
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Tracking Mode Section */}
+                <div className="pt-4 border-t">
+                  <div className="flex items-center space-x-2 mb-3">
+                    <Target className="w-5 h-5 text-purple-600" />
+                    <h3 className="font-semibold">Tracking Mode</h3>
+                  </div>
+                  <div className="space-y-2">
+                    {(['conservative', 'balanced', 'precise'] as const).map((mode) => (
+                      <Button
+                        key={mode}
+                        onClick={() => setTrackingMode(mode)}
+                        variant={trackingMode === mode ? 'default' : 'outline'}
+                        className="w-full justify-start"
+                      >
+                        <div className="text-left">
+                          <div className="font-medium capitalize">{mode}</div>
+                          <div className="text-xs text-gray-500">
+                            {mode === 'conservative' && 'Battery saver (5min updates)'}
+                            {mode === 'balanced' && 'Standard (2min updates)'}
+                            {mode === 'precise' && 'High accuracy (30s updates)'}
+                          </div>
+                        </div>
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

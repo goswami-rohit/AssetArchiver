@@ -36,6 +36,144 @@ import { ChatMessage } from 'server/bot/aiService';
 import EnhancedRAGService from 'server/bot/aiService';
 import { telegramBot } from './bot/telegram';
 
+const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY;
+const RADAR_PUBLISHABLE_KEY = process.env.RADAR_PUBLISHABLE_KEY;
+
+// Internal function for geocoding address
+async function geocodeAddress(address: string) {
+  const response = await fetch(`https://api.radar.io/v1/geocode/forward?query=${encodeURIComponent(address)}`, {
+    headers: {
+      'Authorization': RADAR_PUBLISHABLE_KEY
+    }
+  });
+  if (!response.ok) {
+    throw new Error('Geocoding failed');
+  }
+  const data = await response.json();
+
+  if (!data.addresses || data.addresses.length === 0) {
+    throw new Error('Address not found');
+  }
+  const address_result = data.addresses[0];
+  return {
+    latitude: address_result.latitude,
+    longitude: address_result.longitude,
+    confidence: address_result.confidence,
+    formattedAddress: address_result.formattedAddress
+  };
+}
+
+// Internal function for creating office geofence
+export async function createOfficeGeofence(companyId: number) {
+  try {
+    // Get company data from database
+    const company = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+
+    if (company.length === 0) {
+      throw new Error('Company not found');
+    }
+    const companyData = company[0];
+    // Geocode the office address
+    const geocoded = await geocodeAddress(companyData.officeAddress);
+    // Create geofence in Radar
+    const geofenceResponse = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': RADAR_SECRET_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        description: `${companyData.companyName} Office`,
+        type: 'circle',
+        coordinates: [geocoded.longitude, geocoded.latitude], // Note: longitude first!
+        radius: 100, // 100 meters default
+        tag: 'office',
+        externalId: companyId.toString(),
+        enabled: true,
+        operatingHours: {
+          Monday: [["09:00", "18:00"]],
+          Tuesday: [["09:00", "18:00"]],
+          Wednesday: [["09:00", "18:00"]],
+          Thursday: [["09:00", "18:00"]],
+          Friday: [["09:00", "18:00"]]
+        },
+        metadata: {
+          companyName: companyData.companyName,
+          region: companyData.region || '',
+          area: companyData.area || ''
+        }
+      })
+    });
+    if (!geofenceResponse.ok) {
+      const errorData = await geofenceResponse.json();
+      throw new Error(`Geofence creation failed: ${errorData.meta?.message || 'Unknown error'}`);
+    }
+    const geofenceData = await geofenceResponse.json();
+    return {
+      success: true,
+      geofence: geofenceData.geofence,
+      geocoded: geocoded,
+      company: companyData
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Unknown error');
+  }
+}
+
+// Internal function for validating location
+export async function validateLocationInOffice(companyId: number, latitude: number, longitude: number) {
+  try {
+    // Get the geofence for this company
+    const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
+      headers: {
+        'Authorization': RADAR_SECRET_KEY
+      }
+    });
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Office geofence not found. Please create office geofence first.');
+      }
+      throw new Error('Failed to get office geofence');
+    }
+    const geofenceData = await response.json();
+    const geofence = geofenceData.geofence;
+    // Calculate distance between user location and geofence center
+    const centerLat = geofence.geometryCenter.coordinates[1];
+    const centerLng = geofence.geometryCenter.coordinates[0];
+    const radius = geofence.geometryRadius;
+    // Simple distance calculation (approximate)
+    const distance = getDistanceFromLatLonInMeters(latitude, longitude, centerLat, centerLng);
+    const isInside = distance <= radius;
+    return {
+      isInside,
+      distance: Math.round(distance),
+      radius,
+      officeName: geofence.description,
+      geofenceId: geofence._id
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Location validation failed');
+  }
+}
+// Helper function to calculate distance
+function getDistanceFromLatLonInMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371000; // Radius of the earth in meters
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const d = R * c; // Distance in meters
+  return d;
+}
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
+
+
 // Fix multer typing
 interface MulterRequest extends Request {
   file?: Express.Multer.File;
@@ -56,15 +194,6 @@ const upload = multer({
 });
 
 // Office location coordinates with geo-fencing polygons
-const OFFICE_LOCATIONS = [
-  {
-    name: "Head Office",
-    lat: 26.1200853,
-    lng: 91.7955807,
-    radius: 100,
-    polygon: turf.circle([91.7955807, 26.1200853], 0.1, { units: 'kilometers' })
-  }
-];
 
 // ============================================
 // SCHEMA-PERFECT AUTO-CRUD GENERATOR
@@ -365,6 +494,46 @@ export function setupWebRoutes(app: Express) {
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
+  // ===========USER INFO ENDPOINT to GET COMPANY ID==============
+  // Get user profile with company info
+  app.get('/api/users/:userId', async (req, res) => {
+    try {
+      const userId = parseInt(req.params.userId);
+
+      // Query your users table to get companyId
+      const user = await db.select({
+        id: users.id,
+        companyId: users.companyId,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        role: users.role,
+        region: users.region,
+        area: users.area
+      })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (user.length === 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'User not found'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: user[0]
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
@@ -801,6 +970,86 @@ export function setupWebRoutes(app: Express) {
     tableName: 'Dealer Report and Score',
     autoFields: {
       lastUpdatedDate: () => new Date() // timestamp type
+    }
+  });
+
+  // ============================================
+  // GEOFENCING ENDPOINTS for OFFICE creations and SO ON
+  // ============================================
+
+  // HTTP Endpoint: Create office geofence (for frontend)
+  app.post('/create-office', async (req, res) => {
+    try {
+      const { companyId } = req.body;
+      if (!companyId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Company ID is required'
+        });
+      }
+      const result = await createOfficeGeofence(companyId);
+      res.json({
+        success: true,
+        message: 'Office geofence created successfully',
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  // HTTP Endpoint: Validate location (for frontend)
+  app.post('/validate-location', async (req, res) => {
+    try {
+      const { companyId, latitude, longitude } = req.body;
+      if (!companyId || !latitude || !longitude) {
+        return res.status(400).json({
+          success: false,
+          error: 'Company ID, latitude, and longitude are required'
+        });
+      }
+      const result = await validateLocationInOffice(companyId, latitude, longitude);
+      res.json({
+        success: true,
+        data: result
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+  // HTTP Endpoint: Get office geofence info
+  app.get('/office/:companyId', async (req, res) => {
+    try {
+      const companyId = parseInt(req.params.companyId);
+      const response = await fetch(`https://api.radar.io/v1/geofences/office/${companyId}`, {
+        headers: {
+          'Authorization': RADAR_SECRET_KEY
+        }
+      });
+      if (!response.ok) {
+        if (response.status === 404) {
+          return res.status(404).json({
+            success: false,
+            error: 'Office geofence not found'
+          });
+        }
+        throw new Error('Failed to get geofence');
+      }
+      const data = await response.json();
+      res.json({
+        success: true,
+        data: data.geofence
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
