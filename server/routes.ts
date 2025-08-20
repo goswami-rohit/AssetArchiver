@@ -139,44 +139,50 @@ export async function createOfficeGeofence(companyId: number) {
 }
 
 // Internal function for validating location
-export async function validateLocationInOffice(
+async function validateLocationInOffice(
   latitude: number,
   longitude: number,
+  userId: number | string,
   companyId: number | string,
   accuracy: number
-  
 ) {
-  try {
-    const response = await fetch("https://api.radar.io/v1/track", {
-      method: "POST",
-      headers: {
-        "Authorization": RADAR_SECRET_KEY, // make sure this is your secret key
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        userId: `user-${companyId}`, // 👈 you can use userId or companyId to track uniquely
-        latitude,
-        longitude,
-        accuracy
-      })
-    });
+  const response = await fetch("https://api.radar.io/v1/track", {
+    method: "POST",
+    headers: {
+      "Authorization": RADAR_SECRET_KEY,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      userId: String(userId),   // ✅ must be string
+      latitude,
+      longitude,
+      accuracy                  // ✅ Radar accepts float
+    })
+  });
 
-    if (!response.ok) {
-      throw new Error(`Radar validation failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    return {
-      isInside: data.geofences && data.geofences.length > 0,
-      matchedGeofences: data.geofences || [],
-      officeName: data.geofences?.[0]?.description || null,
-      distance: data.geofences?.[0]?.distance || null,
-      radius: data.geofences?.[0]?.geometryRadius || null,
-    };
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Location validation failed");
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Radar validation failed: ${response.status} - ${errorText}`);
   }
+
+  const data = await response.json();
+
+  // ✅ Find if inside the company’s geofence
+  const officeEvent = data.events?.find(
+    (event: any) =>
+      (event.type === "user.entered_geofence" ||
+        event.type === "user.inside_geofence") &&
+      event.geofence?.externalId === String(companyId)
+  );
+
+  if (!officeEvent) {
+    throw new Error("User is not inside the office geofence");
+  }
+
+  return {
+    inside: true,
+    geofence: officeEvent.geofence
+  };
 }
 
 // Fix multer typing
