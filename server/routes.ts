@@ -1158,9 +1158,9 @@ export function setupWebRoutes(app: Express) {
 
       // ✅ geofence validation with correct argument order
       const geoResult = await validateLocationInOffice(
-        companyId,
         parseFloat(latitude),
-        parseFloat(longitude)
+        parseFloat(longitude),
+        String(companyId)
       );
 
       if (!geoResult.isInside) {
@@ -1235,9 +1235,9 @@ export function setupWebRoutes(app: Express) {
       if (latitude && longitude && companyId) {
         // ✅ Optional: also validate geofence on punch-out
         const geoResult = await validateLocationInOffice(
-          companyId,
           parseFloat(latitude),
-          parseFloat(longitude)
+          parseFloat(longitude),
+          String(companyId)
         );
 
         if (!geoResult.isInside) {
