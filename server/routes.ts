@@ -139,26 +139,60 @@ export async function createOfficeGeofence(companyId: number) {
 }
 
 // Internal function for validating location
-export async function validateLocationInOffice(companyId: number, latitude: number, longitude: number) {
-  const response = await fetch(
-    `https://api.radar.io/v1/geofences/search?tags=office&externalId=${companyId}&latitude=${latitude}&longitude=${longitude}`,
-    {
-      headers: { Authorization: RADAR_SECRET_KEY }
+export async function validateLocationInOffice(
+  companyId: number,
+  latitude: number,
+  longitude: number
+) {
+  try {
+    const response = await fetch("https://api.radar.io/v1/geofences/match", {
+      method: "POST",
+      headers: {
+        Authorization: RADAR_SECRET_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        latitude,
+        longitude,
+        tags: ["office"], // filter to office geofences only
+        externalId: String(companyId),
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Radar validation failed: ${response.status}`);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Radar validation failed: ${response.status}`);
+    const data = await response.json();
+
+    // Pick first matched office geofence
+    const matched = data.geofences?.[0];
+
+    if (!matched) {
+      return {
+        isInside: false,
+        distance: null,
+        radius: null,
+        officeName: null,
+        matchedGeofences: [],
+      };
+    }
+
+    return {
+      isInside: true,
+      distance: matched.geometryRadius || null, // Radar gives radius on circle geofences
+      radius: matched.geometryRadius || null,
+      officeName: matched.description || matched._id || "Office",
+      matchedGeofences: data.geofences,
+    };
+  } catch (error) {
+    console.error("validateLocationInOffice error:", error);
+    throw new Error(
+      error instanceof Error ? error.message : "Location validation failed"
+    );
   }
-
-  const data = await response.json();
-
-  const isInside = data.geofences && data.geofences.length > 0;
-  return {
-    isInside,
-    matchedGeofences: data.geofences,
-  };
 }
+
 
 // Fix multer typing
 interface MulterRequest extends Request {
@@ -1138,23 +1172,31 @@ export function setupWebRoutes(app: Express) {
     try {
       const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
 
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({ success: false, error: "userId, latitude, and longitude are required" });
+      if (!userId || !latitude || !longitude || !companyId) {
+        return res.status(400).json({ success: false, error: "userId, companyId, latitude, and longitude are required" });
       }
 
-      // geofence validation
+      // ✅ geofence validation with correct argument order
       const geoResult = await validateLocationInOffice(
+        companyId,
         parseFloat(latitude),
-        parseFloat(longitude),
-        companyId
+        parseFloat(longitude)
       );
 
-      if (!geoResult.isValid) {
-        return res.status(400).json({ success: false, error: "Location not within valid office geofence" });
+      if (!geoResult.isInside) {
+        return res.status(400).json({
+          success: false,
+          error: "Location not within valid office geofence",
+          distance: geoResult.distance,
+          radius: geoResult.radius
+        });
       }
 
-      // reverse geocode
-      const formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
+      // ✅ reverse geocode for pretty address
+      const formattedAddress = await reverseGeocode(
+        parseFloat(latitude),
+        parseFloat(longitude)
+      );
 
       const now = new Date();
       const attendanceData = {
@@ -1184,6 +1226,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+
   app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
       const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
@@ -1207,10 +1250,27 @@ export function setupWebRoutes(app: Express) {
         return res.status(404).json({ success: false, error: "No active punch-in record found" });
       }
 
-      // reverse geocode for exit location
-      const formattedAddress = latitude && longitude
-        ? await reverseGeocode(parseFloat(latitude), parseFloat(longitude))
-        : null;
+      let formattedAddress: string | null = null;
+
+      if (latitude && longitude && companyId) {
+        // ✅ Optional: also validate geofence on punch-out
+        const geoResult = await validateLocationInOffice(
+          companyId,
+          parseFloat(latitude),
+          parseFloat(longitude)
+        );
+
+        if (!geoResult.isInside) {
+          return res.status(400).json({
+            success: false,
+            error: "Punch-out location not within valid office geofence",
+            distance: geoResult.distance,
+            radius: geoResult.radius
+          });
+        }
+
+        formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
+      }
 
       const updateData = {
         outTimeTimestamp: new Date(),
@@ -1234,6 +1294,7 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: "Punch out failed" });
     }
   });
+
 
 
   // ============================================
