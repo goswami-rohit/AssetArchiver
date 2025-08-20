@@ -252,6 +252,7 @@ const useAPI = () => {
         method: "POST",
         body: JSON.stringify({
           userId: user.id,
+          companyId: user.company,
           latitude,
           longitude,
           accuracy,
