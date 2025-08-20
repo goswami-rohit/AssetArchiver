@@ -1303,7 +1303,7 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
       });
     }
 
-    // ✅ Fixed geofence validation
+    // Fixed geofence validation
     const geoResult = await validateLocationInOffice(
       parseFloat(latitude),
       parseFloat(longitude),
@@ -1328,24 +1328,26 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
       });
     }
 
-    // ✅ Get formatted address
+    // Get formatted address
     const formattedAddress = await reverseGeocode(
       parseFloat(latitude),
       parseFloat(longitude)
     );
 
     const now = new Date();
+    
+    // ✅ FIX: Convert data types to match schema expectations
     const attendanceData = {
       userId: parseInt(userId),
-      attendanceDate: now,
+      attendanceDate: now.toISOString().split("T")[0], // ✅ Convert Date to string (YYYY-MM-DD)
       locationName: geoResult.officeName || formattedAddress || "Mobile App",
       inTimeTimestamp: now,
       inTimeImageCaptured: !!selfieUrl,
       outTimeImageCaptured: false,
       inTimeImageUrl: selfieUrl || null,
-      inTimeLatitude: parseFloat(latitude),
-      inTimeLongitude: parseFloat(longitude),
-      inTimeAccuracy: accuracy ? parseFloat(accuracy) : null
+      inTimeLatitude: String(parseFloat(latitude)), // ✅ Convert number to string
+      inTimeLongitude: String(parseFloat(longitude)), // ✅ Convert number to string
+      inTimeAccuracy: accuracy ? String(parseFloat(accuracy)) : null // ✅ Convert number to string
     };
 
     const validated = insertSalesmanAttendanceSchema.safeParse(attendanceData);
@@ -1380,77 +1382,99 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
+  try {
+    const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
+    console.log("👉 Punch-out body received:", req.body);
 
-  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, accuracy, selfieUrl, companyId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ success: false, error: "userId is required" });
+    }
 
-      if (!userId) {
-        return res.status(400).json({ success: false, error: "userId is required" });
-      }
+    const today = new Date().toISOString().split("T")[0];
 
-      const today = new Date().toISOString().split("T")[0];
+    const [unpunchedRecord] = await db.select().from(salesmanAttendance)
+      .where(and(
+        eq(salesmanAttendance.userId, parseInt(userId)),
+        eq(salesmanAttendance.attendanceDate, today),
+        isNull(salesmanAttendance.outTimeTimestamp)
+      ))
+      .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+      .limit(1);
 
-      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp)
-        ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-        .limit(1);
+    if (!unpunchedRecord) {
+      return res.status(404).json({ 
+        success: false, 
+        error: "No active punch-in record found for today" 
+      });
+    }
 
-      if (!unpunchedRecord) {
-        return res.status(404).json({ success: false, error: "No active punch-in record found" });
-      }
+    let formattedAddress: string | null = null;
+    let geoValidation = null;
 
-      let formattedAddress: string | null = null;
-
-      if (latitude && longitude && companyId) {
-        // ✅ Optional: also validate geofence on punch-out
-        const geoResult = await validateLocationInOffice(
+    if (latitude && longitude && companyId) {
+      try {
+        geoValidation = await validateLocationInOffice(
           parseFloat(latitude),
           parseFloat(longitude),
-          String(userId),      // ✅ correct order
-          String(companyId),   // ✅ correct order
+          String(userId),
+          String(companyId),
           parseFloat(accuracy || 50)
         );
 
-
-        if (!geoResult.isInside) {
-          return res.status(400).json({
-            success: false,
-            error: "Punch-out location not within valid office geofence",
-            distance: geoResult.distance,
-            radius: geoResult.radius
-          });
-        }
-
+        console.log("👉 Punch-out geofence validation result:", geoValidation);
+        formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
+      } catch (geoError) {
+        console.error("Geofence validation failed for punch-out:", geoError);
         formattedAddress = await reverseGeocode(parseFloat(latitude), parseFloat(longitude));
       }
-
-      const updateData = {
-        outTimeTimestamp: new Date(),
-        outTimeImageCaptured: !!selfieUrl,
-        outTimeImageUrl: selfieUrl || null,
-        outTimeLatitude: latitude ? parseFloat(latitude) : null,
-        outTimeLongitude: longitude ? parseFloat(longitude) : null,
-        outTimeAccuracy: accuracy ? parseFloat(accuracy) : null,
-        locationName: formattedAddress || unpunchedRecord.locationName || "Mobile App",
-        updatedAt: new Date()
-      };
-
-      const [result] = await db.update(salesmanAttendance)
-        .set(updateData)
-        .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-        .returning();
-
-      res.json({ success: true, data: result, message: "Punched out successfully" });
-    } catch (error) {
-      console.error("Punch out error:", error);
-      res.status(500).json({ success: false, error: "Punch out failed" });
     }
-  });
+
+    // ✅ FIX: Convert data types to match schema expectations
+    const updateData = {
+      outTimeTimestamp: new Date(),
+      outTimeImageCaptured: !!selfieUrl,
+      outTimeImageUrl: selfieUrl || null,
+      outTimeLatitude: latitude ? String(parseFloat(latitude)) : null, // ✅ Convert to string
+      outTimeLongitude: longitude ? String(parseFloat(longitude)) : null, // ✅ Convert to string
+      outTimeAccuracy: accuracy ? String(parseFloat(accuracy)) : null, // ✅ Convert to string
+      locationName: formattedAddress || unpunchedRecord.locationName || "Mobile App",
+      updatedAt: new Date()
+    };
+
+    const [result] = await db.update(salesmanAttendance)
+      .set(updateData)
+      .where(eq(salesmanAttendance.id, unpunchedRecord.id))
+      .returning();
+
+    // Calculate total work duration
+    const workDuration = result.outTimeTimestamp && unpunchedRecord.inTimeTimestamp 
+      ? Math.round((result.outTimeTimestamp.getTime() - unpunchedRecord.inTimeTimestamp.getTime()) / (1000 * 60))
+      : null;
+
+    res.json({ 
+      success: true, 
+      data: result, 
+      message: "Punched out successfully",
+      details: {
+        workDuration: workDuration ? `${Math.floor(workDuration / 60)}h ${workDuration % 60}m` : null,
+        location: {
+          address: formattedAddress,
+          distance: geoValidation?.distance,
+          officeName: geoValidation?.officeName,
+          withinGeofence: geoValidation?.isInside
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Punch out error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Punch out failed",
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
 
 
 
