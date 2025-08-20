@@ -1012,7 +1012,8 @@ export function setupWebRoutes(app: Express) {
   // Validate location (uses Radar Track API ✅)
   app.post('/validate-location', async (req, res) => {
     try {
-      const { companyId, latitude, longitude, userId } = req.body;
+      const { companyId, latitude, longitude, userId, accuracy } = req.body;
+
       if (!companyId || !latitude || !longitude || !userId) {
         return res.status(400).json({
           success: false,
@@ -1020,7 +1021,14 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      const result = await validateLocationInOffice(latitude, longitude, userId, companyId);
+      const result = await validateLocationInOffice(
+        parseFloat(latitude),
+        parseFloat(longitude),
+        String(companyId),
+        String(userId),
+        parseFloat(accuracy || 50)   // ✅ ensure number + default
+      );
+
       res.json({ success: true, data: result });
     } catch (error) {
       res.status(500).json({
@@ -1029,6 +1037,7 @@ export function setupWebRoutes(app: Express) {
       });
     }
   });
+
 
   // Get office geofence info
   app.get('/office/:companyId', async (req, res) => {
