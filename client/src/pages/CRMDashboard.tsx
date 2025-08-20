@@ -37,8 +37,15 @@ interface User {
   lastName: string;
   email: string;
   role: string;
-  company: { companyName: string };
+
+  companyId: number;   // <-- FK, required for punch-in/out
+  company?: {          // <-- optional relation when joined
+    id: number;
+    companyName: string;
+    officeAddress: string;
+  };
 }
+
 
 interface AppState {
   user: User | null;
@@ -252,7 +259,7 @@ const useAPI = () => {
         method: "POST",
         body: JSON.stringify({
           userId: user.id,
-          companyId: user.company,
+          companyId: user.companyId,
           latitude,
           longitude,
           accuracy,
