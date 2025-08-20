@@ -137,6 +137,30 @@ function createAutoCRUD(app: Express, config: {
       const { userId } = req.params;
       const { startDate, endDate, limit = '50', completed, ...filters } = req.query;
 
+      // ✅ ADD THIS CHECK RIGHT HERE - BEFORE THE PROBLEMATIC LINE
+      if (endpoint === 'dealer-reports-scores') {
+        // Special handling for dealer reports - join with dealers table
+        const records = await db.select({
+          id: dealerReportsAndScores.id,
+          dealerId: dealerReportsAndScores.dealerId,
+          dealerScore: dealerReportsAndScores.dealerScore,
+          trustWorthinessScore: dealerReportsAndScores.trustWorthinessScore,
+          creditWorthinessScore: dealerReportsAndScores.creditWorthinessScore,
+          orderHistoryScore: dealerReportsAndScores.orderHistoryScore,
+          visitFrequencyScore: dealerReportsAndScores.visitFrequencyScore,
+          lastUpdatedDate: dealerReportsAndScores.lastUpdatedDate,
+          createdAt: dealerReportsAndScores.createdAt,
+          updatedAt: dealerReportsAndScores.updatedAt,
+        })
+          .from(dealerReportsAndScores)
+          .innerJoin(dealers, eq(dealerReportsAndScores.dealerId, dealers.id))
+          .where(eq(dealers.userId, parseInt(userId)))
+          .orderBy(desc(dealerReportsAndScores.lastUpdatedDate))
+          .limit(parseInt(limit as string));
+
+        return res.json({ success: true, data: records });
+      }
+
       // Base condition - userId is integer in schema
       let whereCondition = eq(table.userId, parseInt(userId));
 
