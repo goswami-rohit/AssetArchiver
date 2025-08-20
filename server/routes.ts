@@ -142,7 +142,9 @@ export async function createOfficeGeofence(companyId: number) {
 export async function validateLocationInOffice(
   latitude: number,
   longitude: number,
-  companyId: number | string
+  companyId: number | string,
+  accuracy: number
+  
 ) {
   try {
     const response = await fetch("https://api.radar.io/v1/track", {
