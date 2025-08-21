@@ -1297,37 +1297,44 @@ export function setupWebRoutes(app: Express) {
   createRadarCRUD(app, {
     endpoint: "attendance",
     table: salesmanAttendance,
-    schema: insertSalesmanAttendanceSchema,
+    schema: insertSalesmanAttendanceSchema, // must match Drizzle
     tableName: "Attendance",
-    dateField: "date",
+
+    // use the real schema column
+    dateField: "attendanceDate",
+
     autoFields: {
-      checkInTime: () => new Date(), // you'll also have out fields when you do a second PUT
+      attendanceDate: () => new Date(),
+      inTimeTimestamp: () => new Date(),
+      inTimeImageCaptured: () => false,   // default until actual photo is taken
+      outTimeImageCaptured: () => false,  // default until checkout
+      createdAt: () => new Date(),
+      updatedAt: () => new Date(),
     },
+
     radar: {
       track: {
-        latField: "inTimeLatitude",   // <-- match your schema field names
+        latField: "inTimeLatitude",
         lngField: "inTimeLongitude",
         accField: "inTimeAccuracy",
         userIdField: "userId",
-        // deviceIdField: "deviceId" // if you carry it in body/headers
       },
       enrich: {
-        // Fill a readable name from context.place or postal context
         mappings: {
-          locationName: "place.name", // fallback handled by UI if undefined
-        }
+          locationName: "place.name",
+        },
       },
       requireGeofence: {
         tag: "dealer",
-        externalIdField: "siteName",     // e.g. you pass which dealer/site the user says they’re at
-        matchBy: "externalId",           // or "description" if you stored names
-        errorMessage: "You must be inside the selected dealer geofence to check in."
+        externalIdField: "locationName",
+        matchBy: "externalId",
+        errorMessage: "You must be inside the selected dealer geofence to check in.",
       },
-      // Optional nearby list if you want the client to show suggestions
-      nearbyGeofences: { limit: 5, radius: 800, includeGeometry: false, tags: "dealer" }
-    }
+      nearbyGeofences: { limit: 5, radius: 800, includeGeometry: false, tags: "dealer" },
+    },
   });
-  
+
+
   createRadarCRUD(app, {
     endpoint: "geo-tracking",
     table: geoTracking,
@@ -1412,8 +1419,12 @@ export function setupWebRoutes(app: Express) {
         });
       }
 
-      const today = new Date().toISOString().split('T')[0];
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      const today = new Date().toISOString().split('T')[0]; // yyyy-mm-dd
+      const now = new Date();
+
+      // Calculate first + last day of current month
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
 
       const [
         todayAttendance,
@@ -1426,13 +1437,15 @@ export function setupWebRoutes(app: Express) {
           .where(and(
             eq(salesmanAttendance.userId, userId),
             eq(salesmanAttendance.attendanceDate, today)
-          )).limit(1),
+          ))
+          .limit(1),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            like(dailyVisitReports.reportDate, `${currentMonth}%`)
+            gte(dailyVisitReports.reportDate, monthStart),
+            lte(dailyVisitReports.reportDate, monthEnd)
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
@@ -1475,4 +1488,6 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Failed to fetch dashboard stats' });
     }
   });
+
+
 }
