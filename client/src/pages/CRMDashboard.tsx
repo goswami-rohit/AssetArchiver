@@ -1,6 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { create } from 'zustand';
+import React, { useState, useEffect, ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -8,2039 +6,2592 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar,
-  Building2, Target, Send, Mic, Search, Filter, MoreHorizontal,
-  Clock, Zap, FileText, TrendingUp, LogIn, LogOut, Navigation,
-  Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft,
-  RotateCcw, Download, Upload, Eye, Briefcase, Users,
-  Activity, BarChart3, PieChart, Smartphone, Laptop,
-  Wifi, WifiOff, RefreshCw, X, Check, AlertCircle, Award,
-  Calendar as CalendarIcon, DollarSign, TrendingDown, Star,
-  Map, Locate, Globe, TrendingDown as Score
+  Clock, MapPin, Users, CheckCircle, Play, Square, Calendar, Building2, MessageCircle, Send, Mic, Camera,
+  Navigation, Plus, List, UserPlus, CalendarDays, LogIn, LogOut, Briefcase, TrendingUp, Zap, Star, Heart,
+  Sparkles, Target, Route, Store, BarChart3, Settings, AlertCircle, Loader2, RefreshCw, Eye, Edit, Trash2,
+  Home, Phone, Mail, Globe, Award, Battery, Wifi, Signal, ChevronRight, Activity, FileText, Users2,
+  MapPinned, Timer, DollarSign, Package, ShoppingCart, TrendingDown, PieChart, BarChart, LineChart
 } from 'lucide-react';
-
-// Import your custom components
 import ChatInterface from '@/components/ChatInterface';
 import JourneyTracker from '@/components/JourneyTracker';
 
-// ============= STATE MANAGEMENT =============
 interface User {
   id: number;
   firstName: string;
   lastName: string;
   email: string;
   role: string;
-
-  companyId: number;   // <-- FK, required for punch-in/out
-  company?: {          // <-- optional relation when joined
-    id: number;
+  company: {
     companyName: string;
-    officeAddress: string;
   };
 }
 
-
-interface AppState {
-  user: User | null;
-  currentPage: string;
-  attendanceStatus: 'in' | 'out';
-  isLoading: boolean;
-  isOnline: boolean;
-  lastSync: Date | null;
-
-  // Data
-  dailyTasks: any[];
-  pjps: any[];
-  dealers: any[];
-  reports: any[];
-  attendance: any[];
-  leaveApplications: any[];
-  clientReports: any[];
-  competitionReports: any[];
-  dashboardStats: any;
-  userTargets: any[];
-  dealerScores: any[];
-
-  // UI State
-  showCreateModal: boolean;
-  createType: 'task' | 'pjp' | 'dealer' | 'dvr' | 'tvr' | 'leave' | 'client-report' | 'competition-report' | 'dealer-score';
-  selectedItem: any;
-  showDetailModal: boolean;
-  searchQuery: string;
-  filterType: string;
-
-  // Actions
-  setUser: (user: User | null) => void;
-  setCurrentPage: (page: string) => void;
-  setAttendanceStatus: (status: 'in' | 'out') => void;
-  setLoading: (loading: boolean) => void;
-  setOnlineStatus: (online: boolean) => void;
-  updateLastSync: () => void;
-  setData: (key: string, data: any) => void;
-  setUIState: (key: string, value: any) => void;
-  resetModals: () => void;
+interface Dealer {
+  id: string;
+  name: string;
+  type: string;
+  region: string;
+  area: string;
+  phoneNo: string;
+  address: string;
+  totalPotential: string;
+  bestPotential: string;
+  brandSelling: string[];
+  feedbacks: string;
 }
 
-const useAppStore = create<AppState>((set, get) => ({
-  user: null,
-  currentPage: 'home',
-  attendanceStatus: 'out',
-  isLoading: false,
-  isOnline: true,
-  lastSync: null,
+interface DashboardStats {
+  attendance: {
+    isCheckedIn: boolean;
+    checkInTime?: string;
+    totalHours: number;
+    weeklyHours: number;
+  };
+  journey: {
+    isActive: boolean;
+    totalDistance: string;
+    activeDuration: string;
+    dealerVisits: number;
+  };
+  reports: {
+    dvrCount: number;
+    tvrCount: number;
+    competitionCount: number;
+    pendingReports: number;
+  };
+  tasks: {
+    pending: number;
+    completed: number;
+    overdue: number;
+  };
+  dealers: {
+    total: number;
+    visited: number;
+    pending: number;
+  };
+  leave: {
+    pending: number;
+    approved: number;
+    remaining: number;
+  };
+}
 
-  dailyTasks: [],
-  pjps: [],
-  dealers: [],
-  reports: [],
-  attendance: [],
-  leaveApplications: [],
-  clientReports: [],
-  competitionReports: [],
-  dashboardStats: {},
-  userTargets: [],
-  dealerScores: [],
+const initialDvrFormData = {
+  reportDate: '',
+  dealerType: '',
+  dealerName: '',
+  subDealerName: null as string | null,
+  location: '',
+  visitType: '',
+  dealerTotalPotential: '',
+  dealerBestPotential: '',
+  brandSelling: '',
+  contactPerson: '',
+  contactPersonPhoneNo: '',
+  todayOrderMt: '',
+  todayCollectionRupees: '',
+  feedbacks: '',
+  solutionBySalesperson: '',
+  anyRemarks: '',
+  inTimeImageUrl: '',
+};
 
-  showCreateModal: false,
-  createType: 'task',
-  selectedItem: null,
-  showDetailModal: false,
-  searchQuery: '',
-  filterType: 'all',
+export default function CRMDashboard() {
+  // Core State
+  const [user, setUser] = useState<User | null>(null);
+  const [isJourneyActive, setIsJourneyActive] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number, lng: number } | null>(null);
+  const [chatContext, setChatContext] = useState<string>('dashboard');
+  const [attendanceStatus, setAttendanceStatus] = useState<'out' | 'in' | null>(null);
+  const [attendanceData, setAttendanceData] = useState<any>(null);
 
-  setUser: (user) => set({ user }),
-  setCurrentPage: (page) => set({ currentPage: page }),
-  setAttendanceStatus: (status) => set({ attendanceStatus: status }),
-  setLoading: (loading) => set({ isLoading: loading }),
-  setOnlineStatus: (online) => set({ isOnline: online }),
-  updateLastSync: () => set({ lastSync: new Date() }),
-  setData: (key, data) => set({ [key]: data }),
-  setUIState: (key, value) => set({ [key]: value }),
-  resetModals: () => set({
-    showCreateModal: false,
-    showDetailModal: false,
-    selectedItem: null
-  })
-}));
+  // Data State
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [dealers, setDealers] = useState<Dealer[]>([]);
+  const [recentReports, setRecentReports] = useState<any[]>([]);
+  const [leaveApplications, setLeaveApplications] = useState<any[]>([]);
 
-// ============= API HOOKS =============
-const useAPI = () => {
-  const { user, setLoading, setData, updateLastSync } = useAppStore();
+  // UI State
+  const [isLoading, setIsLoading] = useState(false);
+  const [showDealerForm, setShowDealerForm] = useState(false);
+  const [showDealersList, setShowDealersList] = useState(false);
+  const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [refreshing, setRefreshing] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [isCreatingTvr, setIsCreatingTvr] = useState(false);
+  const [tvrFormData, setTvrFormData] = useState({
+    visitType: '',
+    siteNameConcernedPerson: '',
+    phoneNo: '',
+    emailId: '',
+    clientsRemarks: '',
+    salespersonRemarks: '',
+    inTimeImageUrl: '',
+  });
 
-  const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
+  const [isCreatingDvr, setIsCreatingDvr] = useState(false);
+  const [dvrFormData, setDvrFormData] = useState(initialDvrFormData);
+
+  //viewing fetched reports on reports tab
+  const [showReportDetails, setShowReportDetails] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<any>(null);
+
+  //TVR handlres
+  const handleTvrInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setTvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleTvrSelectChange = (value: string) => {
+    setTvrFormData(prevData => ({
+      ...prevData,
+      visitType: value,
+    }));
+  };
+
+  const handleTvrFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    // Assume a loading state exists in CRMdashboard.tsx
+    // setIsLoading(true);
     try {
-      const response = await fetch(endpoint, {
+      const response = await fetch('/api/tvr', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...options.headers,
         },
-        ...options,
+        body: JSON.stringify({
+          ...tvrFormData,
+          userId: user?.id, // Assuming userId is available in CRMdashboard.tsx
+          reportDate: new Date().toISOString().split('T')[0],
+          checkInTime: new Date().toISOString(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error('Failed to create TVR');
+      }
+      const result = await response.json();
+      console.log('TVR created:', result);
+      // You might want to update some state here to show a success message
+      // and close the form
+      setTvrFormData({
+        visitType: '',
+        siteNameConcernedPerson: '',
+        phoneNo: '',
+        emailId: '',
+        clientsRemarks: '',
+        salespersonRemarks: '',
+        inTimeImageUrl: '',
+      });
+      setIsCreatingTvr(false);
+    } catch (error) {
+      console.error('Error creating TVR:', error);
+    } finally {
+      // setIsLoading(false);
+    }
+  };
+
+  //DVR handlres
+  const handleDvrInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setDvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleDvrSelectChange = (name: string, value: string) => {
+    setDvrFormData(prevData => ({
+      ...prevData,
+      [name]: value,
+    }));
+  };
+
+  const handleDvrFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    // Create a copy of the form data to process
+    const dataToSubmit: any = { ...dvrFormData };
+
+    try {
+      // FIX 1: Correctly process the brandSelling string into an array.
+      // This logic was correct, but it wasn't being used in the final fetch call.
+      if (dataToSubmit.brandSelling && typeof dataToSubmit.brandSelling === 'string') {
+        dataToSubmit.brandSelling = dataToSubmit.brandSelling.split(',').map((brand: string) => brand.trim()).filter(brand => brand !== '');
+      } else {
+        dataToSubmit.brandSelling = [];
+      }
+
+      // Explicitly ensure subDealerName is null if dealerType is 'Dealer'
+      if (dataToSubmit.dealerType === 'Dealer') {
+        dataToSubmit.subDealerName = null;
+      }
+
+      // This is the payload that will be sent to the API
+      const payload = {
+        ...dataToSubmit,
+        userId: user?.id, // Assumes userId is available
+      };
+
+      // Log the final payload to verify all fields are present before sending
+      //console.log('Payload being sent to API:', payload);
+
+
+
+      // The original code was passing 'dvrFormData' directly,
+      // which did not contain the changes made above.
+      // FIX 3: Pass the `dataToSubmit` object in the fetch body.
+      const response = await fetch('/api/dvr-manual', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...dataToSubmit,
+          userId: user?.id, // Assumes userId is available
+        }),
       });
 
       if (!response.ok) {
-        const txt = await response.text().catch(() => '');
-        throw new Error(`API Error: ${response.status} ${txt}`);
+        throw new Error('Failed to create DVR');
       }
 
-      const data = await response.json();
-      updateLastSync();
-      return data;
+      const result = await response.json();
+      console.log('DVR created:', result);
+
+      // Reset the form data to its initial state
+      setDvrFormData(initialDvrFormData);
+      setIsCreatingDvr(false);
     } catch (error) {
-      console.error('API call failed:', error);
-      throw error;
-    }
-  }, [updateLastSync]);
-
-  const fetchDashboardStats = useCallback(async () => {
-    if (!user) return;
-    try {
-      const data = await apiCall(`/api/dashboard/stats/${user.id}`);
-      setData('dashboardStats', data.data);
-    } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error);
-    }
-  }, [user, apiCall, setData]);
-
-  const fetchUserTargets = useCallback(async () => {
-    if (!user) return;
-    try {
-      // Fetch real data from PJPs completed, etc.
-      const [pjpData, reportData] = await Promise.allSettled([
-        apiCall(`/api/pjp/user/${user.id}/completed`),
-        apiCall(`/api/dvr/user/${user.id}?completed=true`)
-      ]);
-
-      const completedPJPs = pjpData.status === 'fulfilled' ? pjpData.value.data?.length || 0 : 0;
-      const completedReports = reportData.status === 'fulfilled' ? reportData.value.data?.length || 0 : 0;
-
-      const realTargets = [
-        { label: 'PJPs Completed', current: completedPJPs, target: 25, icon: Navigation, color: 'text-purple-400' },
-        { label: 'Reports Submitted', current: completedReports, target: 30, icon: FileText, color: 'text-blue-400' },
-        { label: 'Dealers Visited', current: Math.floor(completedReports * 0.8), target: 20, icon: Building2, color: 'text-orange-400' }
-      ];
-
-      setData('userTargets', realTargets);
-    } catch (error) {
-      console.error('Failed to fetch user targets:', error);
-    }
-  }, [user, apiCall, setData]);
-
-  const fetchAllData = useCallback(async () => {
-    if (!user) return;
-
-    setLoading(true);
-    try {
-      const [
-        tasksRes,
-        pjpsRes,
-        dealersRes,
-        dvrRes,
-        tvrRes,
-        attendanceRes,
-        leaveRes,
-        clientRes,
-        competitionRes,
-        dealerScoresRes,
-        geoTrackingRes,
-        dealerCheckinsRes
-      ] = await Promise.allSettled([
-        apiCall(`/api/daily-tasks/user/${user.id}`),
-        apiCall(`/api/pjp/user/${user.id}`),
-        apiCall(`/api/dealers/user/${user.id}`),
-        apiCall(`/api/dvr/user/${user.id}?limit=20`),
-        apiCall(`/api/tvr/user/${user.id}`),
-        apiCall(`/api/attendance/user/${user.id}`),           // Radar CRUD
-        apiCall(`/api/leave-applications/user/${user.id}`),
-        apiCall(`/api/client-reports/user/${user.id}`),
-        apiCall(`/api/competition-reports/user/${user.id}`),
-        apiCall(`/api/dealer-reports-scores/user/${user.id}`),
-        apiCall(`/api/geo-tracking/user/${user.id}?limit=100`), // Radar CRUD
-        apiCall(`/api/dealer-checkins/user/${user.id}?limit=50`) // Radar CRUD
-      ]);
-
-      if (tasksRes.status === 'fulfilled') setData('dailyTasks', tasksRes.value.data || []);
-      if (pjpsRes.status === 'fulfilled') setData('pjps', pjpsRes.value.data || []);
-      if (dealersRes.status === 'fulfilled') setData('dealers', dealersRes.value.data || []);
-      if (dvrRes.status === 'fulfilled') setData('reports', dvrRes.value.data || []);
-      if (tvrRes.status === 'fulfilled') setData('tvr', tvrRes.value.data || []);
-      if (attendanceRes.status === 'fulfilled') setData('attendance', attendanceRes.value.data || []);
-      if (leaveRes.status === 'fulfilled') setData('leaveApplications', leaveRes.value.data || []);
-      if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
-      if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
-      if (dealerScoresRes.status === 'fulfilled') setData('dealerScores', dealerScoresRes.value.data || []);
-      if (geoTrackingRes.status === 'fulfilled') setData('geoTracking', geoTrackingRes.value.data || []);
-      if (dealerCheckinsRes.status === 'fulfilled') setData('dealerCheckins', dealerCheckinsRes.value.data || []);
-
-      await Promise.all([fetchDashboardStats(), fetchUserTargets()]);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
-
-  // ---- Attendance punch using Radar-aware CRUD ----
-  const handleAttendancePunch = useCallback(async (opts?: {
-    siteName?: string; // if you want to bind to a specific dealer/site the UI selected
-  }) => {
-    if (!user) return;
-
-    try {
-      setLoading(true);
-
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
-      });
-
-      const { latitude, longitude, accuracy } = position.coords;
-      const status = useAppStore.getState().attendanceStatus;
-
-      if (status === 'out') {
-        // === PUNCH-IN -> CREATE ===
-        const body = {
-          userId: user.id,
-          companyId: user.companyId,
-          // fields that our Radar CRUD expects for track()
-          inTimeLatitude: latitude,
-          inTimeLongitude: longitude,
-          inTimeAccuracy: accuracy,
-          // optional if you want to force/validate a specific dealer geofence
-          siteName: opts?.siteName
-        };
-
-        const response = await apiCall('/api/attendance', {
-          method: 'POST',
-          body: JSON.stringify(body),
-        });
-
-        if (response.success) {
-          useAppStore.getState().setAttendanceStatus('in');
-          await fetchDashboardStats();
-        }
-      } else {
-        // === PUNCH-OUT -> UPDATE last open row ===
-        // You might already store open row id, but let's derive it safely:
-        const list = await apiCall(`/api/attendance/user/${user.id}?limit=1`);
-        const latest = Array.isArray(list?.data) ? list.data[0] : undefined;
-        if (!latest || latest.outTime) {
-          throw new Error('No open attendance record found for punch-out.');
-        }
-
-        const body = {
-          outTimeLatitude: latitude,
-          outTimeLongitude: longitude,
-          outTimeAccuracy: accuracy
-        };
-
-        const response = await apiCall(`/api/attendance/${latest.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(body),
-        });
-
-        if (response.success) {
-          useAppStore.getState().setAttendanceStatus('out');
-          await fetchDashboardStats();
-        }
-      }
-    } catch (error) {
-      console.error('Attendance punch failed:', error);
-      // Optional: surface backend geofence error message to UI toast
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setLoading, fetchDashboardStats]);
-
-  // ---- Geo-tracking ping (one-off) ----
-  const sendGeoTrackingPing = useCallback(async (extra?: {
-    siteName?: string;
-    description?: string;
-  }) => {
-    if (!user) return;
-
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
-      });
-
-      const { latitude, longitude, accuracy } = position.coords;
-
-      const response = await apiCall('/api/geo-tracking', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId: user.id,
-          companyId: user.companyId,
-          latitude,
-          longitude,
-          accuracy,
-          siteName: extra?.siteName,
-          description: extra?.description
-        })
-      });
-
-      return response;
-    } catch (e) {
-      console.error('sendGeoTrackingPing failed:', e);
-      throw e;
-    }
-  }, [user, apiCall]);
-
-  // ---- Dealer check-in (uses Radar geofence gate) ----
-  const dealerCheckIn = useCallback(async (siteName: string) => {
-    if (!user) return;
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
-      });
-
-      const { latitude, longitude, accuracy } = position.coords;
-
-      const response = await apiCall('/api/dealer-checkins', {
-        method: 'POST',
-        body: JSON.stringify({
-          userId: user.id,
-          companyId: user.companyId,
-          latitude,
-          longitude,
-          accuracy,
-          siteName // server will enforce inside dealer geofence tagged "dealer"
-        })
-      });
-
-      return response;
-    } catch (e) {
-      console.error('dealerCheckIn failed:', e);
-      throw e;
-    }
-  }, [user, apiCall]);
-
-  const createRecord = useCallback(async (type: string, data: any) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: '/api/daily-tasks',
-      pjp: '/api/pjp',
-      dealer: '/api/dealers',
-      dvr: '/api/dvr',
-      tvr: '/api/tvr',
-      leave: '/api/leave-applications',
-      'client-report': '/api/client-reports',
-      'competition-report': '/api/competition-reports',
-      'dealer-score': '/api/dealer-reports-scores',
-      // new:
-      'geo-tracking': '/api/geo-tracking',
-      'dealer-checkin': '/api/dealer-checkins',
-      attendance: '/api/attendance'
-    } as const;
-
-    const url = (endpoints as any)[type];
-    if (!url) throw new Error(`Unknown type ${type}`);
-
-    try {
-      setLoading(true);
-      const response = await apiCall(url, {
-        method: 'POST',
-        body: JSON.stringify({ ...data, userId: user.id, companyId: user.companyId })
-      });
-
-      if (response.success) {
-        useAppStore.getState().resetModals();
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to create ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setLoading, fetchAllData]);
-
-  const updateRecord = useCallback(async (type: string, id: string, data: any) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
-      dealer: `/api/dealers/${id}`,
-      dvr: `/api/dvr/${id}`,
-      tvr: `/api/tvr/${id}`,
-      leave: `/api/leave-applications/${id}`,
-      'client-report': `/api/client-reports/${id}`,
-      'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`,
-      // new:
-      'geo-tracking': `/api/geo-tracking/${id}`,
-      'dealer-checkin': `/api/dealer-checkins/${id}`,
-      attendance: `/api/attendance/${id}`
-    } as const;
-
-    const url = (endpoints as any)[type];
-    if (!url) throw new Error(`Unknown type ${type}`);
-
-    try {
-      setLoading(true);
-      const response = await apiCall(url, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      });
-
-      if (response.success) {
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to update ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setLoading, fetchAllData]);
-
-  const deleteRecord = useCallback(async (type: string, id: string) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
-      dealer: `/api/dealers/${id}`,
-      dvr: `/api/dvr/${id}`,
-      tvr: `/api/tvr/${id}`,
-      leave: `/api/leave-applications/${id}`,
-      'client-report': `/api/client-reports/${id}`,
-      'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`,
-      // new:
-      'geo-tracking': `/api/geo-tracking/${id}`,
-      'dealer-checkin': `/api/dealer-checkins/${id}`,
-      attendance: `/api/attendance/${id}`
-    } as const;
-
-    const url = (endpoints as any)[type];
-    if (!url) throw new Error(`Unknown type ${type}`);
-
-    try {
-      setLoading(true);
-      const response = await apiCall(url, {
-        method: 'DELETE'
-      });
-
-      if (response.success) {
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to delete ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
-    }
-  }, [user, apiCall, setLoading, fetchAllData]);
-
-  return {
-    fetchAllData,
-    fetchDashboardStats,
-    fetchUserTargets,
-    handleAttendancePunch,
-    sendGeoTrackingPing,
-    dealerCheckIn,
-    createRecord,
-    updateRecord,
-    deleteRecord
-  };
-};
-
-// ============= LOCATION PICKER COMPONENT =============
-const LocationPicker = ({
-  onLocationSelect,
-  currentLocation
-}: {
-  onLocationSelect: (location: string, coords?: { lat: number; lng: number }) => void;
-  currentLocation?: string;
-}) => {
-  const [searchQuery, setSearchQuery] = useState(currentLocation || '');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const getCurrentLocation = async () => {
-    setIsLoading(true);
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
-      });
-
-      const { latitude, longitude, accuracy } = position.coords;
-
-      // Let backend (Radar) enrich; here we just display quick coords
-      const locationName = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)} (~${Math.round(accuracy)}m)`;
-      onLocationSelect(locationName, { lat: latitude, lng: longitude });
-      setSearchQuery(locationName);
-    } catch (error) {
-      console.error('Failed to get current location:', error);
+      console.error('Error creating DVR:', error);
+      // You could add a user-facing error message here
     } finally {
       setIsLoading(false);
     }
   };
-  return (
-    <div className="space-y-3">
-      <div className="flex space-x-2">
-        <Input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search location or area..."
-          className="bg-gray-900/50 border-gray-600 text-white flex-1"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={getCurrentLocation}
-          disabled={isLoading}
-          className="border-gray-600 text-gray-300 hover:bg-gray-700"
-        >
-          {isLoading ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Locate className="w-4 h-4" />
-          )}
-        </Button>
-      </div>
 
-      <div className="flex space-x-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            onLocationSelect(searchQuery);
-          }}
-          className="text-blue-400 hover:bg-blue-400/10"
-        >
-          <Map className="w-4 h-4 mr-1" />
-          Use This Location
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-// ============= COMPONENTS =============
-const StatusBar = () => {
-  const { isOnline, lastSync } = useAppStore();
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex items-center justify-between px-4 py-2 bg-gray-900/50 backdrop-blur-lg border-b border-gray-800"
-    >
-      <div className="flex items-center space-x-2">
-        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-gray-400">
-          {isOnline ? 'Online' : 'Offline'}
-        </span>
-      </div>
-
-      {lastSync && (
-        <span className="text-xs text-gray-500">
-          Last sync: {lastSync.toLocaleTimeString()}
-        </span>
-      )}
-    </motion.div>
-  );
-};
-
-const LoadingSkeleton = ({ rows = 3 }: { rows?: number }) => (
-  <div className="space-y-3">
-    {Array.from({ length: rows }).map((_, i) => (
-      <Card key={i} className="bg-gray-900/30 border-gray-800">
-        <CardContent className="p-4">
-          <div className="flex items-center space-x-3">
-            <Skeleton className="h-12 w-12 rounded-full bg-gray-700" />
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-4 w-3/4 bg-gray-700" />
-              <Skeleton className="h-3 w-1/2 bg-gray-700" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    ))}
-  </div>
-);
-
-const ActionButton = ({
-  icon: Icon,
-  label,
-  variant = 'default',
-  onClick,
-  loading = false
-}: {
-  icon: any;
-  label: string;
-  variant?: 'default' | 'primary' | 'success' | 'danger';
-  onClick: () => void;
-  loading?: boolean;
-}) => {
-  const variants = {
-    default: 'bg-gray-800 hover:bg-gray-700 text-gray-200',
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-    success: 'bg-green-600 hover:bg-green-700 text-white',
-    danger: 'bg-red-600 hover:bg-red-700 text-white'
+  //Eye button handler 
+  const handleViewReport = async (reportId: string, reportType: string) => {
+    try {
+      const response = await fetch(`/api/${reportType.toLowerCase()}/${reportId}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch report details');
+      }
+      const responseData = await response.json();
+      // Correctly set the state with the `data` property from the response
+      setSelectedReport(responseData.data);
+      setShowReportDetails(true);
+    } catch (error) {
+      console.error('Error fetching report:', error);
+    }
   };
 
-  return (
-    <motion.button
-      whileTap={{ scale: 0.95 }}
-      whileHover={{ scale: 1.02 }}
-      onClick={onClick}
-      disabled={loading}
-      className={`
-        flex items-center space-x-2 px-4 py-2 rounded-xl font-medium
-        transition-all duration-200 shadow-lg
-        ${variants[variant]}
-        ${loading ? 'opacity-50 cursor-not-allowed' : ''}
-      `}
-    >
-      {loading ? (
-        <RefreshCw className="w-4 h-4 animate-spin" />
-      ) : (
-        <Icon className="w-4 h-4" />
-      )}
-      <span>{label}</span>
-    </motion.button>
-  );
-};
+  // Form State
+  const [dealerForm, setDealerForm] = useState({
+    name: '', type: 'Dealer', region: '', area: '', phoneNo: '', address: '',
+    totalPotential: '', bestPotential: '', brandSelling: [''], feedbacks: '', remarks: ''
+  });
 
-// ============= MAIN DASHBOARD COMPONENT =============
-export default function AdvancedCRM() {
-  const {
-    user,
-    currentPage,
-    attendanceStatus,
-    isLoading,
-    dailyTasks,
-    pjps,
-    dealers,
-    reports,
-    dashboardStats,
-    userTargets,
-    dealerScores,
-    showCreateModal,
-    createType,
-    setUser,
-    setCurrentPage,
-    setUIState,
-    resetModals
-  } = useAppStore();
+  const [leaveForm, setLeaveForm] = useState({
+    leaveType: '', startDate: '', endDate: '', reason: '', totalDays: 1
+  });
 
-  const {
-    fetchAllData,
-    handleAttendancePunch,
-    createRecord,
-    updateRecord,
-    deleteRecord
-  } = useAPI();
+  const [taskForm, setTaskForm] = useState({
+    title: '', description: '', priority: 'medium', dueDate: '', assignedTo: ''
+  });
 
-  // Initialize app
+  // 🚀 INITIALIZATION
   useEffect(() => {
-    const initializeApp = async () => {
+    initializeDashboard();
+    setupLocationTracking();
+    setupAutoRefresh();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchAllDashboardData();
+    }
+  }, [user]);
+
+  const initializeDashboard = async () => {
+    setIsLoading(true);
+    try {
+      // Get user data from localStorage or API
       const userData = localStorage.getItem('user');
       if (userData) {
         const parsedUser = JSON.parse(userData);
         setUser(parsedUser);
+      } else {
+        // Fallback: fetch user data from API if not in localStorage
+        await fetchUserData();
       }
-    };
-
-    initializeApp();
-  }, [setUser]);
-
-  // Fetch data when user changes
-  useEffect(() => {
-    if (user) {
-      fetchAllData();
-    }
-  }, [user, fetchAllData]);
-
-  // Network status monitoring
-  useEffect(() => {
-    const handleOnline = () => useAppStore.getState().setOnlineStatus(true);
-    const handleOffline = () => useAppStore.getState().setOnlineStatus(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  // Memoized filtered data
-  const filteredTasks = useMemo(() =>
-    dailyTasks.filter(task => task.status !== 'Completed').slice(0, 5),
-    [dailyTasks]
-  );
-
-  const activePJPs = useMemo(() =>
-    pjps.filter(pjp => pjp.status === 'active' || pjp.status === 'planned').slice(0, 5),
-    [pjps]
-  );
-
-  const recentReports = useMemo(() =>
-    reports.slice(0, 3),
-    [reports]
-  );
-
-  // ============= HOME PAGE - PROPERLY SCROLLABLE =============
-  const HomePage = () => (
-    <div className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
-      <StatusBar />
-
-      {/* SCROLLABLE CONTENT CONTAINER */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Header Section */}
-        <div className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
-          <div className="relative px-6 py-8">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-4">
-                <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
-                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
-                    {user?.firstName?.[0]}{user?.lastName?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <motion.h1
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-2xl font-bold text-white"
-                  >
-                    {user?.firstName} {user?.lastName}
-                  </motion.h1>
-                  <p className="text-blue-200">{user?.company?.companyName}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-3">
-                <ActionButton
-                  icon={attendanceStatus === 'in' ? LogOut : LogIn}
-                  label={attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
-                  variant={attendanceStatus === 'in' ? 'danger' : 'success'}
-                  onClick={handleAttendancePunch}
-                  loading={isLoading}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-white hover:bg-white/10"
-                >
-                  <Bell className="w-5 h-5" />
-                </Button>
-              </div>
-            </div>
-
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                {
-                  label: "Today's Tasks",
-                  value: filteredTasks.length,
-                  icon: CheckCircle,
-                  color: "from-blue-500 to-blue-600"
-                },
-                {
-                  label: "Active PJPs",
-                  value: activePJPs.length,
-                  icon: Calendar,
-                  color: "from-purple-500 to-purple-600"
-                },
-                {
-                  label: "Total Dealers",
-                  value: dealers.length,
-                  icon: Building2,
-                  color: "from-orange-500 to-orange-600"
-                },
-                {
-                  label: "This Month",
-                  value: reports.length,
-                  icon: BarChart3,
-                  color: "from-green-500 to-green-600"
-                }
-              ].map((stat, index) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                >
-                  <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">{stat.label}</p>
-                          <p className="text-2xl font-bold text-white">{stat.value}</p>
-                        </div>
-                        <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
-                          <stat.icon className="w-6 h-6 text-white" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* SCROLLABLE Content Sections */}
-        <div className="px-6 pb-32 space-y-8">
-          {/* Tasks Section */}
-          <Section
-            title="Today's Tasks"
-            icon={CheckCircle}
-            onAdd={() => {
-              setUIState('createType', 'task');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : filteredTasks.length > 0 ? (
-              <AnimatePresence>
-                {filteredTasks.map((task, index) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    index={index}
-                    onEdit={(task) => {
-                      setUIState('selectedItem', task);
-                      setUIState('createType', 'task');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(taskId) => deleteRecord('task', taskId)}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No tasks for today</p>
-              </div>
-            )}
-          </Section>
-
-          {/* ENHANCED PJP Section - NOW WITH PROPER CRUD */}
-          <Section
-            title="Journey Plans"
-            icon={Navigation}
-            onAdd={() => {
-              setUIState('createType', 'pjp');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : activePJPs.length > 0 ? (
-              <AnimatePresence>
-                {activePJPs.map((pjp, index) => (
-                  <PJPCard
-                    key={pjp.id}
-                    pjp={pjp}
-                    index={index}
-                    onEdit={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('createType', 'pjp');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
-                    onView={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No active journey plans</p>
-              </div>
-            )}
-          </Section>
-
-          {/* Dealers Section with Scoring */}
-          <Section
-            title="Recent Dealers"
-            icon={Building2}
-            onAdd={() => {
-              setUIState('createType', 'dealer');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : dealers.length > 0 ? (
-              <AnimatePresence>
-                {dealers.slice(0, 5).map((dealer, index) => (
-                  <DealerCard
-                    key={dealer.id}
-                    dealer={dealer}
-                    index={index}
-                    onEdit={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
-                    onView={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('showDetailModal', true);
-                    }}
-                    onScore={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer-score');
-                      setUIState('showCreateModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <DealerCard
-                key="ns-traders"
-                dealer={{
-                  id: 'sample',
-                  name: 'NS Traders',
-                  region: 'North',
-                  area: 'Zone A',
-                  type: 'Premium',
-                  totalPotential: '50,000',
-                  contact: '+91-XXXXXXXXXX',
-                  address: 'Sample Address'
-                }}
-                index={0}
-                onEdit={() => { }}
-                onDelete={() => { }}
-                onView={(dealer) => {
-                  setUIState('selectedItem', dealer);
-                  setUIState('showDetailModal', true);
-                }}
-                onScore={() => { }}
-              />
-            )}
-          </Section>
-
-          {/* ENHANCED Reports Section with DVR/TVR options */}
-          <Section
-            title="Recent Reports"
-            icon={FileText}
-            onAdd={() => {
-              // Show options for DVR or TVR
-              setUIState('createType', 'dvr');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            <div className="flex space-x-2 mb-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'dvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-blue-600 text-blue-400 hover:bg-blue-400/10"
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Create DVR
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'tvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-purple-600 text-purple-400 hover:bg-purple-400/10"
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Create TVR
-              </Button>
-            </div>
-
-            {recentReports.length > 0 ? (
-              <AnimatePresence>
-                {recentReports.map((report, index) => (
-                  <ReportCard
-                    key={report.id}
-                    report={report}
-                    index={index}
-                    onView={(report) => {
-                      setUIState('selectedItem', report);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No reports yet</p>
-              </div>
-            )}
-          </Section>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ============= PROFILE PAGE with REAL DATA =============
-  const ProfilePage = () => (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col"
-    >
-      <StatusBar />
-
-      <div className="flex-1 overflow-y-auto px-6 py-8 pb-32">
-        {/* Profile Header */}
-        <div className="text-center mb-8">
-          <Avatar className="h-24 w-24 mx-auto mb-4 ring-4 ring-blue-500/30">
-            <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-2xl font-bold">
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
-            </AvatarFallback>
-          </Avatar>
-          <h2 className="text-2xl font-bold text-white mb-1">
-            {user?.firstName} {user?.lastName}
-          </h2>
-          <p className="text-gray-400">{user?.email}</p>
-          <Badge className="mt-2 bg-blue-600 text-white">{user?.role}</Badge>
-        </div>
-
-        {/* Achievement Stats - REAL DATA */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4 text-center">
-              <div className="flex items-center justify-center mb-2">
-                <Target className="w-5 h-5 text-blue-400 mr-2" />
-                <p className="text-2xl font-bold text-white">{reports.length}</p>
-              </div>
-              <p className="text-sm text-gray-400">Total Reports</p>
-            </CardContent>
-          </Card>
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4 text-center">
-              <div className="flex items-center justify-center mb-2">
-                <Building2 className="w-5 h-5 text-orange-400 mr-2" />
-                <p className="text-2xl font-bold text-white">{dealers.length}</p>
-              </div>
-              <p className="text-sm text-gray-400">Dealers Managed</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* REAL Monthly Targets from API */}
-        <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center text-white">
-              <Award className="w-5 h-5 mr-2 text-yellow-400" />
-              Performance Metrics
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {userTargets.map((item, index) => {
-                const progress = (item.current / item.target) * 100;
-                return (
-                  <div key={item.label} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <item.icon className={`w-4 h-4 ${item.color}`} />
-                        <span className="text-sm text-gray-300">{item.label}</span>
-                      </div>
-                      <span className="text-sm text-white">
-                        {item.current} / {item.target}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progress}%` }}
-                        transition={{ duration: 1, delay: index * 0.2 }}
-                        className={`h-2 rounded-full ${progress >= 80 ? 'bg-green-500' : progress >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Profile Actions */}
-        <div className="space-y-4">
-          <Button
-            onClick={() => {
-              localStorage.removeItem('user');
-              setUser(null);
-            }}
-            className="w-full bg-red-600 hover:bg-red-700 text-white py-3"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </div>
-    </motion.div>
-  );
-
-  // ============= ENHANCED SECTION COMPONENT =============
-  const Section = ({
-    title,
-    icon: Icon,
-    children,
-    onAdd
-  }: {
-    title: string;
-    icon: any;
-    children: React.ReactNode;
-    onAdd: () => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-8"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-3">
-          <Icon className="w-6 h-6 text-blue-400" />
-          <h2 className="text-xl font-bold text-white">{title}</h2>
-        </div>
-        <Button
-          onClick={onAdd}
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
-        >
-          <Plus className="w-4 h-4" />
-        </Button>
-      </div>
-      <div className="space-y-3">
-        {children}
-      </div>
-    </motion.div>
-  );
-
-  // ============= ENHANCED CARD COMPONENTS =============
-  const TaskCard = ({
-    task,
-    index,
-    onEdit,
-    onDelete
-  }: {
-    task: any;
-    index: number;
-    onEdit: (task: any) => void;
-    onDelete: (taskId: string) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h3 className="font-semibold text-white">{task.visitType || task.title}</h3>
-              <p className="text-sm text-gray-400 mt-1">{task.description}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
-                  {task.priority || 'Normal'}
-                </Badge>
-                <span className="text-xs text-gray-500">{task.taskDate}</span>
-                {task.pjpId && (
-                  <Badge variant="outline" className="text-purple-400 border-purple-400">
-                    PJP Task
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(task)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(task.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-green-400"
-              >
-                <CheckCircle className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const PJPCard = ({
-    pjp,
-    index,
-    onEdit,
-    onDelete,
-    onView
-  }: {
-    pjp: any;
-    index: number;
-    onEdit: (pjp: any) => void;
-    onDelete: (pjpId: string) => void;
-    onView: (pjp: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(pjp)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{pjp.objective}</h3>
-              <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge
-                  variant="outline"
-                  className={
-                    pjp.status === 'active' ? 'text-green-400 border-green-400' :
-                      pjp.status === 'planned' ? 'text-blue-400 border-blue-400' :
-                        'text-yellow-400 border-yellow-400'
-                  }
-                >
-                  {pjp.status}
-                </Badge>
-                <span className="text-xs text-gray-500">{pjp.planDate}</span>
-                {pjp.areaToBeVisited && (
-                  <span className="text-xs text-gray-500">📍 {pjp.areaToBeVisited}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(pjp)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(pjp)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(pjp.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-              <Navigation className="w-5 h-5 text-purple-400" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const DealerCard = ({
-    dealer,
-    index,
-    onEdit,
-    onDelete,
-    onView,
-    onScore
-  }: {
-    dealer: any;
-    index: number;
-    onEdit: (dealer: any) => void;
-    onDelete: (dealerId: string) => void;
-    onView: (dealer: any) => void;
-    onScore: (dealer: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(dealer)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{dealer.name}</h3>
-              <p className="text-sm text-gray-400 mt-1">{dealer.region} - {dealer.area}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{dealer.type}</Badge>
-                <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-yellow-400"
-                onClick={() => onScore(dealer)}
-              >
-                <Star className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(dealer)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(dealer)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(dealer.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const ReportCard = ({
-    report,
-    index,
-    onView
-  }: {
-    report: any;
-    index: number;
-    onView: (report: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(report)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{report.title || 'Daily Report'}</h3>
-              <p className="text-sm text-gray-400 mt-1">{report.location || 'Field Visit'}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{report.type || 'DVR'}</Badge>
-                <span className="text-xs text-gray-500">{report.date}</span>
-                {report.amount && (
-                  <span className="text-xs text-green-400">₹{report.amount}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(report)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  // AI, Journey, and other pages remain the same
-  const AIPage = () => (
-    <div className="h-full">
-      <ChatInterface
-        onBack={() => setCurrentPage('home')}
-      />
-    </div>
-  );
-
-  const JourneyPage = () => (
-    <div className="h-full">
-      <JourneyTracker
-        userId={user?.id || 1}
-        onBack={() => setCurrentPage('home')}
-        onJourneyEnd={() => {
-          fetchAllData();
-          setCurrentPage('home');
-        }}
-      />
-    </div>
-  );
-
-  // ============= RENDER PAGE =============
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'home': return <HomePage />;
-      case 'ai': return <AIPage />;
-      case 'journey': return <JourneyPage />;
-      case 'profile': return <ProfilePage />;
-      default: return <HomePage />;
+    } catch (error) {
+      console.error('Error initializing dashboard:', error);
+      addError('Failed to initialize dashboard');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // ============= MAIN RENDER =============
-  return (
-    <div className="h-screen flex flex-col bg-gray-900 max-w-md mx-auto relative overflow-hidden">
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        <AnimatePresence mode="wait">
-          {renderPage()}
-        </AnimatePresence>
-      </div>
+  const setupLocationTracking = () => {
+    if (navigator.geolocation) {
+      // High accuracy location for better tracking
+      const options = {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000 // 5 minutes
+      };
 
-      {/* BOTTOM NAVIGATION */}
-      {(currentPage !== 'ai' && currentPage !== 'journey') && (
-        <motion.div
-          initial={{ y: 100 }}
-          animate={{ y: 0 }}
-          className="absolute bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-700/50 shadow-2xl safe-area-pb"
-        >
-          <div className="flex items-center justify-around py-3 px-4">
-            {[
-              { key: 'home', icon: Home, label: 'Home' },
-              { key: 'ai', icon: MessageCircle, label: 'AI' },
-              { key: 'journey', icon: MapPin, label: 'Journey' },
-              { key: 'profile', icon: User, label: 'Profile' }
-            ].map((nav) => (
-              <motion.button
-                key={nav.key}
-                whileTap={{ scale: 0.85 }}
-                whileHover={{ scale: 1.05 }}
-                onClick={() => setCurrentPage(nav.key)}
-                className={`
-                  flex flex-col items-center justify-center space-y-1 px-4 py-2 rounded-2xl 
-                  transition-all duration-300 min-w-[60px] relative overflow-hidden
-                  ${currentPage === nav.key
-                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800/60'
-                  }
-                `}
-              >
-                {currentPage === nav.key && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl"
-                    initial={false}
-                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                  />
-                )}
-                <nav.icon className={`w-5 h-5 relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`} />
-                <span className={`text-xs font-medium relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`}>
-                  {nav.label}
-                </span>
-              </motion.button>
-            ))}
-          </div>
-        </motion.div>
-      )}
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => {
+          console.warn('Location error:', error);
+          addError('Location services unavailable');
+        },
+        options
+      );
 
-      {/* Enhanced Create Modal */}
-      <AnimatePresence>
-        {showCreateModal && (
-          <CreateModal
-            type={createType}
-            onClose={resetModals}
-            onCreate={createRecord}
-          />
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+      // Watch position for real-time updates
+      navigator.geolocation.watchPosition(
+        (position) => {
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude
+          });
+        },
+        (error) => console.warn('Location watch error:', error),
+        options
+      );
+    }
+  };
 
-// ============= ENHANCED CREATE MODAL =============
-const CreateModal = ({
-  type,
-  onClose,
-  onCreate
-}: {
-  type: string;
-  onClose: () => void;
-  onCreate: (type: string, data: any) => Promise<any>;
-}) => {
-  const [formData, setFormData] = useState<any>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, dealers } = useAppStore();
+  const setupAutoRefresh = () => {
+    // Auto-refresh dashboard data every 5 minutes
+    const interval = setInterval(() => {
+      if (user && !refreshing) {
+        refreshDashboard();
+      }
+    }, 300000); // 5 minutes
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
+    return () => clearInterval(interval);
+  };
+
+  // 🎯 COMPREHENSIVE DATA FETCHING - HOOKS TO ALL YOUR ENDPOINTS
+  const fetchAllDashboardData = async () => {
+    if (!user) return;
+
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        fetchAttendanceStatus(),
+        fetchJourneyStatus(),
+        fetchDashboardStats(),
+        fetchTasks(),
+        fetchDealers(),
+        fetchRecentReports(),
+        fetchLeaveApplications()
+      ]);
+    } catch (error) {
+      console.error('Error fetching dashboard data:', error);
+      addError('Failed to load dashboard data');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const fetchAttendanceStatus = async () => {
+    if (!user) return;
 
     try {
-      // ENHANCED DATA MAPPING FOR ALL TYPES
-      let transformedData = { ...formData };
+      console.log('🔍 Fetching attendance for user:', user.id); // DEBUG
+      const response = await fetch(`/api/attendance/today/${user.id}`);
+      const data = await response.json();
+      console.log('🔍 API Response:', data); // DEBUG
 
-      if (type === 'task') {
-        transformedData = {
-          userId: user?.id || 1,
-          assignedByUserId: user?.id || 1,
-          taskDate: formData.taskDate || new Date().toISOString().split('T')[0],
-          visitType: formData.title || formData.visitType || 'General Task',
-          relatedDealerId: formData.relatedDealerId || null,
-          siteName: formData.siteName || formData.title || '',
-          description: formData.description || '',
-          pjpId: formData.isPjp ? formData.pjpId : null // PJP OPTION
-        };
+      if (data.success) {
+        // 🔥 UPDATED: Handle new API response structure with multiple sessions
+        if (data.hasAttendance) {
+          console.log('🔍 Has attendance data'); // DEBUG
+          console.log('🔍 Active session:', data.activeSession); // DEBUG
+          console.log('🔍 Total sessions:', data.totalSessions); // DEBUG
+          console.log('🔍 Currently punched in:', data.punchedIn); // DEBUG
+
+          // 🔥 NEW: Set attendance data to active session or latest session
+          const attendanceToDisplay = data.activeSession || data.latestSession;
+          if (attendanceToDisplay) {
+            setAttendanceData(attendanceToDisplay);
+          }
+
+          // 🔥 UPDATED: Use the API's calculated punchedIn status
+          const newStatus = data.punchedIn ? 'in' : 'out';
+          console.log('🔍 Setting status to:', newStatus); // DEBUG
+          setAttendanceStatus(newStatus);
+        } else {
+          console.log('🔍 No attendance data, setting to out'); // DEBUG
+          setAttendanceStatus('out');
+          setAttendanceData(null); // 🔥 SAFETY: Clear any old data
+        }
+      } else {
+        console.log('🔍 API not successful, setting to out'); // DEBUG
+        setAttendanceStatus('out');
+        setAttendanceData(null); // 🔥 SAFETY: Clear any old data
       }
-
-      if (type === 'pjp') {
-        transformedData = {
-          userId: user?.id || 1,
-          planDate: formData.plannedDate || formData.planDate,
-          visitType: formData.visitType || 'Field Visit',
-          siteName: formData.location || formData.siteName,
-          areaToBeVisited: formData.area || formData.areaToBeVisited || formData.location,
-          objective: formData.objective || '',
-          expectedOutcome: formData.expectedOutcome || '',
-          status: 'planned'
-        };
-      }
-
-      if (type === 'dealer') {
-        transformedData = {
-          userId: user?.id || 1,
-          name: formData.name,
-          region: formData.region,
-          area: formData.area,
-          type: formData.type || 'Standard',
-          contact: formData.contact || '',
-          address: formData.address || formData.location || '',
-          totalPotential: formData.totalPotential || '0'
-        };
-      }
-
-      if (type === 'dealer-score') {
-        transformedData = {
-          dealerId: formData.dealerId || useAppStore.getState().selectedItem?.id,
-          dealerScore: formData.dealerScore || 0,
-          trustWorthinessScore: formData.trustWorthinessScore || 0,
-          creditWorthinessScore: formData.creditWorthinessScore || 0,
-          orderHistoryScore: formData.orderHistoryScore || 0,
-          visitFrequencyScore: formData.visitFrequencyScore || 0
-        };
-      }
-
-      if (type === 'dvr' || type === 'tvr') {
-        transformedData = {
-          userId: user?.id || 1,
-          type: type.toUpperCase(),
-          title: formData.title || `${type.toUpperCase()} Report`,
-          location: formData.location || '',
-          amount: formData.amount || 0,
-          description: formData.description || '',
-          date: formData.date || new Date().toISOString().split('T')[0]
-        };
-      }
-
-      await onCreate(type, transformedData);
-      onClose();
     } catch (error) {
-      console.error('Failed to create record:', error);
-    } finally {
-      setIsSubmitting(false);
+      console.error('Error fetching attendance:', error);
+      setAttendanceStatus('out');
+      setAttendanceData(null); // 🔥 SAFETY: Clear any old data
     }
   };
 
-  const titles = {
-    task: 'Create New Task',
-    pjp: 'Create New PJP',
-    dealer: 'Create New Dealer',
-    dvr: 'Create DVR Report',
-    tvr: 'Create TVR Report',
-    leave: 'Apply for Leave',
-    'client-report': 'Create Client Report',
-    'competition-report': 'Create Competition Report',
-    'dealer-score': 'Score Dealer Performance'
+  const fetchJourneyStatus = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ HOOK TO YOUR JOURNEY ENDPOINT
+      const response = await fetch(`/api/journey/active/${user.id}`);
+      const data = await response.json();
+
+      if (data.success && data.hasActiveJourney) {
+        setIsJourneyActive(true);
+        setChatContext('journey_active');
+      } else {
+        setIsJourneyActive(false);
+      }
+    } catch (error) {
+      console.error('Error fetching journey status:', error);
+      setIsJourneyActive(false);
+    }
   };
 
+  const fetchDashboardStats = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ PARALLEL FETCH FROM MULTIPLE ENDPOINTS FOR COMPREHENSIVE STATS - UNCHANGED
+      const [attendanceRes, journeyRes, reportsRes, tasksRes, dealersRes, leaveRes] = await Promise.all([
+        fetch(`/api/attendance/recent?userId=${user.id}&limit=7`),
+        fetch(`/api/journey/analytics/${user.id}?days=30`),
+        fetch(`/api/dvr/recent?userId=${user.id}&limit=100`),
+        fetch(`/api/tasks/recent?userId=${user.id}&limit=100`),
+        fetch(`/api/dealers/recent?limit=1000`),
+        fetch(`/api/leave/user/${user.id}?limit=50`)
+      ]);
+
+      const [attendanceData, journeyData, reportsData, tasksData, dealersData, leaveData] = await Promise.all([
+        attendanceRes.json(),
+        journeyRes.json(),
+        reportsRes.json(),
+        tasksData.json(),
+        dealersRes.json(),
+        leaveRes.json()
+      ]);
+
+      // 🔥 UPDATED: Get current active session info for more accurate stats
+      let currentActiveSession = null;
+      let todayCheckInTime = null;
+
+      if (attendanceData.data && attendanceData.data.length > 0) {
+        // Find today's active session (if any)
+        const today = new Date().toISOString().split('T')[0];
+        const todaySessions = attendanceData.data.filter((session: any) =>
+          session.attendanceDate === today
+        );
+
+        // Get active session (not punched out) or latest session for check-in time
+        currentActiveSession = todaySessions.find((session: any) => !session.outTimeTimestamp);
+        todayCheckInTime = currentActiveSession?.inTimeTimestamp ||
+          (todaySessions.length > 0 ? todaySessions[0].inTimeTimestamp : null);
+      }
+
+      // Build comprehensive stats - MOSTLY UNCHANGED
+      const stats: DashboardStats = {
+        attendance: {
+          isCheckedIn: attendanceStatus === 'in', // ✅ UNCHANGED - uses existing state
+          checkInTime: todayCheckInTime, // 🔥 UPDATED - shows current/latest check-in time
+          totalHours: calculateTotalHours(attendanceData.data || []), // ✅ UNCHANGED - function will handle multiple sessions
+          weeklyHours: calculateWeeklyHours(attendanceData.data || []) // ✅ UNCHANGED - function will handle multiple sessions
+        },
+        journey: {
+          isActive: isJourneyActive,
+          totalDistance: journeyData.analytics?.totalDistance || '0 km',
+          activeDuration: journeyData.analytics?.totalDuration || '0 minutes',
+          dealerVisits: journeyData.analytics?.dealerVisits?.total || 0
+        },
+        reports: {
+          dvrCount: reportsData.total || 0,
+          tvrCount: 0, // Will fetch separately
+          competitionCount: 0, // Will fetch separately
+          pendingReports: 0
+        },
+        tasks: {
+          pending: tasksData.data?.filter((t: any) => t.status === 'pending')?.length || 0,
+          completed: tasksData.data?.filter((t: any) => t.status === 'completed')?.length || 0,
+          overdue: tasksData.data?.filter((t: any) => isOverdue(t.dueDate))?.length || 0
+        },
+        dealers: {
+          total: dealersData.total || 0,
+          visited: calculateVisitedDealers(),
+          pending: calculatePendingDealers()
+        },
+        leave: {
+          pending: leaveData.data?.filter((l: any) => l.status === 'Pending')?.length || 0,
+          approved: leaveData.data?.filter((l: any) => l.status === 'Approved')?.length || 0,
+          remaining: calculateRemainingLeave(leaveData.data || [])
+        }
+      };
+
+      setDashboardStats(stats);
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+    }
+  };
+
+  const fetchTasks = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ HOOK TO YOUR TASKS ENDPOINT
+      const response = await fetch(`/api/tasks/recent?userId=${user.id}&limit=20`);
+      const data = await response.json();
+
+      if (data.success) {
+        setTasks(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      setTasks([]);
+    }
+  };
+
+  const fetchDealers = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ HOOK TO YOUR DEALERS ENDPOINT
+      const response = await fetch(`/api/dealers/recent?limit=100`);
+      const data = await response.json();
+
+      if (data.success) {
+        setDealers(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching dealers:', error);
+      setDealers([]);
+    }
+  };
+
+  const fetchRecentReports = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ HOOK TO MULTIPLE REPORT ENDPOINTS
+      const [dvrRes, tvrRes, compRes] = await Promise.all([
+        fetch(`/api/dvr/recent?userId=${user.id}&limit=10`),
+        fetch(`/api/tvr/recent?userId=${user.id}&limit=10`),
+        fetch(`/api/competition/recent?userId=${user.id}&limit=10`)
+      ]);
+
+      const [dvrData, tvrData, compData] = await Promise.all([
+        dvrRes.json(),
+        tvrRes.json(),
+        compRes.json()
+      ]);
+
+      const allReports = [
+        ...(dvrData.data || []).map((r: any) => ({ ...r, type: 'DVR' })),
+        ...(tvrData.data || []).map((r: any) => ({ ...r, type: 'TVR' })),
+        ...(compData.data || []).map((r: any) => ({ ...r, type: 'Competition' }))
+      ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      setRecentReports(allReports);
+    } catch (error) {
+      console.error('Error fetching recent reports:', error);
+      setRecentReports([]);
+    }
+  };
+
+  const fetchLeaveApplications = async () => {
+    if (!user) return;
+
+    try {
+      // ✅ HOOK TO YOUR LEAVE ENDPOINT
+      const response = await fetch(`/api/leave/user/${user.id}?limit=10`);
+      const data = await response.json();
+
+      if (data.success) {
+        setLeaveApplications(data.data || []);
+      }
+    } catch (error) {
+      console.error('Error fetching leave applications:', error);
+      setLeaveApplications([]);
+    }
+  };
+
+  // 🎯 SMART ATTENDANCE HANDLING
+  const handleAttendancePunch = async () => {
+    if (!user || !currentLocation) {
+      addError('Location services required for attendance');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (attendanceStatus === 'out') {
+        // ✅ PUNCH IN - UNCHANGED LOGIC
+        const response = await fetch('/api/attendance/punch-in', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            locationName: 'Mobile App Check-in',
+            latitude: currentLocation.lat,
+            longitude: currentLocation.lng,
+            accuracy: 10,
+            speed: 0,
+            heading: 0,
+            altitude: 0,
+            imageUrl: null,
+            imageCaptured: false
+          })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          // ✅ SUCCESS: New punch-in recorded - UNCHANGED
+          setAttendanceStatus('in');
+          setAttendanceData(data.data);
+          showSuccess('✅ Punched in successfully! Have a productive day!');
+          await fetchDashboardStats();
+        } else {
+          // 🔥 UPDATED: Handle "already punched in" with better logic
+          if (data.error && data.error.includes('Already punched in')) {
+            // For multiple cycles: this means they have an ACTIVE session
+            if (data.data) {
+              setAttendanceData(data.data);
+              setAttendanceStatus('in'); // They're currently punched in
+              showSuccess('You are already punched in! Ready to punch out when done.');
+            } else {
+              setAttendanceStatus('in');
+              showSuccess('You are already punched in! Ready to punch out when done.');
+            }
+          } else {
+            addError(`Punch in failed: ${data.error || 'Unknown error'}`);
+          }
+        }
+      } else {
+        // ✅ PUNCH OUT - UNCHANGED LOGIC
+        const response = await fetch('/api/attendance/punch-out', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: user.id,
+            latitude: currentLocation.lat,
+            longitude: currentLocation.lng,
+            accuracy: 10,
+            speed: 0,
+            heading: 0,
+            altitude: 0,
+            imageUrl: null,
+            imageCaptured: false
+          })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          // ✅ SUCCESS: Punch-out recorded - UNCHANGED
+          setAttendanceStatus('out');
+          setAttendanceData(data.data);
+          showSuccess('✅ Punched out successfully! Great work today!');
+          await fetchDashboardStats();
+        } else {
+          // 🔥 UPDATED: Better error handling for multiple cycles
+          if (data.error && data.error.includes('No punch-in record') ||
+            data.error && data.error.includes('No active punch-in session')) {
+            // For multiple cycles: no active session found
+            setAttendanceStatus('out');
+            addError('Please punch in first before punching out.');
+          } else {
+            addError(`Punch out failed: ${data.error || 'Unknown error'}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error with attendance:', error);
+      addError('Failed to update attendance');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  // 🗺️ SMART JOURNEY HANDLING
+  const handleStartJourney = async () => {
+    if (!user || !currentLocation) {
+      addError('Location services required for journey tracking');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      // ✅ HOOK TO YOUR JOURNEY START ENDPOINT
+      const response = await fetch('/api/journey/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          latitude: currentLocation.lat,
+          longitude: currentLocation.lng,
+          journeyType: 'field_visit',
+          plannedDealers: [],
+          siteName: 'Field Visit Journey',
+          accuracy: 10,
+          batteryLevel: await getBatteryLevel(),
+          isCharging: await getChargingStatus(),
+          networkStatus: navigator.onLine ? 'online' : 'offline',
+          ipAddress: await getIPAddress(),
+          description: 'Journey started from mobile dashboard',
+          estimatedDuration: '8 hours',
+          priority: 'medium'
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setIsJourneyActive(true);
+        setChatContext('journey_active');
+        showSuccess('🚗 Journey started! GPS tracking is now active.');
+        await fetchDashboardStats(); // Refresh stats
+      } else {
+        addError(`Journey start failed: ${data.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error starting journey:', error);
+      addError('Failed to start journey');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 🏢 SMART DEALER MANAGEMENT
+  const handleAddDealer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setIsLoading(true);
+    try {
+      // ✅ HOOK TO YOUR DEALERS ENDPOINT WITH PROPER VALIDATION
+      const response = await fetch('/api/dealers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          type: dealerForm.type,
+          name: dealerForm.name.trim(),
+          region: dealerForm.region.trim(),
+          area: dealerForm.area.trim(),
+          phoneNo: dealerForm.phoneNo.trim(),
+          address: dealerForm.address.trim(),
+          totalPotential: parseFloat(dealerForm.totalPotential) || 0,
+          bestPotential: parseFloat(dealerForm.bestPotential) || 0,
+          brandSelling: dealerForm.brandSelling.filter(brand => brand.trim() !== ''),
+          feedbacks: dealerForm.feedbacks.trim(),
+          remarks: dealerForm.remarks.trim() || null
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowDealerForm(false);
+        resetDealerForm();
+        await fetchDealers();
+        await fetchDashboardStats();
+        showSuccess('🏢 Dealer added successfully!');
+      } else {
+        addError(`Failed to add dealer: ${data.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error adding dealer:', error);
+      addError('Failed to add dealer');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGetLocation = () => {
+    if (!navigator.geolocation) {
+      addError('Geolocation is not supported by this browser');
+      return;
+    }
+
+    setIsLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coordinates = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          radius: 100
+        };
+
+        setDealerForm({
+          ...dealerForm,
+          area: JSON.stringify(coordinates)
+        });
+
+        showSuccess('📍 Location captured successfully!');
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error('Error getting location:', error);
+        addError('Failed to get location. Please enter area manually.');
+        setIsLoading(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000
+      }
+    );
+  };
+
+  // 🏖️ SMART LEAVE APPLICATION
+  const handleLeaveApplication = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setIsLoading(true);
+    try {
+      // Calculate total days automatically
+      const startDate = new Date(leaveForm.startDate);
+      const endDate = new Date(leaveForm.endDate);
+      const totalDays = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+
+      // ✅ HOOK TO YOUR LEAVE ENDPOINT
+      const response = await fetch('/api/leave', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          leaveType: leaveForm.leaveType,
+          startDate: leaveForm.startDate,
+          endDate: leaveForm.endDate,
+          reason: leaveForm.reason.trim(),
+          totalDays: totalDays
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowLeaveForm(false);
+        resetLeaveForm();
+        await fetchLeaveApplications();
+        await fetchDashboardStats();
+        showSuccess('📝 Leave application submitted successfully!');
+      } else {
+        addError(`Failed to submit leave: ${data.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error submitting leave:', error);
+      addError('Failed to submit leave application');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ✅ SMART TASK MANAGEMENT
+  const handleCreateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
+    setIsLoading(true);
+    try {
+      // ✅ HOOK TO YOUR TASKS ENDPOINT
+      const response = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          title: taskForm.title.trim(),
+          description: taskForm.description.trim(),
+          priority: taskForm.priority,
+          dueDate: taskForm.dueDate ? new Date(taskForm.dueDate).toISOString() : null,
+          assignedTo: taskForm.assignedTo || user.id,
+          status: 'pending',
+          taskType: 'general'
+        })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowTaskForm(false);
+        resetTaskForm();
+        await fetchTasks();
+        await fetchDashboardStats();
+        showSuccess('✅ Task created successfully!');
+      } else {
+        addError(`Failed to create task: ${data.error || 'Unknown error'}`);
+      }
+    } catch (error) {
+      console.error('Error creating task:', error);
+      addError('Failed to create task');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 🔄 REFRESH DASHBOARD
+  const refreshDashboard = async () => {
+    setRefreshing(true);
+    await fetchAllDashboardData();
+    showSuccess('📊 Dashboard refreshed!');
+  };
+
+  // 🎨 UTILITY FUNCTIONS
+  const addError = (error: string) => {
+    setErrors(prev => [...prev, error]);
+    setTimeout(() => {
+      setErrors(prev => prev.slice(1));
+    }, 5000);
+  };
+
+  const showSuccess = (message: string) => {
+    // You can implement a success toast here
+    console.log('Success:', message);
+  };
+
+  const resetDealerForm = () => {
+    setDealerForm({
+      name: '', type: 'Dealer', region: '', area: '', phoneNo: '', address: '',
+      totalPotential: '', bestPotential: '', brandSelling: [''], feedbacks: '', remarks: ''
+    });
+  };
+
+  const resetLeaveForm = () => {
+    setLeaveForm({
+      leaveType: '', startDate: '', endDate: '', reason: '', totalDays: 1
+    });
+  };
+
+  const resetTaskForm = () => {
+    setTaskForm({
+      title: '', description: '', priority: 'medium', dueDate: '', assignedTo: ''
+    });
+  };
+
+  const addBrandField = () => {
+    setDealerForm(prev => ({
+      ...prev,
+      brandSelling: [...prev.brandSelling, '']
+    }));
+  };
+
+  const updateBrandField = (index: number, value: string) => {
+    setDealerForm(prev => ({
+      ...prev,
+      brandSelling: prev.brandSelling.map((brand, i) => i === index ? value : brand)
+    }));
+  };
+
+  const removeBrandField = (index: number) => {
+    setDealerForm(prev => ({
+      ...prev,
+      brandSelling: prev.brandSelling.filter((_, i) => i !== index)
+    }));
+  };
+
+  // Helper functions for calculations
+  const calculateTotalHours = (attendanceData: any[]) => {
+    return attendanceData.reduce((total, record) => {
+      if (record.inTimeTimestamp && record.outTimeTimestamp) {
+        const inTime = new Date(record.inTimeTimestamp);
+        const outTime = new Date(record.outTimeTimestamp);
+        return total + (outTime.getTime() - inTime.getTime()) / (1000 * 60 * 60);
+      }
+      return total;
+    }, 0);
+  };
+
+  const calculateWeeklyHours = (attendanceData: any[]) => {
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+
+    return attendanceData
+      .filter(record => new Date(record.attendanceDate) >= weekStart)
+      .reduce((total, record) => {
+        if (record.inTimeTimestamp && record.outTimeTimestamp) {
+          const inTime = new Date(record.inTimeTimestamp);
+          const outTime = new Date(record.outTimeTimestamp);
+          return total + (outTime.getTime() - inTime.getTime()) / (1000 * 60 * 60);
+        }
+        return total;
+      }, 0);
+  };
+
+  const isOverdue = (dueDate: string) => {
+    return new Date(dueDate) < new Date();
+  };
+
+  const calculateVisitedDealers = () => {
+    // This would need to be calculated based on recent DVR/TVR data
+    return Math.floor(dealers.length * 0.7); // Placeholder
+  };
+
+  const calculatePendingDealers = () => {
+    return dealers.length - calculateVisitedDealers();
+  };
+
+  const calculateRemainingLeave = (leaveData: any[]) => {
+    const approvedDays = leaveData
+      .filter(leave => leave.status === 'Approved')
+      .reduce((total, leave) => total + (leave.totalDays || 0), 0);
+    return Math.max(0, 21 - approvedDays); // Assuming 21 days annual leave
+  };
+
+  const getBatteryLevel = async (): Promise<number> => {
+    if ('getBattery' in navigator) {
+      try {
+        const battery = await (navigator as any).getBattery();
+        return Math.round(battery.level * 100);
+      } catch {
+        return 100;
+      }
+    }
+    return 100;
+  };
+
+  const getChargingStatus = async (): Promise<boolean> => {
+    if ('getBattery' in navigator) {
+      try {
+        const battery = await (navigator as any).getBattery();
+        return battery.charging;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  };
+
+  const getIPAddress = async (): Promise<string> => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      return data.ip;
+    } catch {
+      return 'Unknown';
+    }
+  };
+
+  // 🎨 RENDER CONDITIONS
+  if (isLoading && !user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
+        <Card className="p-8">
+          <div className="flex flex-col items-center space-y-4">
+            <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-lg font-medium text-gray-700">Loading your CRM dashboard...</p>
+            <p className="text-sm text-gray-500">Connecting to 56+ endpoints</p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-pink-100 flex items-center justify-center">
+        <Card className="p-8">
+          <div className="flex flex-col items-center space-y-4">
+            <AlertCircle className="w-12 h-12 text-red-500" />
+            <p className="text-lg font-medium text-red-700">User not found</p>
+            <p className="text-sm text-gray-500">Please log in to access your dashboard</p>
+            <Button onClick={() => window.location.reload()}>Reload</Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gray-800/90 backdrop-blur-xl rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto border border-gray-700/50"
-      >
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">
-            {titles[type as keyof typeof titles]}
-          </h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="text-gray-400 hover:text-white"
-          >
-            <X className="w-5 h-5" />
-          </Button>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 flex flex-col pb-32">
+      {/* 🎨 ENHANCED HEADER WITH REAL-TIME STATUS */}
+      <div className="bg-white shadow-lg border-b-2 border-blue-100 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-4">
+            <div className="relative">
+              <div className="w-12 h-12 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
+                <Building2 className="w-6 h-6 text-white" />
+              </div>
+              {refreshing && (
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
+              )}
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900 flex items-center">
+                {user.firstName} {user.lastName}
+                <Sparkles className="w-5 h-5 ml-2 text-yellow-500" />
+              </h1>
+              <p className="text-sm text-gray-600 flex items-center">
+                {user.company.companyName}
+                <Badge variant="outline" className="ml-2 text-xs">
+                  {user.role}
+                </Badge>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Real-time Status Badges */}
+            {currentLocation && (
+              <Badge className="bg-green-100 text-green-800 border-green-300 flex items-center">
+                <MapPin className="w-3 h-3 mr-1" />
+                <span className="truncate">GPS Active</span>
+              </Badge>
+            )}
+
+            {isJourneyActive && (
+              <Badge className="bg-blue-100 text-blue-800 border-blue-300 flex items-center">
+                <Navigation className="w-3 h-3 mr-1" />
+                <span className="truncate">Journey Active</span>
+              </Badge>
+            )}
+
+            <Badge
+              variant={attendanceStatus === 'in' ? 'default' : 'outline'}
+              className={`flex items-center ${attendanceStatus === 'in'
+                  ? 'bg-green-600 text-white'
+                  : 'border-red-300 text-red-600'
+                }`}
+            >
+              {attendanceStatus === 'in' ? (
+                <LogIn className="w-3 h-3 mr-1" />
+              ) : (
+                <LogOut className="w-3 h-3 mr-1" />
+              )}
+              <span className="truncate">
+                {attendanceStatus === 'in' ? 'Checked In' : 'Checked Out'}
+              </span>
+            </Badge>
+
+            <Button
+              onClick={refreshDashboard}
+              disabled={refreshing}
+              size="sm"
+              variant="outline"
+              className="p-2"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* ENHANCED TASK FORM with PJP option */}
-          {type === 'task' && (
-            <>
-              <div>
-                <Label className="text-gray-300">Task Title</Label>
-                <Input
-                  value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="Enter task title"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
+        {/* Error Messages */}
+        {errors.length > 0 && (
+          <div className="mt-4 space-y-2">
+            {errors.map((error, index) => (
+              <Alert key={index} className="border-red-200 bg-red-50">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription className="text-red-700">{error}</AlertDescription>
+              </Alert>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 📊 MAIN DASHBOARD CONTENT */}
+      <div className="flex-1 flex flex-col p-4 pb-24">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+            <TabsTrigger value="reports">Reports</TabsTrigger>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
+            <TabsTrigger value="manage">Manage</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="dashboard" className="space-y-6">
+            {/* 🚀 MAIN ACTION GRID - BIGGER AND MORE ATTRACTIVE */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 bg-gray-50 rounded-xl shadow-inner p-4">
+              <Button
+                onClick={handleAttendancePunch}
+                disabled={isLoading || attendanceStatus === null}
+                className={`h-24 flex flex-col items-center justify-center space-y-2 text-white font-semibold ${attendanceStatus === 'in'
+                  ? 'bg-gradient-to-br from-red-500 to-red-700 hover:from-red-600 hover:to-red-800'
+                  : 'bg-gradient-to-br from-green-500 to-green-700 hover:from-green-600 hover:to-green-800'
+                  }`}
+              >
+                {isLoading ? (
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                ) : attendanceStatus === null ? (
+                  <Loader2 className="w-8 h-8 animate-spin" />
+                ) : attendanceStatus === 'in' ? (
+                  <LogOut className="w-8 h-8" />
+                ) : (
+                  <LogIn className="w-8 h-8" />
+                )}
+                <span className="text-sm">
+                  {attendanceStatus === null ? 'Loading...' : attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
+                </span>
+              </Button>
+
+              <Button
+                onClick={handleStartJourney}
+                disabled={isJourneyActive || isLoading}
+                className="h-24 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white font-semibold disabled:bg-gray-400"
+              >
+                {isJourneyActive ? (
+                  <>
+                    <Navigation className="w-8 h-8" />
+                    <span className="text-sm">Journey Active</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-8 h-8" />
+                    <span className="text-sm">Start Journey</span>
+                  </>
+                )}
+              </Button>
+
+              <Button
+                onClick={() => setIsCreatingDvr(true)}
+                className="h-24 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white font-semibold"
+              >
+                <FileText className="w-8 h-8" />
+                <span className="text-sm">Create DVR</span>
+              </Button>
+              {/* //Form for creating DVR with Pop-Up Dialog */}
+              <Dialog open={isCreatingDvr} onOpenChange={setIsCreatingDvr}>
+                <DialogContent className="sm:max-w-[425px] flex flex-col h-full max-h-[90vh]">
+                  <DialogHeader>
+                    <DialogTitle>Create Daily Visit Report</DialogTitle>
+                    <DialogDescription>
+                      Fill in the details below to create a new Daily Visit Report.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="flex-1 overflow-y-auto p-4 -mx-4 -mt-2">
+                    <form id="dvr-form" onSubmit={handleDvrFormSubmit} className="space-y-4">
+                      <div className="space-y-2">
+                        <label htmlFor="dealerType" className="text-sm font-medium">Dealer Type</label>
+                        <Select value={dvrFormData.dealerType} onValueChange={(value) => handleDvrSelectChange('dealerType', value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Dealer Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Dealer">Dealer</SelectItem>
+                            <SelectItem value="Sub Dealer">Sub Dealer</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {/* 🎨 FIX: Conditionally render the Dealer Name field */}
+                      {dvrFormData.dealerType !== 'Sub-Dealer' && (
+                        <div>
+                          <Label htmlFor="dealerName">Dealer Name</Label>
+                          <Input
+                            id="dealerName"
+                            value={dvrFormData.dealerName}
+                            onChange={handleDvrInputChange}
+                            placeholder="Enter dealer name"
+                          />
+                        </div>
+                      )}
+
+                      {/* Sub Dealer Name Input (optional) */}
+                      {dvrFormData.dealerType === 'Sub Dealer' && (
+                        <div className="space-y-2">
+                          <label htmlFor="subDealerName" className="text-sm font-medium">Sub Dealer Name</label>
+                          <Input
+                            id="subDealerName"
+                            name="subDealerName"
+                            value={dvrFormData.subDealerName || ''}
+                            onChange={handleDvrInputChange}
+                            placeholder="e.g., XYZ Distributors"
+                            required
+                          />
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        <label htmlFor="location" className="text-sm font-medium">Location</label>
+                        <Input
+                          id="location"
+                          name="location"
+                          value={dvrFormData.location}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., City, State"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="visitType" className="text-sm font-medium">Visit Type</label>
+                        <Select value={dvrFormData.visitType} onValueChange={(value) => handleDvrSelectChange('visitType', value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select Visit Type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Best">Best</SelectItem>
+                            <SelectItem value="Non-Best">Non-Best</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="dealerTotalPotential" className="text-sm font-medium">Dealer Total Potential (MT)</label>
+                        <Input
+                          id="dealerTotalPotential"
+                          name="dealerTotalPotential"
+                          value={dvrFormData.dealerTotalPotential}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 50.00"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="dealerBestPotential" className="text-sm font-medium">Dealer Best Potential (MT)</label>
+                        <Input
+                          id="dealerBestPotential"
+                          name="dealerBestPotential"
+                          value={dvrFormData.dealerBestPotential}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 25.50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="brandSelling" className="text-sm font-medium">Brand Selling (Comma Separated)</label>
+                        <Input
+                          id="brandSelling"
+                          name="brandSelling"
+                          value={dvrFormData.brandSelling}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., Brand A, Brand B"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="contactPerson" className="text-sm font-medium">Contact Person</label>
+                        <Input
+                          id="contactPerson"
+                          name="contactPerson"
+                          value={dvrFormData.contactPerson}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., Jane Doe"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="contactPersonPhoneNo" className="text-sm font-medium">Contact Person Phone No.</label>
+                        <Input
+                          id="contactPersonPhoneNo"
+                          name="contactPersonPhoneNo"
+                          value={dvrFormData.contactPersonPhoneNo}
+                          onChange={handleDvrInputChange}
+                          placeholder="e.g., 9876543210"
+                          type="tel"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="todayOrderMt" className="text-sm font-medium">Today's Order (MT)</label>
+                        <Input
+                          id="todayOrderMt"
+                          name="todayOrderMt"
+                          value={dvrFormData.todayOrderMt}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 10.00"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="todayCollectionRupees" className="text-sm font-medium">Today's Collection (₹)</label>
+                        <Input
+                          id="todayCollectionRupees"
+                          name="todayCollectionRupees"
+                          value={dvrFormData.todayCollectionRupees}
+                          onChange={handleDvrInputChange}
+                          type="number"
+                          step="0.01"
+                          placeholder="e.g., 50000.00"
+                          required
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="feedbacks" className="text-sm font-medium">Feedback from Dealer</label>
+                        <textarea
+                          id="feedbacks"
+                          name="feedbacks"
+                          value={dvrFormData.feedbacks}
+                          onChange={handleDvrInputChange}
+                          placeholder="Enter dealer's feedback here."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="solutionBySalesperson" className="text-sm font-medium">Solution/Action Taken</label>
+                        <textarea
+                          id="solutionBySalesperson"
+                          name="solutionBySalesperson"
+                          value={dvrFormData.solutionBySalesperson}
+                          onChange={handleDvrInputChange}
+                          placeholder="Your notes on solutions provided."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="anyRemarks" className="text-sm font-medium">Any Remarks</label>
+                        <textarea
+                          id="anyRemarks"
+                          name="anyRemarks"
+                          value={dvrFormData.anyRemarks}
+                          onChange={handleDvrInputChange}
+                          placeholder="Any other relevant remarks."
+                          className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <label htmlFor="inTimeImageUrl" className="text-sm font-medium">In Time Image URL</label>
+                        <Input
+                          id="inTimeImageUrl"
+                          name="inTimeImageUrl"
+                          value={dvrFormData.inTimeImageUrl}
+                          onChange={handleDvrInputChange}
+                          placeholder="URL to image"
+                        />
+                      </div>
+
+                    </form>
+                  </div>
+                  <div className="flex justify-end space-x-2 p-4 -mx-4 -mb-4 border-t">
+                    <Button type="button" variant="outline" onClick={() => setIsCreatingDvr(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={isLoading} form="dvr-form">
+                      {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                      Submit DVR
+                    </Button>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              {/* //Form end */}
+
+              <Button
+                onClick={() => setIsCreatingTvr(true)}
+                className="h-24 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-indigo-500 to-indigo-700 hover:from-indigo-600 hover:to-indigo-800 text-white font-semibold"
+              >
+                <Zap className="w-8 h-8" />
+                <span className="text-sm">Create TVR</span>
+              </Button>
+              {/* //Form for Creating TVR with Pop-Up Dialog */}
+              <Dialog open={isCreatingTvr} onOpenChange={setIsCreatingTvr}>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Create Technical Visit Report</DialogTitle>
+                    <DialogDescription>
+                      Fill in the details below to create a new TVR.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <form onSubmit={handleTvrFormSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <label htmlFor="visitType" className="text-sm font-medium">Visit Type</label>
+                      <Select value={tvrFormData.visitType} onValueChange={handleTvrSelectChange}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select Visit Type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Dealer-Best">Dealer-Best</SelectItem>
+                          <SelectItem value="Sub Dealer-Best">Sub Dealer-Best</SelectItem>
+                          <SelectItem value="Dealer-Non Best">Dealer-Non Best</SelectItem>
+                          <SelectItem value="Sub Dealer-Non Best">Sub Dealer-Non Best</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="siteNameConcernedPerson" className="text-sm font-medium">Site/Client Name</label>
+                      <Input
+                        id="siteNameConcernedPerson"
+                        name="siteNameConcernedPerson"
+                        value={tvrFormData.siteNameConcernedPerson}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., ABC Constructions, John Doe"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="phoneNo" className="text-sm font-medium">Phone No.</label>
+                      <Input
+                        id="phoneNo"
+                        name="phoneNo"
+                        value={tvrFormData.phoneNo}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., 9876543210"
+                        type="tel"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="emailId" className="text-sm font-medium">Email (Optional)</label>
+                      <Input
+                        id="emailId"
+                        name="emailId"
+                        value={tvrFormData.emailId}
+                        onChange={handleTvrInputChange}
+                        placeholder="e.g., john.doe@email.com"
+                        type="email"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="clientsRemarks" className="text-sm font-medium">Client's Remarks</label>
+                      <textarea
+                        id="clientsRemarks"
+                        name="clientsRemarks"
+                        value={tvrFormData.clientsRemarks}
+                        onChange={handleTvrInputChange}
+                        placeholder="Enter client's feedback or comments here."
+                        className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label htmlFor="salespersonRemarks" className="text-sm font-medium">Your Remarks</label>
+                      <textarea
+                        id="salespersonRemarks"
+                        name="salespersonRemarks"
+                        value={tvrFormData.salespersonRemarks}
+                        onChange={handleTvrInputChange}
+                        placeholder="Your notes and observations about the visit."
+                        className="flex h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        required
+                      />
+                    </div>
+
+                    <div className="flex justify-end space-x-2">
+                      <Button type="button" variant="outline" onClick={() => setIsCreatingTvr(false)}>
+                        Cancel
+                      </Button>
+                      <Button type="submit" disabled={isLoading}>
+                        {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                        Submit TVR
+                      </Button>
+                    </div>
+                  </form>
+                </DialogContent>
+              </Dialog>
+              {/* //Form end */}
+            </div>
+
+            {/* 📊 COMPREHENSIVE STATS DASHBOARD */}
+            {dashboardStats && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <Card className="border-green-200 bg-gradient-to-br from-green-50 to-green-100">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-green-800 flex items-center">
+                      <Clock className="w-4 h-4 mr-2" />
+                      Attendance Today
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-3xl font-bold ${dashboardStats.attendance.isCheckedIn ? 'text-green-600' : 'text-red-600'}`}>
+                          {dashboardStats.attendance.isCheckedIn ? '✓' : '✗'}
+                        </span>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">
+                            {dashboardStats.attendance.isCheckedIn ? 'Checked In' : 'Not Checked In'}
+                          </div>
+                          {dashboardStats.attendance.checkInTime && (
+                            <div className="text-xs text-gray-600">
+                              {new Date(dashboardStats.attendance.checkInTime).toLocaleTimeString()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Weekly: {dashboardStats.attendance.weeklyHours.toFixed(1)}h
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-purple-200 bg-gradient-to-br from-purple-50 to-purple-100">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-purple-800 flex items-center">
+                      <Navigation className="w-4 h-4 mr-2" />
+                      Journey Status
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-3xl font-bold ${dashboardStats.journey.isActive ? 'text-purple-600' : 'text-gray-400'}`}>
+                          {dashboardStats.journey.isActive ? '🚗' : '�'}
+                        </span>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">
+                            {dashboardStats.journey.isActive ? 'Active' : 'Inactive'}
+                          </div>
+                          <div className="text-xs text-gray-600">
+                            {dashboardStats.journey.totalDistance}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Visits: {dashboardStats.journey.dealerVisits}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-blue-100">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-blue-800 flex items-center">
+                      <FileText className="w-4 h-4 mr-2" />
+                      Reports This Month
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-3xl font-bold text-blue-600">
+                          {dashboardStats.reports.dvrCount + dashboardStats.reports.tvrCount + dashboardStats.reports.competitionCount}
+                        </span>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">Total Reports</div>
+                          <div className="text-xs text-gray-600">
+                            DVR: {dashboardStats.reports.dvrCount} | TVR: {dashboardStats.reports.tvrCount}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        Competition: {dashboardStats.reports.competitionCount}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-orange-200 bg-gradient-to-br from-orange-50 to-orange-100">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-sm font-medium text-orange-800 flex items-center">
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Tasks & Follow-ups
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-3xl font-bold text-orange-600">
+                          {dashboardStats.tasks.pending}
+                        </span>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">Pending</div>
+                          <div className="text-xs text-gray-600">
+                            Completed: {dashboardStats.tasks.completed}
+                          </div>
+                        </div>
+                      </div>
+                      {dashboardStats.tasks.overdue > 0 && (
+                        <div className="text-xs text-red-600 font-medium">
+                          ⚠️ {dashboardStats.tasks.overdue} overdue
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
-              <div>
-                <Label className="text-gray-300">Description</Label>
-                <Textarea
-                  value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Task description"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Task Date</Label>
-                <Input
-                  type="date"
-                  value={formData.taskDate || ''}
-                  onChange={(e) => setFormData({ ...formData, taskDate: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Site/Location</Label>
-                <LocationPicker
-                  currentLocation={formData.siteName}
-                  onLocationSelect={(location) => setFormData({ ...formData, siteName: location })}
-                />
-              </div>
-              {/* PJP OPTION */}
-              <div className="flex items-center space-x-2">
-                <Switch
-                  checked={formData.isPjp || false}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isPjp: checked })}
-                />
-                <Label className="text-gray-300">This is a PJP task</Label>
-              </div>
-              {formData.isPjp && (
-                <div>
-                  <Label className="text-gray-300">Related PJP</Label>
-                  <Select
-                    value={formData.pjpId || ''}
-                    onValueChange={(value) => setFormData({ ...formData, pjpId: value })}
-                  >
-                    <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                      <SelectValue placeholder="Select PJP" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-600">
-                      {useAppStore.getState().pjps.map((pjp) => (
-                        <SelectItem key={pjp.id} value={pjp.id}>{pjp.objective}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+            )}
+
+            {/* 🎯 QUICK ACTION PANELS */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Card className="border-orange-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg font-semibold text-orange-800 flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Users className="w-5 h-5 mr-2" />
+                      Dealers ({dealers.length})
+                    </div>
+                    <Button
+                      onClick={() => setShowDealerForm(true)}
+                      size="sm"
+                      className="bg-orange-600 hover:bg-orange-700 rounded-lg"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {dealers.slice(0, 3).map((dealer) => (
+                      <div key={dealer.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg transition-all duration-200 hover:bg-orange-100">
+                        <div>
+                          <div className="font-medium text-sm">{dealer.name}</div>
+                          <div className="text-xs text-gray-600">{dealer.region} - {dealer.area}</div>
+                        </div>
+                        <Badge variant={dealer.type === 'Dealer' ? 'default' : 'outline'} className="rounded-full">
+                          {dealer.type}
+                        </Badge>
+                      </div>
+                    ))}
+                    {dealers.length > 3 && (
+                      <Button
+                        onClick={() => setShowDealersList(true)}
+                        variant="outline"
+                        size="sm"
+                        className="w-full rounded-lg"
+                      >
+                        View All {dealers.length} Dealers
+                      </Button>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-blue-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg font-semibold text-blue-800 flex items-center">
+                    <FileText className="w-5 h-5 mr-2" />
+                    Recent Reports
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {recentReports.slice(0, 3).map((report, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-blue-50 rounded-lg transition-all duration-200 hover:bg-blue-100">
+                        <div>
+                          <div className="font-medium text-sm">{report.type}</div>
+                          <div className="text-xs text-gray-600">
+                            {new Date(report.createdAt).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="rounded-full">
+                          {report.checkOutTime ? 'Complete' : 'In Progress'}
+                        </Badge>
+                      </div>
+                    ))}
+                    <Button
+                      onClick={() => setActiveTab('reports')}
+                      variant="outline"
+                      size="sm"
+                      className="w-full rounded-lg"
+                    >
+                      View All Reports
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="border-purple-200 rounded-xl shadow-md transition-all duration-300 hover:shadow-lg">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-lg font-semibold text-purple-800 flex items-center justify-between">
+                    <div className="flex items-center">
+                      <CalendarDays className="w-5 h-5 mr-2" />
+                      Leave Status
+                    </div>
+                    <Button
+                      onClick={() => setShowLeaveForm(true)}
+                      size="sm"
+                      className="bg-purple-600 hover:bg-purple-700 rounded-lg"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {dashboardStats && (
+                      <>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Remaining</span>
+                          <span className="font-bold text-purple-600">{dashboardStats.leave.remaining} days</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Pending</span>
+                          <span className="font-medium text-orange-600">{dashboardStats.leave.pending}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-sm p-2 bg-purple-50 rounded-lg">
+                          <span className="font-medium">Approved</span>
+                          <span className="font-medium text-green-600">{dashboardStats.leave.approved}</span>
+                        </div>
+                      </>
+                    )}
+                    <Button
+                      onClick={() => setShowLeaveForm(true)}
+                      variant="outline"
+                      size="sm"
+                      className="w-full rounded-lg"
+                    >
+                      Apply for Leave
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+
+          <TabsContent value="reports" className="space-y-6">
+            {/* Reports Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <Button
+                onClick={() => setChatContext('dvr')}
+                className="h-20 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 text-white"
+              >
+                <FileText className="w-8 h-8" />
+                <span>Daily Visit Report</span>
+                <span className="text-xs opacity-80">AI-Powered</span>
+              </Button>
+
+              <Button
+                onClick={() => setChatContext('tvr')}
+                className="h-20 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-indigo-500 to-indigo-700 hover:from-indigo-600 hover:to-indigo-800 text-white"
+              >
+                <Zap className="w-8 h-8" />
+                <span>Technical Visit Report</span>
+                <span className="text-xs opacity-80">Smart Generation</span>
+              </Button>
+
+              <Button
+                onClick={() => setChatContext('competition')}
+                className="h-20 flex flex-col items-center justify-center space-y-2 bg-gradient-to-br from-purple-500 to-purple-700 hover:from-purple-600 hover:to-purple-800 text-white"
+              >
+                <TrendingUp className="w-8 h-8" />
+                <span>Competition Report</span>
+                <span className="text-xs opacity-80">Market Intelligence</span>
+              </Button>
+            </div>
+
+            {/* Recent Reports List */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <FileText className="w-5 h-5 mr-2" />
+                  Recent Reports
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {recentReports.length > 0 ? (
+                    recentReports.map((report, index) => (
+                      <div key={index} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="space-y-1">
+                          <div className="font-medium">{report.type} Report</div>
+                          <div className="text-sm text-gray-600">
+                            {new Date(report.createdAt).toLocaleDateString()}
+                          </div>
+                          {report.dealerName && (
+                            <div className="text-sm text-blue-600">{report.dealerName}</div>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant={report.checkOutTime ? 'default' : 'outline'}>
+                            {report.checkOutTime ? 'Complete' : 'In Progress'}
+                          </Badge>
+                          <Button size="sm" variant="outline"
+                            onClick={() => handleViewReport(report.id, report.type)}>
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                      <p>No reports yet</p>
+                      <p className="text-sm">Start creating reports using the AI assistant</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </>
-          )}
 
-          {/* ENHANCED PJP FORM with location picker */}
-          {type === 'pjp' && (
-            <>
-              <div>
-                <Label className="text-gray-300">Objective</Label>
-                <Input
-                  value={formData.objective || ''}
-                  onChange={(e) => setFormData({ ...formData, objective: e.target.value })}
-                  placeholder="Journey objective"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Area to Visit</Label>
-                <Input
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                  placeholder="Specific area"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Planned Date</Label>
-                <Input
-                  type="date"
-                  value={formData.plannedDate || ''}
-                  onChange={(e) => setFormData({ ...formData, plannedDate: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Expected Outcome</Label>
-                <Textarea
-                  value={formData.expectedOutcome || ''}
-                  onChange={(e) => setFormData({ ...formData, expectedOutcome: e.target.value })}
-                  placeholder="What do you expect to achieve?"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-            </>
-          )}
+                <Dialog open={showReportDetails} onOpenChange={setShowReportDetails}>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>{selectedReport?.type} Report</DialogTitle>
+                    </DialogHeader>
+                    {selectedReport && (
+                      <div className="grid gap-4 py-4">
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Visit Type</Label>
+                          <p className="col-span-3">{selectedReport.visitType}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Client Name</Label>
+                          <p className="col-span-3">{selectedReport.siteNameConcernedPerson || selectedReport.dealerName}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Client's Remarks</Label>
+                          <p className="col-span-3">{selectedReport.clientsRemarks || 'N/A'}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Your Remarks</Label>
+                          <p className="col-span-3">{selectedReport.salespersonRemarks || selectedReport.remarks || 'N/A'}</p>
+                        </div>
+                        <div className="grid grid-cols-4 items-center gap-4">
+                          <Label className="text-right">Check-in</Label>
+                          <p className="col-span-3">{new Date(selectedReport.checkInTime).toLocaleString()}</p>
+                        </div>
+                      </div>
+                    )}
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-          {/* ENHANCED DEALER FORM with location picker */}
-          {type === 'dealer' && (
-            <>
+          <TabsContent value="analytics" className="space-y-6">
+            {/* Analytics Dashboard */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <BarChart3 className="w-5 h-5 mr-2" />
+                    Performance Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {dashboardStats && (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Weekly Hours</span>
+                          <span>{dashboardStats.attendance.weeklyHours.toFixed(1)}h / 40h</span>
+                        </div>
+                        <Progress value={(dashboardStats.attendance.weeklyHours / 40) * 100} />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Task Completion</span>
+                          <span>{dashboardStats.tasks.completed} / {dashboardStats.tasks.completed + dashboardStats.tasks.pending}</span>
+                        </div>
+                        <Progress value={(dashboardStats.tasks.completed / (dashboardStats.tasks.completed + dashboardStats.tasks.pending || 1)) * 100} />
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span>Dealer Coverage</span>
+                          <span>{dashboardStats.dealers.visited} / {dashboardStats.dealers.total}</span>
+                        </div>
+                        <Progress value={(dashboardStats.dealers.visited / (dashboardStats.dealers.total || 1)) * 100} />
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <PieChart className="w-5 h-5 mr-2" />
+                    Activity Breakdown
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-blue-500 rounded-full mr-3"></div>
+                        <span className="text-sm">DVR Reports</span>
+                      </div>
+                      <span className="font-medium">{dashboardStats?.reports.dvrCount || 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-indigo-500 rounded-full mr-3"></div>
+                        <span className="text-sm">TVR Reports</span>
+                      </div>
+                      <span className="font-medium">{dashboardStats?.reports.tvrCount || 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-purple-500 rounded-full mr-3"></div>
+                        <span className="text-sm">Competition</span>
+                      </div>
+                      <span className="font-medium">{dashboardStats?.reports.competitionCount || 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        <div className="w-3 h-3 bg-green-500 rounded-full mr-3"></div>
+                        <span className="text-sm">Journey KM</span>
+                      </div>
+                      <span className="font-medium">{dashboardStats?.journey.totalDistance || '0 km'}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="manage" className="space-y-6">
+            {/* Management Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Users className="w-5 h-5 mr-2" />
+                      Dealer Management
+                    </div>
+                    <Button
+                      onClick={() => setShowDealerForm(true)}
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Dealer
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <span>Total Dealers</span>
+                      <span className="font-bold">{dealers.length}</span>
+                    </div>
+                    <Button
+                      onClick={() => setShowDealersList(true)}
+                      variant="outline"
+                      className="w-full"
+                    >
+                      <List className="w-4 h-4 mr-2" />
+                      View All Dealers
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <CheckCircle className="w-5 h-5 mr-2" />
+                      Task Management
+                    </div>
+                    <Button
+                      onClick={() => setShowTaskForm(true)}
+                      size="sm"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add Task
+                    </Button>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    <div className="flex justify-between">
+                      <span>Pending Tasks</span>
+                      <span className="font-bold text-orange-600">{tasks.filter(t => t.status === 'pending').length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Completed</span>
+                      <span className="font-bold text-green-600">{tasks.filter(t => t.status === 'completed').length}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+        </Tabs>
+
+        {/* 🗺️ JOURNEY TRACKER COMPONENT */}
+        {isJourneyActive && (
+          <JourneyTracker
+            userId={user.id}
+            onJourneyEnd={() => {
+              setIsJourneyActive(false);
+              setChatContext('dashboard');
+              fetchDashboardStats();
+            }}
+          />
+        )}
+      </div>
+
+      {/* 🎨 MODALS AND DIALOGS */}
+
+      {/* Dealer Form Dialog */}
+      <Dialog open={showDealerForm} onOpenChange={setShowDealerForm}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add New Dealer</DialogTitle>
+            <DialogDescription>
+              Fill in the dealer information. All fields marked with * are required.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAddDealer} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <Label className="text-gray-300">Dealer Name</Label>
+                <Label htmlFor="name">Dealer Name *</Label>
                 <Input
-                  value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Dealer name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  id="name"
+                  value={dealerForm.name}
+                  onChange={(e) => setDealerForm({ ...dealerForm, name: e.target.value })}
                   required
+                  maxLength={255}
+                  placeholder="Enter dealer name"
                 />
               </div>
               <div>
-                <Label className="text-gray-300">Region</Label>
-                <Input
-                  value={formData.region || ''}
-                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                  placeholder="Region"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Area</Label>
-                <Input
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                  placeholder="Area"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Address/Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Type</Label>
-                <Select
-                  value={formData.type || 'Standard'}
-                  onValueChange={(value) => setFormData({ ...formData, type: value })}
-                >
-                  <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
+                <Label htmlFor="type">Dealer Type *</Label>
+                <Select value={dealerForm.type} onValueChange={(value) => setDealerForm({ ...dealerForm, type: value })}>
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-600">
-                    <SelectItem value="Premium">Premium</SelectItem>
-                    <SelectItem value="Standard">Standard</SelectItem>
-                    <SelectItem value="Basic">Basic</SelectItem>
+                  <SelectContent>
+                    <SelectItem value="Dealer">Dealer</SelectItem>
+                    <SelectItem value="Sub Dealer">Sub Dealer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <Label className="text-gray-300">Contact</Label>
+                <Label htmlFor="region">Region *</Label>
                 <Input
-                  value={formData.contact || ''}
-                  onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
-                  placeholder="Phone number"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Total Potential (₹)</Label>
-                <Input
-                  type="number"
-                  value={formData.totalPotential || ''}
-                  onChange={(e) => setFormData({ ...formData, totalPotential: e.target.value })}
-                  placeholder="Expected business value"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-            </>
-          )}
-
-          {/* DEALER SCORING FORM */}
-          {type === 'dealer-score' && (
-            <>
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-white mb-2">
-                  Score: {useAppStore.getState().selectedItem?.name}
-                </h3>
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Overall Dealer Score</span>
-                  <span>{formData.dealerScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.dealerScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, dealerScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Trustworthiness</span>
-                  <span>{formData.trustWorthinessScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.trustWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, trustWorthinessScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Credit Worthiness</span>
-                  <span>{formData.creditWorthinessScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.creditWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, creditWorthinessScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Order History</span>
-                  <span>{formData.orderHistoryScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.orderHistoryScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, orderHistoryScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Visit Frequency</span>
-                  <span>{formData.visitFrequencyScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.visitFrequencyScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, visitFrequencyScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-            </>
-          )}
-
-          {/* DVR/TVR FORMS */}
-          {(type === 'dvr' || type === 'tvr') && (
-            <>
-              <div>
-                <Label className="text-gray-300">Report Title</Label>
-                <Input
-                  value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder={`${type.toUpperCase()} Report`}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  id="region"
+                  value={dealerForm.region}
+                  onChange={(e) => setDealerForm({ ...dealerForm, region: e.target.value })}
                   required
+                  maxLength={100}
+                  placeholder="Enter region"
                 />
               </div>
               <div>
-                <Label className="text-gray-300">Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Description</Label>
-                <Textarea
-                  value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Report details"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  rows={3}
-                />
-              </div>
-              {type === 'dvr' && (
-                <div>
-                  <Label className="text-gray-300">Amount Collected (₹)</Label>
-                  <Input
-                    type="number"
-                    value={formData.amount || ''}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    placeholder="0"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  />
+                <Label htmlFor="area">Area * (with Location)</Label>
+                <div className="space-y-2">
+                  <div className="flex space-x-2">
+                    <Input
+                      id="area"
+                      value={dealerForm.area}
+                      onChange={(e) => setDealerForm({ ...dealerForm, area: e.target.value })}
+                      required
+                      maxLength={255}
+                      placeholder="Enter area or use location"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      onClick={handleGetLocation}
+                      disabled={isLoading}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-3"
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <>
+                          <MapPin className="w-4 h-4 mr-1" />
+                          Get Location
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  {dealerForm.area.startsWith('{') && (
+                    <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                      📍 Location coordinates stored
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
               <div>
-                <Label className="text-gray-300">Date</Label>
+                <Label htmlFor="phoneNo">Phone Number *</Label>
                 <Input
-                  type="date"
-                  value={formData.date || ''}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  id="phoneNo"
+                  value={dealerForm.phoneNo}
+                  onChange={(e) => setDealerForm({ ...dealerForm, phoneNo: e.target.value })}
+                  required
+                  maxLength={20}
+                  placeholder="Enter phone number"
                 />
               </div>
-            </>
-          )}
+              <div>
+                <Label htmlFor="totalPotential">Total Potential (₹) *</Label>
+                <Input
+                  id="totalPotential"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={dealerForm.totalPotential}
+                  onChange={(e) => setDealerForm({ ...dealerForm, totalPotential: e.target.value })}
+                  required
+                  placeholder="Enter total potential"
+                />
+              </div>
+              <div>
+                <Label htmlFor="bestPotential">Best Potential (₹) *</Label>
+                <Input
+                  id="bestPotential"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={dealerForm.bestPotential}
+                  onChange={(e) => setDealerForm({ ...dealerForm, bestPotential: e.target.value })}
+                  required
+                  placeholder="Enter best potential"
+                />
+              </div>
+            </div>
 
-          <div className="flex space-x-3 pt-4">
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
-            >
-              {isSubmitting ? (
-                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-              ) : null}
-              {isSubmitting ? 'Creating...' : 'Create'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="border-gray-600 text-gray-300 hover:bg-gray-700"
-            >
-              Cancel
-            </Button>
+            <div>
+              <Label htmlFor="address">Address *</Label>
+              <Textarea
+                id="address"
+                value={dealerForm.address}
+                onChange={(e) => setDealerForm({ ...dealerForm, address: e.target.value })}
+                required
+                maxLength={500}
+                placeholder="Enter complete address"
+                rows={3}
+              />
+            </div>
+
+            <div>
+              <Label>Brands Selling *</Label>
+              {dealerForm.brandSelling.map((brand, index) => (
+                <div key={index} className="flex space-x-2 mt-2">
+                  <Input
+                    value={brand}
+                    onChange={(e) => updateBrandField(index, e.target.value)}
+                    placeholder="Brand name"
+                    required={index === 0}
+                  />
+                  {dealerForm.brandSelling.length > 1 && (
+                    <Button type="button" variant="outline" size="sm" onClick={() => removeBrandField(index)}>
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button type="button" variant="outline" onClick={addBrandField} className="mt-2">
+                <Plus className="w-4 h-4 mr-2" />
+                Add Brand
+              </Button>
+            </div>
+
+            <div>
+              <Label htmlFor="feedbacks">Feedbacks *</Label>
+              <Textarea
+                id="feedbacks"
+                value={dealerForm.feedbacks}
+                onChange={(e) => setDealerForm({ ...dealerForm, feedbacks: e.target.value })}
+                required
+                maxLength={500}
+                placeholder="Enter dealer feedbacks"
+                rows={3}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="remarks">Remarks</Label>
+              <Textarea
+                id="remarks"
+                value={dealerForm.remarks}
+                onChange={(e) => setDealerForm({ ...dealerForm, remarks: e.target.value })}
+                maxLength={500}
+                placeholder="Additional remarks (optional)"
+                rows={2}
+              />
+            </div>
+
+            <div className="flex space-x-2">
+              <Button type="submit" disabled={isLoading} className="flex-1">
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Adding Dealer...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add Dealer
+                  </>
+                )}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowDealerForm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dealers List Dialog */}
+      <Dialog open={showDealersList} onOpenChange={setShowDealersList}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>All Dealers ({dealers.length})</DialogTitle>
+            <DialogDescription>
+              Manage your dealer database
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {dealers.length > 0 ? (
+              <div className="grid gap-4">
+                {dealers.map((dealer) => (
+                  <Card key={dealer.id} className="p-4">
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-2 flex-1">
+                        <div className="flex items-center space-x-2">
+                          <h3 className="font-semibold text-lg">{dealer.name}</h3>
+                          <Badge variant={dealer.type === 'Dealer' ? 'default' : 'outline'}>
+                            {dealer.type}
+                          </Badge>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-600">
+                          <div className="flex items-center">
+                            <MapPin className="w-4 h-4 mr-1" />
+                            {dealer.region} - {dealer.area}
+                          </div>
+                          <div className="flex items-center">
+                            <Phone className="w-4 h-4 mr-1" />
+                            {dealer.phoneNo}
+                          </div>
+                          <div className="flex items-center">
+                            <DollarSign className="w-4 h-4 mr-1" />
+                            Total: ₹{dealer.totalPotential}
+                          </div>
+                          <div className="flex items-center">
+                            <Target className="w-4 h-4 mr-1" />
+                            Best: ₹{dealer.bestPotential}
+                          </div>
+                        </div>
+                        <div className="text-sm">
+                          <strong>Brands:</strong> {dealer.brandSelling.join(', ')}
+                        </div>
+                        <div className="text-sm">
+                          <strong>Address:</strong> {dealer.address}
+                        </div>
+                      </div>
+                      <div className="flex space-x-2 ml-4">
+                        <Button size="sm" variant="outline">
+                          <Edit className="w-4 h-4" />
+                        </Button>
+                        <Button size="sm" variant="outline">
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12 text-gray-500">
+                <Users className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                <p className="text-lg font-medium">No dealers found</p>
+                <p className="text-sm">Start by adding your first dealer</p>
+                <Button
+                  onClick={() => {
+                    setShowDealersList(false);
+                    setShowDealerForm(true);
+                  }}
+                  className="mt-4"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add First Dealer
+                </Button>
+              </div>
+            )}
           </div>
-        </form>
-      </motion.div>
-    </motion.div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Leave Form Dialog */}
+      <Dialog open={showLeaveForm} onOpenChange={setShowLeaveForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apply for Leave</DialogTitle>
+            <DialogDescription>
+              Submit your leave application for approval
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleLeaveApplication} className="space-y-4">
+            <div>
+              <Label htmlFor="leaveType">Leave Type *</Label>
+              <Select value={leaveForm.leaveType} onValueChange={(value) => setLeaveForm({ ...leaveForm, leaveType: value })}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select leave type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Sick">Sick Leave</SelectItem>
+                  <SelectItem value="Casual">Casual Leave</SelectItem>
+                  <SelectItem value="Earned">Earned Leave</SelectItem>
+                  <SelectItem value="Emergency">Emergency Leave</SelectItem>
+                  <SelectItem value="Personal">Personal Leave</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="startDate">Start Date *</Label>
+                <Input
+                  id="startDate"
+                  type="date"
+                  value={leaveForm.startDate}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, startDate: e.target.value })}
+                  required
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+              <div>
+                <Label htmlFor="endDate">End Date *</Label>
+                <Input
+                  id="endDate"
+                  type="date"
+                  value={leaveForm.endDate}
+                  onChange={(e) => setLeaveForm({ ...leaveForm, endDate: e.target.value })}
+                  required
+                  min={leaveForm.startDate || new Date().toISOString().split('T')[0]}
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="reason">Reason *</Label>
+              <Textarea
+                id="reason"
+                value={leaveForm.reason}
+                onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })}
+                placeholder="Please provide reason for leave"
+                required
+                rows={3}
+              />
+            </div>
+
+            <div className="flex space-x-2">
+              <Button type="submit" disabled={isLoading} className="flex-1">
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4 mr-2" />
+                    Submit Application
+                  </>
+                )}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowLeaveForm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Task Form Dialog */}
+      <Dialog open={showTaskForm} onOpenChange={setShowTaskForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create New Task</DialogTitle>
+            <DialogDescription>
+              Add a new task or follow-up
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleCreateTask} className="space-y-4">
+            <div>
+              <Label htmlFor="taskTitle">Task Title *</Label>
+              <Input
+                id="taskTitle"
+                value={taskForm.title}
+                onChange={(e) => setTaskForm({ ...taskForm, title: e.target.value })}
+                required
+                placeholder="Enter task title"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="taskDescription">Description</Label>
+              <Textarea
+                id="taskDescription"
+                value={taskForm.description}
+                onChange={(e) => setTaskForm({ ...taskForm, description: e.target.value })}
+                placeholder="Task description (optional)"
+                rows={3}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="priority">Priority</Label>
+                <Select value={taskForm.priority} onValueChange={(value) => setTaskForm({ ...taskForm, priority: value })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="urgent">Urgent</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label htmlFor="dueDate">Due Date</Label>
+                <Input
+                  id="dueDate"
+                  type="date"
+                  value={taskForm.dueDate}
+                  onChange={(e) => setTaskForm({ ...taskForm, dueDate: e.target.value })}
+                  min={new Date().toISOString().split('T')[0]}
+                />
+              </div>
+            </div>
+
+            <div className="flex space-x-2">
+              <Button type="submit" disabled={isLoading} className="flex-1">
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Creating...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Task
+                  </>
+                )}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowTaskForm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* 🎨 FIXED CHAT INTERFACE AT BOTTOM */}
+      <div className="chat-interface">
+        <ChatInterface
+          context={chatContext}
+          currentLocation={currentLocation}
+          userId={user?.id}
+          onContextChange={setChatContext}
+        />
+      </div>
+    </div>
   );
-};
+}

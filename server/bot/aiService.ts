@@ -1,314 +1,245 @@
-// aiService.ts - ENHANCED RAG with Qdrant Vector Search
 import OpenAI from 'openai';
-import { qdrantClient, searchSimilarEndpoints } from '../qdrant';
+import { QdrantClient } from '@qdrant/js-client-rest';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
 }
 
-interface EndpointResult {
-  name: string;
-  endpoint: string;
-  description: string;
-  similarity: number;
-  fields: any;
-  requiredFields: any;
+interface ChatResponse {
+  message: string;
+  isComplete?: boolean;
+  endpointData?: any;
 }
 
-class EnhancedRAGService {
+class PureRAGService {
   private openai: OpenAI;
+  private qdrant: QdrantClient;
+  private endpointContext: string = '';
   private ready: Promise<void>;
 
   constructor() {
-    // OpenRouter with FREE model
+    // ✅ Validate env vars
+    const requiredEnvVars = ["OPENROUTER_API_KEY", "QDRANT_API_KEY"];
+    requiredEnvVars.forEach((envVar) => {
+      if (!process.env[envVar]) {
+        throw new Error(`❌ Missing environment variable: ${envVar}`);
+      }
+    });
+
     this.openai = new OpenAI({
       baseURL: "https://openrouter.ai/api/v1",
       apiKey: process.env.OPENROUTER_API_KEY!,
       defaultHeaders: {
         "HTTP-Referer": process.env.NGROK_URL || "https://telesalesside.onrender.com",
-        "X-Title": "Enhanced Field Service RAG Assistant",
+        "X-Title": "Field Service RAG Assistant",
       },
     });
 
-    this.ready = this.initialize();
+    this.qdrant = new QdrantClient({
+      url: "https://159aa838-50db-435a-b6d7-46b432c554ba.eu-west-1-0.aws.cloud.qdrant.io:6333",
+      apiKey: process.env.QDRANT_API_KEY!,
+    });
+
+    // ✅ Wait for RAG context to be ready
+    this.ready = this.loadRAGContext();
   }
 
-  private async initialize() {
-    console.log("🚀 Initializing Enhanced RAG Service with Qdrant...");
-    // Test Qdrant connection
-    await this.testQdrantConnection();
-  }
+  private async loadRAGContext() {
+    console.log("📥 Loading RAG context from Qdrant...");
 
-  private async testQdrantConnection() {
     try {
-      console.log("🔌 Testing Qdrant connection...");
-      const collections = await qdrantClient.getCollections();
-      console.log("✅ Qdrant connected! Collections:", collections.collections.length);
+      const response = await this.qdrant.scroll("api_endpoints", {
+        limit: 100,
+        with_payload: true,
+        with_vector: false,
+      });
+
+      const endpoints = response.points.map((point) => point.payload);
+
+      this.endpointContext = `
+AVAILABLE API ENDPOINTS:
+
+${endpoints
+          .map(
+            (endpoint) => `
+ENDPOINT: ${endpoint.name}
+URL: ${endpoint.endpoint} (${endpoint.method})
+DESCRIPTION: ${endpoint.description}
+FIELDS: ${JSON.stringify(endpoint.fields)}
+REQUIRED FIELDS: ${JSON.stringify(endpoint.requiredFields)}
+SEARCH TERMS: ${endpoint.searchTerms}
+---`
+          )
+          .join("\n")}
+`;
+
+      console.log(`✅ RAG context loaded (${endpoints.length} endpoints)`);
     } catch (error) {
-      console.error("❌ Qdrant connection failed:", error);
+      console.error("❌ Failed to load RAG context from Qdrant:", error);
+      throw new Error("Could not connect to Qdrant vector database");
     }
   }
 
-  // 🎯 VECTOR-POWERED ENDPOINT DISCOVERY
-  private async findRelevantEndpoints(userMessage: string): Promise<EndpointResult[]> {
-    console.log("🔍 Vector search for relevant endpoints...");
-    
+  // Enhanced chat method with REAL proactiveness:
+  async chat(messages: ChatMessage[], userId?: number): Promise<string> {
+    await this.ready;
+    console.log("💬 Chat request received");
+
+    // 🤖 PROACTIVE: Check if user mentioned a visit
+    const lastMessage = messages[messages.length - 1]?.content.toLowerCase();
+    const isVisitMention = lastMessage.includes('visit') || lastMessage.includes('dealer') || lastMessage.includes('client') || lastMessage.includes('technical');
+
+    let contextualInfo = '';
+
+    if (isVisitMention && userId) {
+      console.log("🔍 Visit detected - fetching user's recent activity...");
+
+      // Fetch user's recent activity in parallel
+      const [recentDealers, recentDVRs, recentTVRs] = await Promise.all([
+        this.fetchRecentDealers(userId),
+        this.fetchRecentDVRs(userId),
+        this.fetchRecentTVRs(userId)
+      ]);
+
+      if (recentDealers.length > 0) {
+        contextualInfo += `\n🏢 RECENT DEALERS: ${recentDealers.map(d => `${d.name} (${d.location})`).slice(0, 3).join(', ')}\n`;
+      }
+
+      if (recentDVRs.length > 0) {
+        contextualInfo += `\n📊 RECENT DVR VISITS: ${recentDVRs.map(d => `${d.dealerName} - ${d.visitType}`).slice(0, 3).join(', ')}\n`;
+      }
+
+      if (recentTVRs.length > 0) {
+        contextualInfo += `\n🔧 RECENT TVR VISITS: ${recentTVRs.map(t => `${t.siteNameConcernedPerson} - ${t.visitType}`).slice(0, 3).join(', ')}\n`;
+      }
+    }
+    const ragMessages = [
+      {
+        role: "system" as const,
+        content: `You are a proactive field service assistant with access to user's recent activity.
+${this.endpointContext}
+${contextualInfo}
+IMPORTANT: You already have the user's ID (${userId}) - NEVER ask for it.
+BUTLER BEHAVIOR:
+- Use the recent activity data above to be specific
+- When users mention visits, reference their recent patterns
+- Don't ask for information you can infer from recent activity
+- Be conversational: "I see you recently visited ABC Corp - is this another visit there?"
+- Auto-suggest based on patterns: "Like your usual technical visits to XYZ?"
+- Only ask for truly missing critical information
+BE A SMART BUTLER, NOT A FORM.`,
+      },
+      ...messages,
+    ];
     try {
-      // Generate embedding for user query
-      const embedding = await this.generateEmbedding(userMessage);
-      
-      // Search similar endpoints using Qdrant
-      const similarEndpoints = await searchSimilarEndpoints(embedding, 5);
-      
-      console.log(`✅ Found ${similarEndpoints.length} relevant endpoints via vector search`);
-      return similarEndpoints;
+      const completion = await this.openai.chat.completions.create({
+        model: "openai/gpt-oss-20b:free",
+        messages: ragMessages,
+        max_tokens: 1000,
+        temperature: 0.7,
+      });
+      return completion.choices[0]?.message?.content || "I'm having trouble processing that. Could you try again?";
     } catch (error) {
-      console.error("❌ Vector search failed:", error);
+      console.error("❌ OpenRouter request failed:", error);
+      throw new Error("Failed to process chat message");
+    }
+  }
+
+  private async fetchRecentDealers(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dealers/recent?limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent dealers:', error);
+      return [];
+    }
+  }
+  private async fetchRecentDVRs(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/dvr/recent?userId=${userId}&limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent DVRs:', error);
+      return [];
+    }
+  }
+  private async fetchRecentTVRs(userId: number): Promise<any[]> {
+    try {
+      const response = await fetch(`${process.env.BASE_URL || 'https://telesalesside.onrender.com'}/api/tvr/recent?userId=${userId}&limit=5`);
+      const result = await response.json();
+      return response.ok ? (result.data || []) : [];
+    } catch (error) {
+      console.error('Failed to fetch recent TVRs:', error);
       return [];
     }
   }
 
-  // 🧠 GENERATE EMBEDDINGS
-  private async generateEmbedding(text: string): Promise<number[]> {
-    try {
-      const response = await this.openai.embeddings.create({
-        model: "text-embedding-3-small",
-        input: text,
-      });
-      return response.data[0].embedding;
-    } catch (error) {
-      console.error("❌ Embedding generation failed:", error);
-      // Fallback to simple vector for testing
-      return new Array(1536).fill(0).map(() => Math.random());
-    }
-  }
 
-  // 💬 ENHANCED RAG CHAT with Vector Search
-  async chat(messages: ChatMessage[], userId?: number): Promise<string> {
-    await this.ready;
-    console.log("💬 Enhanced RAG processing with vector search...");
-
-    try {
-      const userMessage = messages[messages.length - 1]?.content || '';
-      
-      // 1. RETRIEVE: Vector search for relevant endpoints
-      const relevantEndpoints = await this.findRelevantEndpoints(userMessage);
-      
-      // 2. AUGMENT: Build enhanced context
-      const endpointContext = relevantEndpoints.length > 0 
-        ? relevantEndpoints.map(ep => 
-            `- ${ep.name}: ${ep.description} (${ep.endpoint}) [Similarity: ${ep.similarity.toFixed(2)}]`
-          ).join('\n')
-        : 'Available services: DVR, TVR, PJP, Dealers, Attendance, Tasks';
-      
-      const conversationHistory = messages.slice(-3).map(m => `${m.role}: ${m.content}`).join('\n');
-      
-      // 3. GENERATE: Enhanced response with UI awareness
-      const completion = await this.openai.chat.completions.create({
-        model: "openai/gpt-oss-20b:free",
-        messages: [
-          {
-            role: "system",
-            content: `You are an intelligent field service assistant with API consciousness.
-
-AVAILABLE ENDPOINTS (Vector Search Results):
-${endpointContext}
-
-CONVERSATION HISTORY:
-${conversationHistory}
-
-GUIDELINES:
-- You have semantic awareness of all API endpoints through vector search
-- For data collection, guide users step-by-step with specific field requirements
-- Provide UI-aware responses with button/form suggestions
-- Be precise about which endpoint to use based on user intent
-- If user wants to submit data, extract structured information for API calls
-- Keep responses actionable and conversational`
-          },
-          { role: "user", content: userMessage }
-        ],
-        max_tokens: 500,
-        temperature: 0.7,
-      });
-
-      const response = completion.choices[0]?.message?.content || "I'm here to help with intelligent API routing!";
-      console.log("✅ Enhanced RAG response generated");
-      return response;
-    } catch (error) {
-      console.error("❌ Enhanced RAG Chat failed:", error);
-      return "I'm experiencing some technical difficulties. Please try again.";
-    }
-  }
-
-  // 🎯 SMART ENDPOINT FINDER
-  async findBestEndpoint(userInput: string): Promise<EndpointResult | null> {
-    try {
-      const endpoints = await this.findRelevantEndpoints(userInput);
-      return endpoints.length > 0 ? endpoints[0] : null;
-    } catch (error) {
-      console.error("❌ Best endpoint finding failed:", error);
-      return null;
-    }
-  }
-
-  // ⚡ DIRECT API EXECUTOR
-  async executeEndpoint(endpoint: string, data: any, userId?: number): Promise<any> {
-    try {
-      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
-      
-      console.log(`🎯 Executing ${endpoint} with data:`, data);
-      
-      const response = await fetch(`${baseUrl}${endpoint}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Enhanced-RAG-Service/2.0'
-        },
-        body: JSON.stringify({ userId, ...data })
-      });
-
-      const result = await response.json();
-      
-      if (!response.ok) {
-        console.error(`❌ API execution failed for ${endpoint}:`, result);
-        return { success: false, error: result.error || 'API execution failed', details: result.details };
-      }
-
-      console.log(`✅ Successfully executed ${endpoint}`);
-      return { success: true, data: result.data, endpoint };
-    } catch (error) {
-      console.error(`❌ Direct execution failed for ${endpoint}:`, error);
-      return { success: false, error: 'Network or execution error' };
-    }
-  }
-
-  // 🤖 INTELLIGENT RAG CHAT (Complete Flow)
-  async ragChat(userInput: string, userId?: number): Promise<any> {
-    console.log("🤖 Starting intelligent RAG flow...");
-    
-    try {
-      // 1. Find best endpoint using vector search
-      const bestEndpoint = await this.findBestEndpoint(userInput);
-      
-      if (!bestEndpoint) {
-        return {
-          success: false,
-          message: "I couldn't find a relevant endpoint for your request. Could you be more specific?",
-          suggestion: "Try asking about visits, reports, dealers, or attendance."
-        };
-      }
-
-      // 2. Extract structured data if this looks like a submission
-      const messages: ChatMessage[] = [{ role: 'user', content: userInput }];
-      const extractedData = await this.extractStructuredData(messages, userId);
-
-      if (extractedData && !extractedData.error && extractedData.data) {
-        // 3. Execute the endpoint directly
-        const executionResult = await this.executeEndpoint(bestEndpoint.endpoint, extractedData.data, userId);
-        
-        if (executionResult.success) {
-          return {
-            success: true,
-            message: `✅ Successfully processed using ${bestEndpoint.name}!`,
-            endpoint: bestEndpoint.endpoint,
-            data: executionResult.data,
-            similarity: bestEndpoint.similarity
-          };
-        } else {
-          return {
-            success: false,
-            message: `Found relevant endpoint (${bestEndpoint.name}) but execution failed: ${executionResult.error}`,
-            endpoint: bestEndpoint.endpoint,
-            error: executionResult.error,
-            suggestion: "Please check your data format and try again."
-          };
-        }
-      } else {
-        // 4. Just provide guidance without execution
-        return {
-          success: true,
-          message: await this.chat(messages, userId),
-          endpoint: bestEndpoint.endpoint,
-          similarity: bestEndpoint.similarity,
-          guidance: true
-        };
-      }
-    } catch (error) {
-      console.error("❌ Intelligent RAG flow failed:", error);
-      return {
-        success: false,
-        message: "I encountered an error processing your request. Please try again.",
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-    }
-  }
-
-  // 📋 Enhanced Structured Data Extraction
   async extractStructuredData(messages: ChatMessage[], userId?: number): Promise<any> {
     await this.ready;
-    console.log("📋 Enhanced data extraction with vector context...");
+
+    let contextualInfo = '';
+
+    // ✅ FETCH RECENT ACTIVITY FOR BETTER EXTRACTION
+    if (userId) {
+      const [recentDealers, recentDVRs, recentTVRs] = await Promise.all([
+        this.fetchRecentDealers(userId),
+        this.fetchRecentDVRs(userId),
+        this.fetchRecentTVRs(userId)
+      ]);
+
+      if (recentDealers.length > 0) {
+        contextualInfo += `\nUSER'S RECENT DEALERS: ${recentDealers.map(d => `${d.name} (${d.location})`).join(', ')}\n`;
+      }
+
+      if (recentDVRs.length > 0) {
+        contextualInfo += `\nUSER'S RECENT DVR PATTERNS: ${recentDVRs.map(d => `${d.dealerName} - ${d.visitType}`).join(', ')}\n`;
+      }
+    }
+
+    const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
 
     try {
-      const conversation = messages.map(m => `${m.role}: ${m.content}`).join('\n');
-      
-      // Get relevant endpoints for context
-      const userMessage = messages[messages.length - 1]?.content || '';
-      const relevantEndpoints = await this.findRelevantEndpoints(userMessage);
-      
-      const endpointDetails = relevantEndpoints.slice(0, 3).map(ep => 
-        `${ep.endpoint}: ${ep.description}\nRequired: ${JSON.stringify(ep.requiredFields)}\nOptional: ${JSON.stringify(ep.fields)}`
-      ).join('\n\n');
-
       const completion = await this.openai.chat.completions.create({
         model: "openai/gpt-oss-20b:free",
         messages: [
           {
             role: "system",
-            content: `Extract structured data from conversation for API submission.
+            content: `Extract structured data from this field service conversation.
 
-RELEVANT ENDPOINTS (Vector Search Results):
-${endpointDetails}
+${contextualInfo}
 
-RESPONSE FORMAT:
-Success: {"endpoint": "/api/dvr", "data": {"dealerName": "ABC Corp", "location": "Mumbai", ...}}
-Error: {"error": "Missing required fields"}
+Use the recent activity above to match dealer names and validate data.
 
-Only return structured data if you can identify the endpoint and have required fields.`
+DVR: /api/dvr-manual (dealerName, subDealerName, location, dealerType, visitType, etc.)
+TVR: /api/tvr (visitType, siteNameConcernedPerson, phoneNo, emailId, etc.)
+
+Return JSON: {"endpoint": "/api/dvr-manual" or "/api/tvr", "data": {...}} or {"error": "reason"}`
           },
-          { role: "user", content: conversation }
+          {
+            role: "user",
+            content: conversation
+          }
         ],
-        max_tokens: 600,
+        max_tokens: 500,
         temperature: 0.1,
       });
 
       const response = completion.choices[0]?.message?.content;
-      const extracted = JSON.parse(response || '{"error": "Failed to extract data"}');
-      
-      console.log("✅ Enhanced data extraction completed:", extracted.endpoint || extracted.error);
-      return extracted;
-    } catch (error) {
-      console.error("❌ Enhanced data extraction failed:", error);
-      return { error: "Failed to extract structured data from conversation" };
-    }
-  }
+      if (!response) {
+        return { error: "Failed to extract data" };
+      }
 
-  // 📊 Fetch data with your auto-CRUD endpoints
-  async fetchData(endpoint: string, userId?: number, params: any = {}): Promise<any[]> {
-    try {
-      const baseUrl = process.env.BASE_URL || 'https://telesalesside.onrender.com';
-      const queryParams = new URLSearchParams({ limit: '10', ...params }).toString();
-      const url = `${baseUrl}${endpoint}/user/${userId}?${queryParams}`;
-      
-      const response = await fetch(url);
-      const result = await response.json();
-      return response.ok ? (result.data || []) : [];
+      return JSON.parse(response);
     } catch (error) {
-      console.error(`❌ Fetch failed for ${endpoint}:`, error);
-      return [];
+      console.error("❌ Data extraction failed:", error);
+      return { error: "Failed to extract structured data" };
     }
   }
 }
 
-export default new EnhancedRAGService();
-export { EnhancedRAGService, ChatMessage };
+export default new PureRAGService();
+export { PureRAGService, ChatMessage, ChatResponse };
