@@ -830,32 +830,36 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
         error: 'userId, latitude, longitude, and (companyId OR geofenceId) are required'
       });
     }
-// 1) Fetch the geofence (your curl, verbatim logic)
+// Build the EXACT endpoint with REAL values.
 let radarUrl = '';
 
 if (geofenceId) {
-  // DOCS: GET /v1/geofences/:id
-  radarUrl = 'https://api.radar.io/v1/geofences/:id';
+  // replace :id with the actual Radar _id string (e.g. "56db1f4613012711002229f5")
+  radarUrl = `https://api.radar.io/v1/geofences/${geofenceId}`;
 } else {
-  // DOCS: GET /v1/geofences/:tag/:externalId
-  radarUrl = 'https://api.radar.io/v1/geofences/:tag/:externalId';
+  // replace :tag/:externalId with real values
+  const tag = 'office';
+  const externalId = `company:${companyId}`;
+  radarUrl = `https://api.radar.io/v1/geofences/${tag}/${externalId}`;
 }
 
+// Call Radar (SECRET key, not publishable)
 const gfRes = await fetch(radarUrl, {
   method: 'GET',
   headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
 });
-
 const gfJson = await gfRes.json().catch(() => ({} as any));
 
-if (!gfRes.ok || !gfJson?.geofence) {
+// Log once so you can see what's wrong if it fails again
+if (!gfRes.ok || !gfJson?.geofence || gfJson?.meta?.code !== 200) {
+  console.error('[radar] status:', gfRes.status, 'url:', radarUrl, 'body:', gfJson);
   return res.status(400).json({
     success: false,
     error: gfJson?.message || 'Could not fetch geofence from Radar'
   });
 }
 
-const geofence = gfJson.geofence; // DOCS: object with _id, tag, externalId, geometry, etc.
+const geofence = gfJson.geofence;
 
 
     // 2) Compare coordinates (circle check; exact equality is nonsense)
