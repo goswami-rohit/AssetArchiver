@@ -263,6 +263,7 @@ const useAPI = () => {
         headers: { "Content-Type": "application/json" },     // make sure body is parsed
         body: JSON.stringify({
           userId: Number(user.id),                            // force numeric
+          companyId: Number(user.companyId),
           latitude,
           longitude,
           accuracy,
