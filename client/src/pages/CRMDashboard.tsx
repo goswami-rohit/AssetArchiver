@@ -237,48 +237,50 @@ const useAPI = () => {
       setLoading(false);
     }
   }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
+
   const handleAttendancePunch = useCallback(async () => {
     if (!user) return;
 
     try {
       setLoading(true);
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true, timeout: 15000, maximumAge: 0
+        });
       });
 
-      const { latitude, longitude, accuracy } = position.coords;
+      const { latitude, longitude, accuracy, speed, heading, altitude } = pos.coords;
 
-      // Hit your backend, let it reverse geocode & validate location
       const endpoint =
         useAppStore.getState().attendanceStatus === "out"
-          ? "/api/attendance2/punch-in"
-          : "/api/attendance2/punch-out";
+          ? "/api/attendance3/punch-in"
+          : "/api/attendance3/punch-out";
 
       const response = await apiCall(endpoint, {
         method: "POST",
         body: JSON.stringify({
           userId: user.id,
-          companyId: user.companyId,
           latitude,
           longitude,
           accuracy,
-          // ⚡ remove hardcoded "Mobile App"
-          // let backend fill locationName via reverse geocode
+          speed,
+          heading,
+          altitude
+          // no companyId, no geofence, no Radar, no locationName from client
         }),
       });
 
       if (response.success) {
-        useAppStore
-          .getState()
-          .setAttendanceStatus(
-            useAppStore.getState().attendanceStatus === "out"
-              ? "in"
-              : "out"
-          );
+        useAppStore.getState().setAttendanceStatus(
+          useAppStore.getState().attendanceStatus === "out" ? "in" : "out"
+        );
         await fetchDashboardStats();
+      } else {
+        alert(response.error || "Attendance error");
       }
-    } catch (error) {
-      console.error("Attendance punch failed:", error);
+    } catch (err: any) {
+      console.error("Attendance punch failed:", err);
+      alert(err?.message || "Location unavailable");
     } finally {
       setLoading(false);
     }

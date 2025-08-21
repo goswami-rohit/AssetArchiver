@@ -152,6 +152,28 @@ const zPunchOut = z.object({
   selfieUrl: z.string().url().optional()
 });
 
+const zPunchIn3 = z.object({
+  userId: z.coerce.number().int().positive(),
+  latitude: z.number(),
+  longitude: z.number(),
+  accuracy: z.number().optional(),
+  speed: z.number().optional(),
+  heading: z.number().optional(),
+  altitude: z.number().optional(),
+  selfieUrl: z.string().url().optional()
+});
+
+const zPunchOut3 = z.object({
+  userId: z.coerce.number().int().positive(),
+  latitude: z.number().optional(),
+  longitude: z.number().optional(),
+  accuracy: z.number().optional(),
+  speed: z.number().optional(),
+  heading: z.number().optional(),
+  altitude: z.number().optional(),
+  selfieUrl: z.string().url().optional()
+});
+
 // ============================================
 // SCHEMA-PERFECT AUTO-CRUD GENERATOR
 // ============================================
@@ -1305,5 +1327,90 @@ export function setupWebRoutes(app: Express) {
       return res.status(500).json({ success: false, error: "Punch-out failed" });
     }
   });
+
+  // -------- Attendance v3 (no geofence, no Radar) --------
+
+  // Punch IN: just record GPS + timestamps
+  app.post("/api/attendance3/punch-in", async (req, res) => {
+    try {
+      const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } =
+        zPunchIn3.parse(req.body);
+
+      const today = new Date().toISOString().split("T")[0];
+      const locationName = `Lat ${latitude.toFixed(5)}, Lng ${longitude.toFixed(5)}`;
+
+      const row = {
+        userId,                                 // int
+        attendanceDate: today,                  // YYYY-MM-DD
+        locationName,                           // NOT NULL
+        inTimeTimestamp: new Date(),
+        inTimeImageCaptured: !!selfieUrl,
+        outTimeImageCaptured: false,
+        inTimeImageUrl: selfieUrl ?? null,
+
+        // decimals must be strings for Drizzle decimal()
+        inTimeLatitude: latitude.toString(),
+        inTimeLongitude: longitude.toString(),
+        inTimeAccuracy: accuracy != null ? accuracy.toString() : null,
+        inTimeSpeed: speed != null ? speed.toString() : null,
+        inTimeHeading: heading != null ? heading.toString() : null,
+        inTimeAltitude: altitude != null ? altitude.toString() : null
+      };
+
+      const [inserted] = await db.insert(salesmanAttendance).values(row).returning();
+      return res.json({ success: true, data: inserted, message: "Punch-in recorded." });
+    } catch (e: any) {
+      return res.status(400).json({ success: false, error: e.message || "Punch-in failed" });
+    }
+  });
+
+  // Punch OUT: update latest open record for today
+  app.post("/api/attendance3/punch-out", async (req, res) => {
+    try {
+      const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } =
+        zPunchOut3.parse(req.body);
+
+      const today = new Date().toISOString().split("T")[0];
+
+      const [open] = await db
+        .select()
+        .from(salesmanAttendance)
+        .where(and(
+          eq(salesmanAttendance.userId, userId),
+          eq(salesmanAttendance.attendanceDate, today),
+          isNull(salesmanAttendance.outTimeTimestamp)
+        ))
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+        .limit(1);
+
+      if (!open) {
+        return res.status(404).json({ success: false, error: "No active punch-in record found." });
+      }
+
+      const updateData = {
+        outTimeTimestamp: new Date(),
+        outTimeImageCaptured: !!selfieUrl,
+        outTimeImageUrl: selfieUrl ?? null,
+        outTimeLatitude: latitude != null ? latitude.toString() : null,
+        outTimeLongitude: longitude != null ? longitude.toString() : null,
+        outTimeAccuracy: accuracy != null ? accuracy.toString() : null,
+        outTimeSpeed: speed != null ? speed.toString() : null,
+        outTimeHeading: heading != null ? heading.toString() : null,
+        outTimeAltitude: altitude != null ? altitude.toString() : null,
+        updatedAt: new Date()
+      };
+
+      const [updated] = await db
+        .update(salesmanAttendance)
+        .set(updateData)
+        .where(eq(salesmanAttendance.id, open.id))
+        .returning();
+
+      return res.json({ success: true, data: updated, message: "Punch-out recorded." });
+    } catch (e: any) {
+      return res.status(400).json({ success: false, error: e.message || "Punch-out failed" });
+    }
+  });
+
 }
 
