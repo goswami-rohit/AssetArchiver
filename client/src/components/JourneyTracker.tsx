@@ -357,7 +357,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
   // Enhanced office geofence creation with address support
   const handleCreateOfficeGeofence = async (useAddress = false) => {
-    if (!geofenceSettings.companyId) return;
+    if (!geofenceSettings?.companyId) return;
 
     setIsLoading(true);
     setErrorMessage("");
@@ -366,66 +366,38 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     try {
       let lat: number;
       let lng: number;
-      let addressForSave = currentAddress;
+      let prettyAddress = currentAddress || "";
 
       if (useAddress) {
+        // manual address path (uses your existing /geocode-address and /api/office/set-address)
         if (!addressInput.trim()) {
           setErrorMessage("Please enter an address");
           return;
         }
-        // Forward geocode via Radar (your backend endpoint)
-        const coords = await geocodeAddress(addressInput.trim());
-        if (!coords) {
-          setErrorMessage("Could not find coordinates for the provided address");
+
+        const g = await fetch("/geocode-address", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ address: addressInput.trim() }),
+        });
+        const gj = await g.json();
+        if (!gj?.success) {
+          setErrorMessage(gj?.error || "Address not found");
           return;
         }
-        lat = coords.lat;
-        lng = coords.lng;
+        lat = gj.latitude;
+        lng = gj.longitude;
+        prettyAddress = gj.address || addressInput.trim();
 
-        // Best-effort: normalize to formatted from reverse-geocode
-        try {
-          const r = await fetch("/reverse-geocode", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ latitude: lat, longitude: lng })
-          });
-          const j = await r.json();
-          if (j?.success && j?.address?.formatted) addressForSave = j.address.formatted;
-        } catch { }
-      } else {
-        // Force the browser location prompt on click
-        const pos = await getGeoPositionOnce({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
-        lat = pos.coords.latitude;
-        lng = pos.coords.longitude;
-
-        // Update UI and resolve a nice address via Radar
-        setCurrentLocation({
-          lat,
-          lng,
-          accuracy: pos.coords.accuracy,
-          speed: pos.coords.speed || 0,
-          heading: pos.coords.heading || 0,
-          altitude: pos.coords.altitude || 0
+        const save = await fetch("/api/office/set-address", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ companyId: geofenceSettings.companyId, address: prettyAddress }),
         });
-        await resolveCurrentAddress(lat, lng); // updates currentAddress via /reverse-geocode
-        addressForSave = currentAddress || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-      }
+        const sj = await save.json();
+        if (!sj?.success || !sj?.data) throw new Error(sj?.error || "Failed to save office");
 
-      // Save to Neon via your new endpoint
-      const res = await fetch(useAddress ? "/api/office/set-address" : "/api/office/set-current", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          useAddress
-            ? { companyId: geofenceSettings.companyId, address: addressInput.trim() }
-            : { companyId: geofenceSettings.companyId, latitude: lat, longitude: lng, address: addressForSave }
-        )
-      });
-
-      const data = await res.json();
-
-      if (data?.success && data?.data) {
-        const { address, lat: savedLat, lng: savedLng } = data.data;
+        const { address, lat: savedLat, lng: savedLng } = sj.data;
 
         setGeofenceSettings(prev => ({
           ...prev,
@@ -435,24 +407,83 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             geometryRadius: 100,
             geometryCenter: { coordinates: [savedLng, savedLat] }, // [lng, lat]
             metadata: { companyName: "", region: "", area: "" },
-            address
+            address,
           },
           isSetupRequired: false,
-          officeAddress: address || addressForSave
+          officeAddress: address || prettyAddress,
         }));
 
         setSuccessMessage("✅ Office geofence created successfully!");
         setAddressInput("");
-      } else {
-        setErrorMessage(data?.error || "Failed to create office geofence");
+        return;
       }
+
+      // current-location path (forces the browser permission prompt)
+      const pos = await getGeoPositionOnce({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+      lat = pos.coords.latitude;
+      lng = pos.coords.longitude;
+
+      setCurrentLocation({
+        lat,
+        lng,
+        accuracy: pos.coords.accuracy,
+        speed: pos.coords.speed || 0,
+        heading: pos.coords.heading || 0,
+        altitude: pos.coords.altitude || 0,
+      });
+
+      // reverse-geocode via your backend (Radar under the hood)
+      try {
+        const r = await fetch("/reverse-geocode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ latitude: lat, longitude: lng }),
+        });
+        const j = await r.json();
+        if (j?.success && j?.address?.formatted) {
+          prettyAddress = j.address.formatted;
+          setCurrentAddress(prettyAddress);
+        } else {
+          prettyAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+        }
+      } catch {
+        prettyAddress = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+      }
+
+      // save to Neon via your known endpoint
+      const save = await fetch("/api/office/set-current", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId: geofenceSettings.companyId,
+          latitude: lat,
+          longitude: lng,
+          address: prettyAddress,
+        }),
+      });
+      const sj = await save.json();
+      if (!sj?.success || !sj?.data) throw new Error(sj?.error || "Failed to save office");
+
+      const { address, lat: savedLat, lng: savedLng } = sj.data;
+
+      setGeofenceSettings(prev => ({
+        ...prev,
+        officeGeofence: {
+          _id: "local-office",
+          description: "Company Office",
+          geometryRadius: 100,
+          geometryCenter: { coordinates: [savedLng, savedLat] }, // [lng, lat]
+          metadata: { companyName: "", region: "", area: "" },
+          address,
+        },
+        isSetupRequired: false,
+        officeAddress: address || prettyAddress,
+      }));
+
+      setSuccessMessage("✅ Office geofence created successfully!");
     } catch (err: any) {
-      // Location denied or other error
-      if (err?.code === 1 /* PERMISSION_DENIED */) {
-        setErrorMessage("Location permission denied. Enable location to set office by current position.");
-      } else {
-        setErrorMessage(err?.message || "An unexpected error occurred");
-      }
+      if (err?.code === 1) setErrorMessage("Location permission denied. Enable location to set office.");
+      else setErrorMessage(err?.message || "Unexpected error while setting office.");
     } finally {
       setIsLoading(false);
     }
@@ -1393,12 +1424,11 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       </p>
 
                       <Button
-                        onClick={() => handleCreateOfficeGeofence(officeSetupMode === 'address')}
-                        disabled={isLoading || (officeSetupMode === 'address' && !addressInput.trim())}
+                        onClick={() => handleCreateOfficeGeofence(officeSetupMode === "address")}
+                        disabled={isLoading || (officeSetupMode === "address" && !addressInput.trim())}
                         className="w-full bg-blue-600 hover:bg-blue-700"
-                        data-testid="button-create-geofence"
                       >
-                        {isLoading ? 'Creating...' : 'Setup Office Geofence'}
+                        {isLoading ? "Creating..." : "Setup Office Geofence"}
                       </Button>
                     </CardContent>
                   </Card>

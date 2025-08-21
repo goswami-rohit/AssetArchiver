@@ -1105,7 +1105,7 @@ export function setupWebRoutes(app: Express) {
   app.get("/api/office/:companyId", async (req: Request, res: Response) => {
     try {
       const { companyId } = req.params;
-      const [row] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+      const [row] = await db.select().from(companies).where(eq(companies.id, Number(companyId))).limit(1);
       if (!row || !row.officeAddress) return res.json({ success: true, data: null });
       const parsed = parseOfficeAddress(row.officeAddress);
       return res.json({ success: true, data: parsed });
@@ -1127,7 +1127,7 @@ export function setupWebRoutes(app: Express) {
       }
 
       const officeAddress = formatOfficeAddress(address!, latitude, longitude);
-      await db.update(companies).set({ officeAddress }).where(eq(companies.id, companyId));
+      await db.update(companies).set({ officeAddress }).where(eq(companies.id, Number(companyId)));
 
       res.json({ success: true, data: parseOfficeAddress(officeAddress) });
     } catch (e: any) {
@@ -1147,7 +1147,7 @@ export function setupWebRoutes(app: Express) {
       const lat = Number(best.latitude);
       const lng = Number(best.longitude);
       const officeAddress = formatOfficeAddress(best.formattedAddress || address, lat, lng);
-      await db.update(companies).set({ officeAddress }).where(eq(companies.id, companyId));
+      await db.update(companies).set({ officeAddress }).where(eq(companies.id, Number(companyId)));
 
       res.json({ success: true, data: parseOfficeAddress(officeAddress) });
     } catch (e: any) {
@@ -1191,7 +1191,7 @@ export function setupWebRoutes(app: Express) {
   app.post("/validate-location", async (req: Request, res: Response) => {
     try {
       const { companyId, latitude, longitude } = zValidate.parse(req.body);
-      const [row] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
+      const [row] = await db.select().from(companies).where(eq(companies.id, Number(companyId))).limit(1);
       const parsed = parseOfficeAddress(row?.officeAddress);
       if (!parsed) return res.json({ success: true, data: { isInside: false, distanceMeters: null, radius: 100, message: "Office not configured" } });
 
