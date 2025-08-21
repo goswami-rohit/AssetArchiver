@@ -238,11 +238,13 @@ const useAPI = () => {
     }
   }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
 
+  //eitu suisu RG
   const handleAttendancePunch = useCallback(async () => {
     if (!user) return;
 
     try {
       setLoading(true);
+
       const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true, timeout: 15000, maximumAge: 0
@@ -256,27 +258,29 @@ const useAPI = () => {
           ? "/api/attendance3/punch-in"
           : "/api/attendance3/punch-out";
 
-      const response = await apiCall(endpoint, {
+      const response = await fetch(endpoint, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },     // make sure body is parsed
         body: JSON.stringify({
-          userId: user.id,
+          userId: Number(user.id),                            // force numeric
           latitude,
           longitude,
           accuracy,
           speed,
           heading,
           altitude
-          // no companyId, no geofence, no Radar, no locationName from client
         }),
       });
 
-      if (response.success) {
+      const data = await response.json();
+      if (response.ok && data.success) {
         useAppStore.getState().setAttendanceStatus(
           useAppStore.getState().attendanceStatus === "out" ? "in" : "out"
         );
         await fetchDashboardStats();
       } else {
-        alert(response.error || "Attendance error");
+        console.error("attendance3 response", response.status, data);
+        alert(data?.error || "Attendance error");
       }
     } catch (err: any) {
       console.error("Attendance punch failed:", err);
@@ -284,8 +288,7 @@ const useAPI = () => {
     } finally {
       setLoading(false);
     }
-  }, [user, apiCall, setLoading, fetchDashboardStats]);
-
+  }, [user, setLoading, fetchDashboardStats]);
 
   const createRecord = useCallback(async (type: string, data: any) => {
     if (!user) return;

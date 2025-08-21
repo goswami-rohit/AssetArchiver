@@ -1,5 +1,6 @@
 // routes.ts - COMPLETE IMPLEMENTATION WITH AUTO-CRUD
 import { Express, Request, Response } from 'express';
+import express from "express";
 import { db } from 'server/db';
 import {
   dailyVisitReports,
@@ -154,24 +155,24 @@ const zPunchOut = z.object({
 
 const zPunchIn3 = z.object({
   userId: z.coerce.number().int().positive(),
-  latitude: z.number(),
-  longitude: z.number(),
-  accuracy: z.number().optional(),
-  speed: z.number().optional(),
-  heading: z.number().optional(),
-  altitude: z.number().optional(),
-  selfieUrl: z.string().url().optional()
+  latitude: z.coerce.number(),
+  longitude: z.coerce.number(),
+  accuracy: z.coerce.number().optional(),
+  speed: z.coerce.number().optional(),
+  heading: z.coerce.number().optional(),
+  altitude: z.coerce.number().optional(),
+  selfieUrl: z.string().url().optional(),
 });
 
 const zPunchOut3 = z.object({
   userId: z.coerce.number().int().positive(),
-  latitude: z.number().optional(),
-  longitude: z.number().optional(),
-  accuracy: z.number().optional(),
-  speed: z.number().optional(),
-  heading: z.number().optional(),
-  altitude: z.number().optional(),
-  selfieUrl: z.string().url().optional()
+  latitude: z.coerce.number().optional(),
+  longitude: z.coerce.number().optional(),
+  accuracy: z.coerce.number().optional(),
+  speed: z.coerce.number().optional(),
+  heading: z.coerce.number().optional(),
+  altitude: z.coerce.number().optional(),
+  selfieUrl: z.string().url().optional(),
 });
 
 // ============================================
@@ -1329,10 +1330,12 @@ export function setupWebRoutes(app: Express) {
   });
 
   // -------- Attendance v3 (no geofence, no Radar) --------
+  app.use(express.json({ limit: "1mb" }));
 
   // Punch IN: just record GPS + timestamps
   app.post("/api/attendance3/punch-in", async (req, res) => {
     try {
+      console.log("punch-in body:", req.body);
       const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } =
         zPunchIn3.parse(req.body);
 
@@ -1340,33 +1343,35 @@ export function setupWebRoutes(app: Express) {
       const locationName = `Lat ${latitude.toFixed(5)}, Lng ${longitude.toFixed(5)}`;
 
       const row = {
-        userId,                                 // int
-        attendanceDate: today,                  // YYYY-MM-DD
-        locationName,                           // NOT NULL
+        userId,
+        attendanceDate: today,            // date column accepts 'YYYY-MM-DD'
+        locationName,                     // NOT NULL
         inTimeTimestamp: new Date(),
         inTimeImageCaptured: !!selfieUrl,
         outTimeImageCaptured: false,
         inTimeImageUrl: selfieUrl ?? null,
-
-        // decimals must be strings for Drizzle decimal()
+        // decimals as strings (your schema uses decimal())
         inTimeLatitude: latitude.toString(),
         inTimeLongitude: longitude.toString(),
         inTimeAccuracy: accuracy != null ? accuracy.toString() : null,
         inTimeSpeed: speed != null ? speed.toString() : null,
         inTimeHeading: heading != null ? heading.toString() : null,
-        inTimeAltitude: altitude != null ? altitude.toString() : null
+        inTimeAltitude: altitude != null ? altitude.toString() : null,
       };
 
       const [inserted] = await db.insert(salesmanAttendance).values(row).returning();
       return res.json({ success: true, data: inserted, message: "Punch-in recorded." });
     } catch (e: any) {
-      return res.status(400).json({ success: false, error: e.message || "Punch-in failed" });
+      console.error("attendance3/punch-in error:", e?.issues || e);
+      if (e?.issues) return res.status(400).json({ success: false, error: "Validation failed", details: e.issues });
+      return res.status(400).json({ success: false, error: e?.message || "Punch-in failed" });
     }
   });
 
   // Punch OUT: update latest open record for today
   app.post("/api/attendance3/punch-out", async (req, res) => {
     try {
+      console.log("punch-out body:", req.body);
       const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } =
         zPunchOut3.parse(req.body);
 
