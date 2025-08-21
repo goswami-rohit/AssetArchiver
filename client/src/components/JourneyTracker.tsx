@@ -166,6 +166,13 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     return options[trackingMode];
   }, [trackingMode]);
 
+  // One-shot geolocation, wrapped as a Promise to guarantee the system prompt
+  const getGeoPositionOnce = (opts: PositionOptions = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }) =>
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      if (!navigator.geolocation) return reject(new Error("Geolocation not supported"));
+      navigator.geolocation.getCurrentPosition(resolve, reject, opts);
+    });
+
   // 🚀 INITIALIZE - CHECK FOR ACTIVE JOURNEY
   useEffect(() => {
     initializeJourneyTracker();
@@ -353,47 +360,72 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     if (!geofenceSettings.companyId) return;
 
     setIsLoading(true);
-    try {
-      let coordinates = null;
+    setErrorMessage("");
+    setSuccessMessage("");
 
-      if (useAddress && addressInput.trim()) {
-        coordinates = await geocodeAddress(addressInput.trim());
-        if (!coordinates) {
-          setErrorMessage("Could not find coordinates for the provided address");
-          setIsLoading(false);
+    try {
+      let lat: number;
+      let lng: number;
+      let addressForSave = currentAddress;
+
+      if (useAddress) {
+        if (!addressInput.trim()) {
+          setErrorMessage("Please enter an address");
           return;
         }
-      } else if (!currentLocation) {
-        setErrorMessage("Current location not available");
-        setIsLoading(false);
-        return;
+        // Forward geocode via Radar (your backend endpoint)
+        const coords = await geocodeAddress(addressInput.trim());
+        if (!coords) {
+          setErrorMessage("Could not find coordinates for the provided address");
+          return;
+        }
+        lat = coords.lat;
+        lng = coords.lng;
+
+        // Best-effort: normalize to formatted from reverse-geocode
+        try {
+          const r = await fetch("/reverse-geocode", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ latitude: lat, longitude: lng })
+          });
+          const j = await r.json();
+          if (j?.success && j?.address?.formatted) addressForSave = j.address.formatted;
+        } catch { }
+      } else {
+        // Force the browser location prompt on click
+        const pos = await getGeoPositionOnce({ enableHighAccuracy: true, timeout: 15000, maximumAge: 0 });
+        lat = pos.coords.latitude;
+        lng = pos.coords.longitude;
+
+        // Update UI and resolve a nice address via Radar
+        setCurrentLocation({
+          lat,
+          lng,
+          accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed || 0,
+          heading: pos.coords.heading || 0,
+          altitude: pos.coords.altitude || 0
+        });
+        await resolveCurrentAddress(lat, lng); // updates currentAddress via /reverse-geocode
+        addressForSave = currentAddress || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
       }
 
-      const response = await fetch(
-        useAddress ? "/api/office/set-address" : "/api/office/set-current",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            useAddress
-              ? {
-                companyId: geofenceSettings.companyId,
-                address: addressInput.trim(),
-              }
-              : {
-                companyId: geofenceSettings.companyId,
-                latitude: coordinates?.lat ?? currentLocation!.lat,
-                longitude: coordinates?.lng ?? currentLocation!.lng,
-                address: currentAddress, // optional
-              }
-          ),
-        }
-      );
+      // Save to Neon via your new endpoint
+      const res = await fetch(useAddress ? "/api/office/set-address" : "/api/office/set-current", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          useAddress
+            ? { companyId: geofenceSettings.companyId, address: addressInput.trim() }
+            : { companyId: geofenceSettings.companyId, latitude: lat, longitude: lng, address: addressForSave }
+        )
+      });
 
-      const data = await response.json();
+      const data = await res.json();
 
       if (data?.success && data?.data) {
-        const { address, lat, lng } = data.data;
+        const { address, lat: savedLat, lng: savedLng } = data.data;
 
         setGeofenceSettings(prev => ({
           ...prev,
@@ -401,12 +433,12 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             _id: "local-office",
             description: "Company Office",
             geometryRadius: 100,
-            geometryCenter: { coordinates: [lng, lat] }, // [lng, lat]
+            geometryCenter: { coordinates: [savedLng, savedLat] }, // [lng, lat]
             metadata: { companyName: "", region: "", area: "" },
-            address,
+            address
           },
           isSetupRequired: false,
-          officeAddress: address || currentAddress,
+          officeAddress: address || addressForSave
         }));
 
         setSuccessMessage("✅ Office geofence created successfully!");
@@ -414,13 +446,18 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       } else {
         setErrorMessage(data?.error || "Failed to create office geofence");
       }
-    } catch (error) {
-      console.error("Create office geofence failed:", error);
-      setErrorMessage("An unexpected error occurred");
+    } catch (err: any) {
+      // Location denied or other error
+      if (err?.code === 1 /* PERMISSION_DENIED */) {
+        setErrorMessage("Location permission denied. Enable location to set office by current position.");
+      } else {
+        setErrorMessage(err?.message || "An unexpected error occurred");
+      }
     } finally {
       setIsLoading(false);
     }
   };
+
 
   // Delete office geofence
   const handleDeleteOfficeGeofence = async () => {
