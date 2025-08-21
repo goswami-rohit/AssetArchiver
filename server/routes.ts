@@ -102,16 +102,31 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 }
 
 // ----------------- Radar client (server-side) -----------------
-const RADAR_BASE = "https://api.radar.io/v1";
-const RADAR_SECRET = process.env.RADAR_SECRET_KEY; // server key
-async function radarGet(path: string, params: Record<string, string>) {
-  if (!RADAR_SECRET) throw new Error("RADAR_SECRET not configured");
-  const url = new URL(RADAR_BASE + path);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${RADAR_SECRET}` } });
-  if (!res.ok) throw new Error(`Radar error ${res.status}: ${await res.text()}`);
-  return res.json();
+// const RADAR_BASE = "https://api.radar.io/v1";
+// const RADAR_SECRET = process.env.RADAR_SECRET_KEY; // server key
+// async function radarGet(path: string, params: Record<string, string>) {
+//   if (!RADAR_SECRET) throw new Error("RADAR_SECRET not configured");
+//   const url = new URL(RADAR_BASE + path);
+//   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+//   const res = await fetch(url, { headers: { Authorization: `Bearer ${RADAR_SECRET}` } });
+//   if (!res.ok) throw new Error(`Radar error ${res.status}: ${await res.text()}`);
+//   return res.json();
+// }
+
+const LOCATIONIQ_KEY = process.env.LOCATIONIQ_KEY; // you said you set this
+if (!LOCATIONIQ_KEY) {
+  console.warn("⚠️ LOCATION_IO_KEY is missing; geocoding routes will fail.");
 }
+
+async function liqFetch(url: string) {
+  const r = await fetch(url);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`LocationIQ ${r.status}: ${t}`);
+  }
+  return r.json();
+}
+
 
 // ----------------- Zod payloads -----------------
 const zCompanyId = z.object({ companyId: z.string().min(1) });
@@ -918,137 +933,138 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-    try {
-      // Validate input against schema expectations
-      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
+  // app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+  //   try {
+  //     // Validate input against schema expectations
+  //     const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
 
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId, latitude, and longitude are required'
-        });
-      }
+  //     if (!userId || !latitude || !longitude) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'userId, latitude, and longitude are required'
+  //       });
+  //     }
 
-      // Geo-fencing validation
-      const userPoint = turf.point([longitude, latitude]);
-      let isValid = false;
-      let officeName = '';
+  //     // Geo-fencing validation
+  //     const userPoint = turf.point([longitude, latitude]);
+  //     let isValid = false;
+  //     let officeName = '';
 
-      for (const office of OFFICE_LOCATIONS) {
-        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
-          isValid = true;
-          officeName = office.name;
-          break;
-        }
-      }
+  //     for (const office of OFFICE_LOCATIONS) {
+  //       if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
+  //         isValid = true;
+  //         officeName = office.name;
+  //         break;
+  //       }
+  //     }
 
-      if (!isValid) {
-        return res.status(400).json({
-          success: false,
-          error: 'You are not within office premises'
-        });
-      }
+  //     if (!isValid) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'You are not within office premises'
+  //       });
+  //     }
 
-      const today = new Date().toISOString().split('T')[0];
+  //     const today = new Date().toISOString().split('T')[0];
 
-      // Build data matching exact schema
-      const attendanceData = {
-        userId: parseInt(userId), // integer type
-        attendanceDate: today, // date type
-        locationName: locationName || officeName, // varchar not null
-        inTimeTimestamp: new Date(), // timestamp not null
-        inTimeImageCaptured: !!selfieUrl, // boolean not null
-        outTimeImageCaptured: false, // boolean not null  
-        inTimeImageUrl: selfieUrl || null, // varchar nullable
-        inTimeLatitude: latitude.toString(), // decimal as string
-        inTimeLongitude: longitude.toString(), // decimal as string
-        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
-        // All other nullable fields will be null by default
-      };
+  //     // Build data matching exact schema
+  //     const attendanceData = {
+  //       userId: parseInt(userId), // integer type
+  //       attendanceDate: today, // date type
+  //       locationName: locationName || officeName, // varchar not null
+  //       inTimeTimestamp: new Date(), // timestamp not null
+  //       inTimeImageCaptured: !!selfieUrl, // boolean not null
+  //       outTimeImageCaptured: false, // boolean not null  
+  //       inTimeImageUrl: selfieUrl || null, // varchar nullable
+  //       inTimeLatitude: latitude.toString(), // decimal as string
+  //       inTimeLongitude: longitude.toString(), // decimal as string
+  //       inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
+  //       // All other nullable fields will be null by default
+  //     };
 
-      // Validate against schema
-      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Attendance data validation failed',
-          details: parseResult.error.errors
-        });
-      }
+  //     // Validate against schema
+  //     const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+  //     if (!parseResult.success) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'Attendance data validation failed',
+  //         details: parseResult.error.errors
+  //       });
+  //     }
 
-      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
-      res.json({
-        success: true,
-        data: result,
-        message: `Punched in at ${officeName}`,
-        geoInfo: { officeName, isValid }
-      });
-    } catch (error) {
-      console.error('Punch in error:', error);
-      res.status(500).json({ success: false, error: 'Punch in failed' });
-    }
-  });
+  //     const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+  //     res.json({
+  //       success: true,
+  //       data: result,
+  //       message: `Punched in at ${officeName}`,
+  //       geoInfo: { officeName, isValid }
+  //     });
+  //   } catch (error) {
+  //     console.error('Punch in error:', error);
+  //     res.status(500).json({ success: false, error: 'Punch in failed' });
+  //   }
+  // });
 
-  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, selfieUrl } = req.body;
+  // app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
+  //   try {
+  //     const { userId, latitude, longitude, selfieUrl } = req.body;
 
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId is required'
-        });
-      }
+  //     if (!userId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         error: 'userId is required'
+  //       });
+  //     }
 
-      const today = new Date().toISOString().split('T')[0];
+  //     const today = new Date().toISOString().split('T')[0];
 
-      // Find unpunched record
-      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp)
-        ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-        .limit(1);
+  //     // Find unpunched record
+  //     const [unpunchedRecord] = await db.select().from(salesmanAttendance)
+  //       .where(and(
+  //         eq(salesmanAttendance.userId, parseInt(userId)),
+  //         eq(salesmanAttendance.attendanceDate, today),
+  //         isNull(salesmanAttendance.outTimeTimestamp)
+  //       ))
+  //       .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+  //       .limit(1);
 
-      if (unpunchedRecord) {
-        // Update with proper data types
-        const updateData = {
-          outTimeTimestamp: new Date(), // timestamp
-          outTimeImageCaptured: !!selfieUrl, // boolean
-          outTimeImageUrl: selfieUrl || null, // varchar nullable
-          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
-          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
-          updatedAt: new Date()
-        };
+  //     if (unpunchedRecord) {
+  //       // Update with proper data types
+  //       const updateData = {
+  //         outTimeTimestamp: new Date(), // timestamp
+  //         outTimeImageCaptured: !!selfieUrl, // boolean
+  //         outTimeImageUrl: selfieUrl || null, // varchar nullable
+  //         outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
+  //         outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
+  //         updatedAt: new Date()
+  //       };
 
-        const [result] = await db.update(salesmanAttendance)
-          .set(updateData)
-          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-          .returning();
+  //       const [result] = await db.update(salesmanAttendance)
+  //         .set(updateData)
+  //         .where(eq(salesmanAttendance.id, unpunchedRecord.id))
+  //         .returning();
 
-        res.json({
-          success: true,
-          data: result,
-          message: 'Punched out successfully'
-        });
-      } else {
-        res.status(404).json({
-          success: false,
-          error: 'No active punch-in record found'
-        });
-      }
-    } catch (error) {
-      console.error('Punch out error:', error);
-      res.status(500).json({ success: false, error: 'Punch out failed' });
-    }
-  });
+  //       res.json({
+  //         success: true,
+  //         data: result,
+  //         message: 'Punched out successfully'
+  //       });
+  //     } else {
+  //       res.status(404).json({
+  //         success: false,
+  //         error: 'No active punch-in record found'
+  //       });
+  //     }
+  //   } catch (error) {
+  //     console.error('Punch out error:', error);
+  //     res.status(500).json({ success: false, error: 'Punch out failed' });
+  //   }
+  // });
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)
   // ============================================
+
   app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
     try {
       const userId = parseInt(req.params.userId);
@@ -1137,78 +1153,111 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // Set office by current location
+  // Set office by current location (LocationIQ reverse geocode)
   app.post("/api/office/set-current", async (req: Request, res: Response) => {
     try {
-      const body = zSetCurrent.parse(req.body);
+      const body = zSetCurrent.parse(req.body); // companyId (coerced), latitude, longitude, address?
       const { companyId, latitude, longitude } = body;
 
-      let address = body.address;
+      let address = body.address?.trim();
       if (!address) {
-        const j = await radarGet("/geocode/reverse", { coordinates: `${latitude},${longitude}` });
-        address = j?.addresses?.[0]?.formattedAddress || `Lat ${latitude}, Lng ${longitude}`;
+        // Reverse geocode: lat/lon -> pretty address
+        const url = `https://us1.locationiq.com/v1/reverse?key=${LOCATIONIQ_KEY}&lat=${latitude}&lon=${longitude}&format=json`;
+        const j = await liqFetch(url);
+        address = j?.display_name || `Lat ${latitude}, Lng ${longitude}`;
       }
 
-      const officeAddress = formatOfficeAddress(address!, latitude, longitude);
-      await db.update(companies).set({ officeAddress }).where(eq(companies.id, Number(companyId)));
+      const officeAddress = formatOfficeAddress(address!, latitude, longitude); // "addr || lat, lng"
+      await db
+        .update(companies)
+        .set({ officeAddress })
+        .where(eq(companies.id, Number(companyId)));
 
-      res.json({ success: true, data: parseOfficeAddress(officeAddress) });
+      return res.json({ success: true, data: parseOfficeAddress(officeAddress) });
     } catch (e: any) {
       const code = e?.issues ? 400 : 500;
-      res.status(code).json({ success: false, error: e.message });
+      return res.status(code).json({ success: false, error: e.message });
     }
   });
 
-  // Set office by manual address
+  // Set office by manual address (LocationIQ forward geocode)
   app.post("/api/office/set-address", async (req: Request, res: Response) => {
     try {
-      const { companyId, address } = zSetAddress.parse(req.body);
-      const j = await radarGet("/geocode/forward", { query: address });
-      const best = j?.addresses?.[0];
-      if (!best) return res.status(404).json({ success: false, error: "Address not found" });
+      const { companyId, address } = zSetAddress.parse(req.body); // companyId (coerced), address string
+      const q = encodeURIComponent(address.trim());
 
-      const lat = Number(best.latitude);
-      const lng = Number(best.longitude);
-      const officeAddress = formatOfficeAddress(best.formattedAddress || address, lat, lng);
-      await db.update(companies).set({ officeAddress }).where(eq(companies.id, Number(companyId)));
+      // Forward geocode: address -> lat/lon
+      const url = `https://us1.locationiq.com/v1/search?key=${LOCATIONIQ_KEY}&q=${q}&format=json&limit=1`;
+      const j = await liqFetch(url);
+      const best = Array.isArray(j) ? j[0] : null;
+      if (!best) {
+        return res.status(404).json({ success: false, error: "Address not found" });
+      }
 
-      res.json({ success: true, data: parseOfficeAddress(officeAddress) });
+      const lat = Number(best.lat);
+      const lng = Number(best.lon);
+      const pretty = best.display_name || address;
+
+      const officeAddress = formatOfficeAddress(pretty, lat, lng); // "addr || lat, lng"
+      await db
+        .update(companies)
+        .set({ officeAddress })
+        .where(eq(companies.id, Number(companyId)));
+
+      return res.json({ success: true, data: parseOfficeAddress(officeAddress) });
     } catch (e: any) {
       const code = e?.issues ? 400 : 500;
-      res.status(code).json({ success: false, error: e.message });
+      return res.status(code).json({ success: false, error: e.message });
     }
   });
 
   // Geocoding helpers (JourneyTracker already calls these)
-  app.post("/reverse-geocode", async (req: Request, res: Response) => {
+  app.post("/reverse-geocode", async (req, res) => {
     try {
-      const { latitude, longitude } = zReverseGeo.parse(req.body);
-      const j = await radarGet("/geocode/reverse", { coordinates: `${latitude},${longitude}` });
-      const addr = j?.addresses?.[0];
-      res.json({ success: true, address: { formatted: addr?.formattedAddress ?? "" }, raw: addr ?? null });
+      const { latitude, longitude } = z.object({
+        latitude: z.number(),
+        longitude: z.number()
+      }).parse(req.body);
+
+      // us1 datacenter; switch to eu1 if your account is EU
+      const url = `https://us1.locationiq.com/v1/reverse?key=${LOCATIONIQ_KEY}&lat=${latitude}&lon=${longitude}&format=json`;
+      const j = await liqFetch(url);
+
+      res.json({
+        success: true,
+        address: { formatted: j?.display_name ?? "" },
+        raw: j ?? null
+      });
     } catch (e: any) {
-      const code = e?.issues ? 400 : 500;
-      res.status(code).json({ success: false, error: e.message });
+      res.status(400).json({ success: false, error: e.message || "Reverse geocode failed" });
     }
   });
 
-  app.post("/geocode-address", async (req: Request, res: Response) => {
+
+  app.post("/geocode-address", async (req, res) => {
     try {
-      const { address } = zForwardGeo.parse(req.body);
-      const j = await radarGet("/geocode/forward", { query: address });
-      const addr = j?.addresses?.[0];
-      if (!addr) return res.status(404).json({ success: false, error: "Address not found" });
+      const { address } = z.object({ address: z.string().min(3) }).parse(req.body);
+      const q = encodeURIComponent(address.trim());
+
+      const url = `https://us1.locationiq.com/v1/search?key=${LOCATIONIQ_KEY}&q=${q}&format=json&limit=1`;
+      const j = await liqFetch(url);
+      const first = Array.isArray(j) ? j[0] : null;
+      if (!first) return res.status(404).json({ success: false, error: "Address not found" });
+
+      const lat = Number(first.lat);
+      const lng = Number(first.lon);
+
       res.json({
         success: true,
-        latitude: Number(addr.latitude),
-        longitude: Number(addr.longitude),
-        address: addr.formattedAddress ?? address
+        latitude: lat,
+        longitude: lng,
+        address: first.display_name ?? address
       });
     } catch (e: any) {
-      const code = e?.issues ? 400 : 500;
-      res.status(code).json({ success: false, error: e.message });
+      res.status(400).json({ success: false, error: e.message || "Forward geocode failed" });
     }
   });
+
 
   // Validate location within 100 m of office
   app.post("/validate-location", async (req: Request, res: Response) => {
@@ -1228,92 +1277,89 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ===== NEW ATTENDANCE v2 ENDPOINTS =====
-  // Punch-IN with 100 m geofence gate (office from companies.officeAddress)
+  // Punch-IN with 100 m geofence (office from companies.officeAddress)
   app.post("/api/attendance2/punch-in", async (req, res) => {
     try {
-      const { userId, companyId, latitude, longitude, accuracy, selfieUrl, locationName } = req.body;
+      const Body = z.object({
+        userId: z.coerce.number().int().positive(),
+        companyId: z.coerce.number().int().positive(),
+        latitude: z.number(),
+        longitude: z.number(),
+        accuracy: z.number().optional(),
+        selfieUrl: z.string().url().optional(),
+        locationName: z.string().optional()
+      });
+      const { userId, companyId, latitude, longitude, accuracy, selfieUrl, locationName } = Body.parse(req.body);
 
-      if (!userId || !companyId || typeof latitude !== "number" || typeof longitude !== "number") {
-        return res.status(400).json({ success: false, error: "userId, companyId, latitude, longitude are required" });
-      }
-
-      // 1) Load office center from companies.officeAddress
-      const [co] = await db.select().from(companies).where(eq(companies.id, Number(companyId))).limit(1);
+      // 1) Load office center from companies.officeAddress: "address || lat, lng"
+      const [co] = await db.select().from(companies).where(eq(companies.id, companyId)).limit(1);
       const parsed = parseOfficeAddress(co?.officeAddress);
       if (!parsed) {
         return res.status(400).json({ success: false, error: "Office geofence not configured for this company" });
       }
 
-      // 2) GPS accuracy gate
+      // 2) GPS accuracy gate (optional)
       if (typeof accuracy === "number" && accuracy > 50) {
         return res.status(400).json({ success: false, error: "Low GPS accuracy. Move outdoors and try again." });
       }
 
-      // 3) 100 m distance gate
+      // 3) Distance gate
       const dist = distanceMeters({ lat: latitude, lng: longitude }, { lat: parsed.lat, lng: parsed.lng });
       if (dist > 100) {
         return res.status(400).json({ success: false, error: `Outside office geofence (${Math.round(dist)} m).` });
       }
 
-      // 4) Build row EXACTLY as schema expects
+      // 4) Build row per schema (decimal fields as strings)
       const today = new Date().toISOString().split("T")[0];
       const attendanceData = {
-        userId: parseInt(userId, 10),                 // integer column
-        attendanceDate: today,                        // date string
-        locationName: locationName || parsed.address, // varchar NOT NULL
-        inTimeTimestamp: new Date(),                  // timestamp NOT NULL
-        inTimeImageCaptured: !!selfieUrl,             // boolean NOT NULL
-        outTimeImageCaptured: false,                  // boolean NOT NULL
-        inTimeImageUrl: selfieUrl || null,            // varchar
-        inTimeLatitude: latitude.toString(),          // decimal as string
-        inTimeLongitude: longitude.toString(),        // decimal as string
+        userId,
+        attendanceDate: today,
+        locationName: locationName || parsed.address,
+        inTimeTimestamp: new Date(),
+        inTimeImageCaptured: !!selfieUrl,
+        outTimeImageCaptured: false,
+        inTimeImageUrl: selfieUrl ?? null,
+        inTimeLatitude: latitude.toString(),
+        inTimeLongitude: longitude.toString(),
         inTimeAccuracy: accuracy != null ? accuracy.toString() : null
-        // other optional decimals left null
       };
 
-      // 5) Validate against your Zod insert schema before writing
-      const parsedData = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-      if (!parsedData.success) {
-        return res.status(400).json({ success: false, error: "Attendance data validation failed", details: parsedData.error.errors });
-      }
-
-      const [inserted] = await db.insert(salesmanAttendance).values(parsedData.data).returning();
+      const [inserted] = await db.insert(salesmanAttendance).values(attendanceData).returning();
       return res.json({ success: true, data: inserted, message: "Punch-in recorded." });
-    } catch (e) {
-      console.error("attendance2/punch-in error", e);
-      return res.status(500).json({ success: false, error: "Punch-in failed" });
+    } catch (e: any) {
+      console.error("attendance2/punch-in error", e?.issues || e);
+      return res.status(e?.issues ? 400 : 500).json({ success: false, error: e?.message || "Punch-in failed" });
     }
   });
 
-  // Punch-OUT with no geofence check
+  // Punch-OUT (no geofence)
   app.post("/api/attendance2/punch-out", async (req, res) => {
     try {
-      const { userId, latitude, longitude, selfieUrl } = req.body;
-      if (!userId) return res.status(400).json({ success: false, error: "userId is required" });
+      const Body = z.object({
+        userId: z.coerce.number().int().positive(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        selfieUrl: z.string().url().optional()
+      });
+      const { userId, latitude, longitude, selfieUrl } = Body.parse(req.body);
 
-      const uid = parseInt(userId, 10);
       const today = new Date().toISOString().split("T")[0];
-
-      // Find the latest open record for today
       const [open] = await db.select().from(salesmanAttendance)
         .where(and(
-          eq(salesmanAttendance.userId, uid),
+          eq(salesmanAttendance.userId, userId),
           eq(salesmanAttendance.attendanceDate, today),
           isNull(salesmanAttendance.outTimeTimestamp)
         ))
         .orderBy(desc(salesmanAttendance.inTimeTimestamp))
         .limit(1);
-
-      if (!open) {
-        return res.status(404).json({ success: false, error: "No active punch-in record found" });
-      }
+      if (!open) return res.status(404).json({ success: false, error: "No active punch-in record found" });
 
       const updateData = {
         outTimeTimestamp: new Date(),
         outTimeImageCaptured: !!selfieUrl,
-        outTimeImageUrl: selfieUrl || null,
-        outTimeLatitude: typeof latitude === "number" ? latitude.toString() : null,
-        outTimeLongitude: typeof longitude === "number" ? longitude.toString() : null,
+        outTimeImageUrl: selfieUrl ?? null,
+        outTimeLatitude: latitude != null ? latitude.toString() : null,
+        outTimeLongitude: longitude != null ? longitude.toString() : null,
         updatedAt: new Date()
       };
 
@@ -1323,11 +1369,12 @@ export function setupWebRoutes(app: Express) {
         .returning();
 
       return res.json({ success: true, data: updated, message: "Punch-out recorded." });
-    } catch (e) {
-      console.error("attendance2/punch-out error", e);
-      return res.status(500).json({ success: false, error: "Punch-out failed" });
+    } catch (e: any) {
+      console.error("attendance2/punch-out error", e?.issues || e);
+      return res.status(e?.issues ? 400 : 500).json({ success: false, error: e?.message || "Punch-out failed" });
     }
   });
+
 
   // -------- Attendance v3 (no geofence, no Radar) --------
   app.use(express.json({ limit: "1mb" }));

@@ -255,8 +255,8 @@ const useAPI = () => {
 
       const endpoint =
         useAppStore.getState().attendanceStatus === "out"
-          ? "/api/attendance3/punch-in"
-          : "/api/attendance3/punch-out";
+          ? "/api/attendance2/punch-in"
+          : "/api/attendance2/punch-out";
 
       const response = await fetch(endpoint, {
         method: "POST",
