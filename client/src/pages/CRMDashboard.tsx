@@ -235,55 +235,72 @@ const useAPI = () => {
   const handleAttendancePunch = useCallback(async () => {
     if (!user) return;
 
+    // 1) Ensure companyId for punch-in flows
+    const status = useAppStore.getState().attendanceStatus; // 'out' -> punch-in
+    const endpoint = status === 'out' ? '/api/attendance/punch-in' : '/api/attendance/punch-out';
+    if (endpoint.endsWith('punch-in') && (user as any).companyId == null) {
+      console.error('Missing companyId on user; cannot punch in.');
+      return;
+    }
+
     try {
       setLoading(true);
 
+      // 2) High-accuracy geolocation with a sane timeout
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 0
+        });
       });
 
+      // 3) Normalize numbers (avoid NaN/undefined leaking)
+      const n = (v: any) => Number.isFinite(Number(v)) ? Number(v) : undefined;
       const { latitude, longitude, accuracy, speed, heading, altitude } = position.coords;
 
-      const status = useAppStore.getState().attendanceStatus; // 'out' means we need punch-in
-      const endpoint = status === 'out' ? '/api/attendance/punch-in' : '/api/attendance/punch-out';
-
       const body: any = {
-        userId: user.id,
-        latitude,
-        longitude,
-        accuracy,                // stored to inTimeAccuracy / outTimeAccuracy
-        speed,                   // optional
-        heading,                 // optional
-        altitude,                // optional
+        userId: (user as any).id,
+        latitude: n(latitude),
+        longitude: n(longitude),
+        accuracy: n(accuracy),
+        speed: n(speed),
+        heading: n(heading),
+        altitude: n(altitude),
         locationName: 'Mobile App'
       };
 
-      // Punch-in requires companyId so backend can match externalId=company:<id>
       if (endpoint.endsWith('punch-in')) {
-        body.companyId = user.companyId; // make sure your user object has this
-        // body.selfieUrl = ... if you capture one
+        body.companyId = (user as any).companyId;   // required by backend
+        // body.selfieUrl = selfieUrlRef.current ?? undefined; // include if you have it
       } else {
-        // body.selfieUrl = ... if you capture one on punch-out too
+        // body.selfieUrl = selfieUrlRef.current ?? undefined;
       }
 
-      const response = await apiCall(endpoint, {
-        method: 'POST',
-        body: JSON.stringify(body)
-      });
+      // 4) Network timeout so UI doesn’t hang forever
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 15000);
 
-      if (response.success) {
+      const resp = await apiCall(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },   // <- important
+        body: JSON.stringify(body),
+        signal: (controller as any).signal
+      }).finally(() => clearTimeout(t));
+
+      // 5) Show proper server error
+      if (resp?.success) {
         useAppStore.getState().setAttendanceStatus(status === 'out' ? 'in' : 'out');
         await fetchDashboardStats();
       } else {
-        console.error('Attendance punch failed:', response.error || 'Unknown error');
+        console.error('Attendance punch failed:', resp?.error || resp?.message || 'Unknown error');
       }
     } catch (error) {
-      console.error('Attendance punch failed:', error);
+      console.error('Attendance punch failed:', (error as any)?.message || error);
     } finally {
       setLoading(false);
     }
   }, [user, apiCall, setLoading, fetchDashboardStats]);
-
 
   const createRecord = useCallback(async (type: string, data: any) => {
     if (!user) return;
