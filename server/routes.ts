@@ -830,26 +830,33 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
         error: 'userId, latitude, longitude, and (companyId OR geofenceId) are required'
       });
     }
+// 1) Fetch the geofence (your curl, verbatim logic)
+let radarUrl = '';
 
-    // 1) Fetch the geofence (your curl, verbatim logic)
-    let radarUrl = '';
-    if (geofenceId) {
-      radarUrl = `https://api.radar.io/v1/geofences/${encodeURIComponent(geofenceId)}`;
-    } else {
-      const tag = 'office';
-      const externalId = `company:${companyId}`.trim();
-      radarUrl = `https://api.radar.io/v1/geofences/${encodeURIComponent(tag)}/${encodeURIComponent(externalId)}`;
-    }
+if (geofenceId) {
+  // DOCS: GET /v1/geofences/:id
+  radarUrl = 'https://api.radar.io/v1/geofences/:id';
+} else {
+  // DOCS: GET /v1/geofences/:tag/:externalId
+  radarUrl = 'https://api.radar.io/v1/geofences/:tag/:externalId';
+}
 
-    const gfRes = await fetch(radarUrl, {
-      method: 'GET',
-      headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
-    });
-    const gfJson = await gfRes.json().catch(() => ({} as any));
-    if (!gfRes.ok || !gfJson?.geofence) {
-      return res.status(400).json({ success: false, error: gfJson?.message || 'Could not fetch geofence from Radar' });
-    }
-    const geofence = gfJson.geofence;
+const gfRes = await fetch(radarUrl, {
+  method: 'GET',
+  headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
+});
+
+const gfJson = await gfRes.json().catch(() => ({} as any));
+
+if (!gfRes.ok || !gfJson?.geofence) {
+  return res.status(400).json({
+    success: false,
+    error: gfJson?.message || 'Could not fetch geofence from Radar'
+  });
+}
+
+const geofence = gfJson.geofence; // DOCS: object with _id, tag, externalId, geometry, etc.
+
 
     // 2) Compare coordinates (circle check; exact equality is nonsense)
     const lat = Number(latitude);
