@@ -15,10 +15,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import {
-  Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar,
+  Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar, 
   Building2, Target, Send, Mic, Search, Filter, MoreHorizontal,
   Clock, Zap, FileText, TrendingUp, LogIn, LogOut, Navigation,
-  Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft,
+  Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft, 
   RotateCcw, Download, Upload, Eye, Briefcase, Users,
   Activity, BarChart3, PieChart, Smartphone, Laptop,
   Wifi, WifiOff, RefreshCw, X, Check, AlertCircle, Award,
@@ -37,14 +37,8 @@ interface User {
   lastName: string;
   email: string;
   role: string;
-  companyId: number;   // <-- FK, required for punch-in/out
-  company?: {          // <-- optional relation when joined
-    id: number;
-    companyName: string;
-    officeAddress: string;
-  };
+  company: { companyName: string };
 }
-
 
 interface AppState {
   user: User | null;
@@ -53,7 +47,7 @@ interface AppState {
   isLoading: boolean;
   isOnline: boolean;
   lastSync: Date | null;
-
+  
   // Data
   dailyTasks: any[];
   pjps: any[];
@@ -66,7 +60,7 @@ interface AppState {
   dashboardStats: any;
   userTargets: any[];
   dealerScores: any[];
-
+  
   // UI State
   showCreateModal: boolean;
   createType: 'task' | 'pjp' | 'dealer' | 'dvr' | 'tvr' | 'leave' | 'client-report' | 'competition-report' | 'dealer-score';
@@ -74,7 +68,7 @@ interface AppState {
   showDetailModal: boolean;
   searchQuery: string;
   filterType: string;
-
+  
   // Actions
   setUser: (user: User | null) => void;
   setCurrentPage: (page: string) => void;
@@ -94,7 +88,7 @@ const useAppStore = create<AppState>((set, get) => ({
   isLoading: false,
   isOnline: true,
   lastSync: null,
-
+  
   dailyTasks: [],
   pjps: [],
   dealers: [],
@@ -106,14 +100,14 @@ const useAppStore = create<AppState>((set, get) => ({
   dashboardStats: {},
   userTargets: [],
   dealerScores: [],
-
+  
   showCreateModal: false,
   createType: 'task',
   selectedItem: null,
   showDetailModal: false,
   searchQuery: '',
   filterType: 'all',
-
+  
   setUser: (user) => set({ user }),
   setCurrentPage: (page) => set({ currentPage: page }),
   setAttendanceStatus: (status) => set({ attendanceStatus: status }),
@@ -122,17 +116,17 @@ const useAppStore = create<AppState>((set, get) => ({
   updateLastSync: () => set({ lastSync: new Date() }),
   setData: (key, data) => set({ [key]: data }),
   setUIState: (key, value) => set({ [key]: value }),
-  resetModals: () => set({
-    showCreateModal: false,
-    showDetailModal: false,
-    selectedItem: null
+  resetModals: () => set({ 
+    showCreateModal: false, 
+    showDetailModal: false, 
+    selectedItem: null 
   })
 }));
 
 // ============= API HOOKS =============
 const useAPI = () => {
   const { user, setLoading, setData, updateLastSync } = useAppStore();
-
+  
   const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
     try {
       const response = await fetch(endpoint, {
@@ -142,11 +136,11 @@ const useAPI = () => {
         },
         ...options,
       });
-
+      
       if (!response.ok) {
         throw new Error(`API Error: ${response.status}`);
       }
-
+      
       const data = await response.json();
       updateLastSync();
       return data;
@@ -174,17 +168,17 @@ const useAPI = () => {
         apiCall(`/api/pjp/user/${user.id}/completed`),
         apiCall(`/api/dvr/user/${user.id}?completed=true`)
       ]);
-
+      
       const completedPJPs = pjpData.status === 'fulfilled' ? pjpData.value.data?.length || 0 : 0;
       const completedReports = reportData.status === 'fulfilled' ? reportData.value.data?.length || 0 : 0;
-
+      
       // Calculate real targets based on actual data
       const realTargets = [
         { label: 'PJPs Completed', current: completedPJPs, target: 25, icon: Navigation, color: 'text-purple-400' },
         { label: 'Reports Submitted', current: completedReports, target: 30, icon: FileText, color: 'text-blue-400' },
         { label: 'Dealers Visited', current: Math.floor(completedReports * 0.8), target: 20, icon: Building2, color: 'text-orange-400' }
       ];
-
+      
       setData('userTargets', realTargets);
     } catch (error) {
       console.error('Failed to fetch user targets:', error);
@@ -193,7 +187,7 @@ const useAPI = () => {
 
   const fetchAllData = useCallback(async () => {
     if (!user) return;
-
+    
     setLoading(true);
     try {
       const [
@@ -229,7 +223,7 @@ const useAPI = () => {
       if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
       if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
       if (dealerScoresRes.status === 'fulfilled') setData('dealerScores', dealerScoresRes.value.data || []);
-
+      
       await Promise.all([fetchDashboardStats(), fetchUserTargets()]);
     } catch (error) {
       console.error('Failed to fetch data:', error);
@@ -238,58 +232,43 @@ const useAPI = () => {
     }
   }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
 
-  //eitu suisu RG
   const handleAttendancePunch = useCallback(async () => {
     if (!user) return;
 
     try {
       setLoading(true);
-
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true, timeout: 15000, maximumAge: 0
-        });
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject);
       });
 
-      const { latitude, longitude, accuracy, speed, heading, altitude } = pos.coords;
+      const { latitude, longitude } = position.coords;
+      const endpoint = useAppStore.getState().attendanceStatus === 'out' 
+        ? '/api/attendance/punch-in' 
+        : '/api/attendance/punch-out';
 
-      const endpoint =
-        useAppStore.getState().attendanceStatus === "out"
-          ? "/api/attendance2/punch-in"
-          : "/api/attendance2/punch-out";
-
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },     // make sure body is parsed
+      const response = await apiCall(endpoint, {
+        method: 'POST',
         body: JSON.stringify({
-          userId: Number(user.id),                            // force numeric
-          companyId: Number(user.companyId),
+          userId: user.id,
           latitude,
           longitude,
-          accuracy,
-          speed,
-          heading,
-          altitude
-        }),
+          locationName: 'Mobile App',
+          accuracy: position.coords.accuracy
+        })
       });
 
-      const data = await response.json();
-      if (response.ok && data.success) {
+      if (response.success) {
         useAppStore.getState().setAttendanceStatus(
-          useAppStore.getState().attendanceStatus === "out" ? "in" : "out"
+          useAppStore.getState().attendanceStatus === 'out' ? 'in' : 'out'
         );
         await fetchDashboardStats();
-      } else {
-        console.error("attendance3 response", response.status, data);
-        alert(data?.error || "Attendance error");
       }
-    } catch (err: any) {
-      console.error("Attendance punch failed:", err);
-      alert(err?.message || "Location unavailable");
+    } catch (error) {
+      console.error('Attendance punch failed:', error);
     } finally {
       setLoading(false);
     }
-  }, [user, setLoading, fetchDashboardStats]);
+  }, [user, apiCall, setLoading, fetchDashboardStats]);
 
   const createRecord = useCallback(async (type: string, data: any) => {
     if (!user) return;
@@ -405,10 +384,10 @@ const useAPI = () => {
 };
 
 // ============= LOCATION PICKER COMPONENT =============
-const LocationPicker = ({
-  onLocationSelect,
-  currentLocation
-}: {
+const LocationPicker = ({ 
+  onLocationSelect, 
+  currentLocation 
+}: { 
   onLocationSelect: (location: string, coords?: { lat: number; lng: number }) => void;
   currentLocation?: string;
 }) => {
@@ -421,9 +400,9 @@ const LocationPicker = ({
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject);
       });
-
+      
       const { latitude, longitude } = position.coords;
-
+      
       // Reverse geocoding (in real app, use Google Maps API)
       const locationName = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`;
       onLocationSelect(locationName, { lat: latitude, lng: longitude });
@@ -438,7 +417,7 @@ const LocationPicker = ({
   return (
     <div className="space-y-3">
       <div className="flex space-x-2">
-        <Input
+        <Input 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search location or area..."
@@ -459,7 +438,7 @@ const LocationPicker = ({
           )}
         </Button>
       </div>
-
+      
       <div className="flex space-x-2">
         <Button
           type="button"
@@ -481,9 +460,9 @@ const LocationPicker = ({
 // ============= COMPONENTS =============
 const StatusBar = () => {
   const { isOnline, lastSync } = useAppStore();
-
+  
   return (
-    <motion.div
+    <motion.div 
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
       className="flex items-center justify-between px-4 py-2 bg-gray-900/50 backdrop-blur-lg border-b border-gray-800"
@@ -494,7 +473,7 @@ const StatusBar = () => {
           {isOnline ? 'Online' : 'Offline'}
         </span>
       </div>
-
+      
       {lastSync && (
         <span className="text-xs text-gray-500">
           Last sync: {lastSync.toLocaleTimeString()}
@@ -522,12 +501,12 @@ const LoadingSkeleton = ({ rows = 3 }: { rows?: number }) => (
   </div>
 );
 
-const ActionButton = ({
-  icon: Icon,
-  label,
+const ActionButton = ({ 
+  icon: Icon, 
+  label, 
   variant = 'default',
   onClick,
-  loading = false
+  loading = false 
 }: {
   icon: any;
   label: string;
@@ -587,11 +566,11 @@ export default function AdvancedCRM() {
     resetModals
   } = useAppStore();
 
-  const {
-    fetchAllData,
-    handleAttendancePunch,
-    createRecord,
-    updateRecord,
+  const { 
+    fetchAllData, 
+    handleAttendancePunch, 
+    createRecord, 
+    updateRecord, 
     deleteRecord
   } = useAPI();
 
@@ -630,17 +609,17 @@ export default function AdvancedCRM() {
   }, []);
 
   // Memoized filtered data
-  const filteredTasks = useMemo(() =>
+  const filteredTasks = useMemo(() => 
     dailyTasks.filter(task => task.status !== 'Completed').slice(0, 5),
     [dailyTasks]
   );
 
-  const activePJPs = useMemo(() =>
+  const activePJPs = useMemo(() => 
     pjps.filter(pjp => pjp.status === 'active' || pjp.status === 'planned').slice(0, 5),
     [pjps]
   );
 
-  const recentReports = useMemo(() =>
+  const recentReports = useMemo(() => 
     reports.slice(0, 3),
     [reports]
   );
@@ -649,7 +628,7 @@ export default function AdvancedCRM() {
   const HomePage = () => (
     <div className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
       <StatusBar />
-
+      
       {/* SCROLLABLE CONTENT CONTAINER */}
       <div className="flex-1 overflow-y-auto">
         {/* Header Section */}
@@ -664,7 +643,7 @@ export default function AdvancedCRM() {
                   </AvatarFallback>
                 </Avatar>
                 <div>
-                  <motion.h1
+                  <motion.h1 
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     className="text-2xl font-bold text-white"
@@ -674,7 +653,7 @@ export default function AdvancedCRM() {
                   <p className="text-blue-200">{user?.company?.companyName}</p>
                 </div>
               </div>
-
+              
               <div className="flex items-center space-x-3">
                 <ActionButton
                   icon={attendanceStatus === 'in' ? LogOut : LogIn}
@@ -696,29 +675,29 @@ export default function AdvancedCRM() {
             {/* Quick Stats */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                {
-                  label: "Today's Tasks",
-                  value: filteredTasks.length,
-                  icon: CheckCircle,
-                  color: "from-blue-500 to-blue-600"
+                { 
+                  label: "Today's Tasks", 
+                  value: filteredTasks.length, 
+                  icon: CheckCircle, 
+                  color: "from-blue-500 to-blue-600" 
                 },
-                {
-                  label: "Active PJPs",
-                  value: activePJPs.length,
-                  icon: Calendar,
-                  color: "from-purple-500 to-purple-600"
+                { 
+                  label: "Active PJPs", 
+                  value: activePJPs.length, 
+                  icon: Calendar, 
+                  color: "from-purple-500 to-purple-600" 
                 },
-                {
-                  label: "Total Dealers",
-                  value: dealers.length,
-                  icon: Building2,
-                  color: "from-orange-500 to-orange-600"
+                { 
+                  label: "Total Dealers", 
+                  value: dealers.length, 
+                  icon: Building2, 
+                  color: "from-orange-500 to-orange-600" 
                 },
-                {
-                  label: "This Month",
-                  value: reports.length,
-                  icon: BarChart3,
-                  color: "from-green-500 to-green-600"
+                { 
+                  label: "This Month", 
+                  value: reports.length, 
+                  icon: BarChart3, 
+                  color: "from-green-500 to-green-600" 
                 }
               ].map((stat, index) => (
                 <motion.div
@@ -762,9 +741,9 @@ export default function AdvancedCRM() {
             ) : filteredTasks.length > 0 ? (
               <AnimatePresence>
                 {filteredTasks.map((task, index) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
+                  <TaskCard 
+                    key={task.id} 
+                    task={task} 
                     index={index}
                     onEdit={(task) => {
                       setUIState('selectedItem', task);
@@ -797,9 +776,9 @@ export default function AdvancedCRM() {
             ) : activePJPs.length > 0 ? (
               <AnimatePresence>
                 {activePJPs.map((pjp, index) => (
-                  <PJPCard
-                    key={pjp.id}
-                    pjp={pjp}
+                  <PJPCard 
+                    key={pjp.id} 
+                    pjp={pjp} 
                     index={index}
                     onEdit={(pjp) => {
                       setUIState('selectedItem', pjp);
@@ -836,9 +815,9 @@ export default function AdvancedCRM() {
             ) : dealers.length > 0 ? (
               <AnimatePresence>
                 {dealers.slice(0, 5).map((dealer, index) => (
-                  <DealerCard
-                    key={dealer.id}
-                    dealer={dealer}
+                  <DealerCard 
+                    key={dealer.id} 
+                    dealer={dealer} 
                     index={index}
                     onEdit={(dealer) => {
                       setUIState('selectedItem', dealer);
@@ -859,7 +838,7 @@ export default function AdvancedCRM() {
                 ))}
               </AnimatePresence>
             ) : (
-              <DealerCard
+              <DealerCard 
                 key="ns-traders"
                 dealer={{
                   id: 'sample',
@@ -872,13 +851,13 @@ export default function AdvancedCRM() {
                   address: 'Sample Address'
                 }}
                 index={0}
-                onEdit={() => { }}
-                onDelete={() => { }}
+                onEdit={() => {}}
+                onDelete={() => {}}
                 onView={(dealer) => {
                   setUIState('selectedItem', dealer);
                   setUIState('showDetailModal', true);
                 }}
-                onScore={() => { }}
+                onScore={() => {}}
               />
             )}
           </Section>
@@ -919,13 +898,13 @@ export default function AdvancedCRM() {
                 Create TVR
               </Button>
             </div>
-
+            
             {recentReports.length > 0 ? (
               <AnimatePresence>
                 {recentReports.map((report, index) => (
-                  <ReportCard
-                    key={report.id}
-                    report={report}
+                  <ReportCard 
+                    key={report.id} 
+                    report={report} 
                     index={index}
                     onView={(report) => {
                       setUIState('selectedItem', report);
@@ -948,13 +927,13 @@ export default function AdvancedCRM() {
 
   // ============= PROFILE PAGE with REAL DATA =============
   const ProfilePage = () => (
-    <motion.div
+    <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col"
     >
       <StatusBar />
-
+      
       <div className="flex-1 overflow-y-auto px-6 py-8 pb-32">
         {/* Profile Header */}
         <div className="text-center mb-8">
@@ -1020,8 +999,9 @@ export default function AdvancedCRM() {
                         initial={{ width: 0 }}
                         animate={{ width: `${progress}%` }}
                         transition={{ duration: 1, delay: index * 0.2 }}
-                        className={`h-2 rounded-full ${progress >= 80 ? 'bg-green-500' : progress >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}
+                        className={`h-2 rounded-full ${
+                          progress >= 80 ? 'bg-green-500' : progress >= 60 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}
                       />
                     </div>
                   </div>
@@ -1033,7 +1013,7 @@ export default function AdvancedCRM() {
 
         {/* Profile Actions */}
         <div className="space-y-4">
-          <Button
+          <Button 
             onClick={() => {
               localStorage.removeItem('user');
               setUser(null);
@@ -1049,10 +1029,10 @@ export default function AdvancedCRM() {
   );
 
   // ============= ENHANCED SECTION COMPONENT =============
-  const Section = ({
-    title,
-    icon: Icon,
-    children,
+  const Section = ({ 
+    title, 
+    icon: Icon, 
+    children, 
     onAdd
   }: {
     title: string;
@@ -1060,7 +1040,7 @@ export default function AdvancedCRM() {
     children: React.ReactNode;
     onAdd: () => void;
   }) => (
-    <motion.div
+    <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       className="mb-8"
@@ -1084,13 +1064,13 @@ export default function AdvancedCRM() {
   );
 
   // ============= ENHANCED CARD COMPONENTS =============
-  const TaskCard = ({
-    task,
-    index,
-    onEdit,
-    onDelete
-  }: {
-    task: any;
+  const TaskCard = ({ 
+    task, 
+    index, 
+    onEdit, 
+    onDelete 
+  }: { 
+    task: any; 
     index: number;
     onEdit: (task: any) => void;
     onDelete: (taskId: string) => void;
@@ -1151,14 +1131,14 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  const PJPCard = ({
-    pjp,
-    index,
-    onEdit,
+  const PJPCard = ({ 
+    pjp, 
+    index, 
+    onEdit, 
     onDelete,
     onView
-  }: {
-    pjp: any;
+  }: { 
+    pjp: any; 
     index: number;
     onEdit: (pjp: any) => void;
     onDelete: (pjpId: string) => void;
@@ -1178,12 +1158,12 @@ export default function AdvancedCRM() {
               <h3 className="font-semibold text-white">{pjp.objective}</h3>
               <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
               <div className="flex items-center space-x-2 mt-3">
-                <Badge
-                  variant="outline"
+                <Badge 
+                  variant="outline" 
                   className={
                     pjp.status === 'active' ? 'text-green-400 border-green-400' :
-                      pjp.status === 'planned' ? 'text-blue-400 border-blue-400' :
-                        'text-yellow-400 border-yellow-400'
+                    pjp.status === 'planned' ? 'text-blue-400 border-blue-400' :
+                    'text-yellow-400 border-yellow-400'
                   }
                 >
                   {pjp.status}
@@ -1227,15 +1207,15 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  const DealerCard = ({
-    dealer,
-    index,
-    onEdit,
-    onDelete,
+  const DealerCard = ({ 
+    dealer, 
+    index, 
+    onEdit, 
+    onDelete, 
     onView,
-    onScore
-  }: {
-    dealer: any;
+    onScore 
+  }: { 
+    dealer: any; 
     index: number;
     onEdit: (dealer: any) => void;
     onDelete: (dealerId: string) => void;
@@ -1300,12 +1280,12 @@ export default function AdvancedCRM() {
     </motion.div>
   );
 
-  const ReportCard = ({
-    report,
-    index,
-    onView
-  }: {
-    report: any;
+  const ReportCard = ({ 
+    report, 
+    index, 
+    onView 
+  }: { 
+    report: any; 
     index: number;
     onView: (report: any) => void;
   }) => (
@@ -1391,7 +1371,7 @@ export default function AdvancedCRM() {
 
       {/* BOTTOM NAVIGATION */}
       {(currentPage !== 'ai' && currentPage !== 'journey') && (
-        <motion.div
+        <motion.div 
           initial={{ y: 100 }}
           animate={{ y: 0 }}
           className="absolute bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-700/50 shadow-2xl safe-area-pb"
@@ -1411,8 +1391,8 @@ export default function AdvancedCRM() {
                 className={`
                   flex flex-col items-center justify-center space-y-1 px-4 py-2 rounded-2xl 
                   transition-all duration-300 min-w-[60px] relative overflow-hidden
-                  ${currentPage === nav.key
-                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
+                  ${currentPage === nav.key 
+                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25' 
                     : 'text-gray-400 hover:text-white hover:bg-gray-800/60'
                   }
                 `}
@@ -1438,7 +1418,7 @@ export default function AdvancedCRM() {
       {/* Enhanced Create Modal */}
       <AnimatePresence>
         {showCreateModal && (
-          <CreateModal
+          <CreateModal 
             type={createType}
             onClose={resetModals}
             onCreate={createRecord}
@@ -1450,10 +1430,10 @@ export default function AdvancedCRM() {
 }
 
 // ============= ENHANCED CREATE MODAL =============
-const CreateModal = ({
-  type,
-  onClose,
-  onCreate
+const CreateModal = ({ 
+  type, 
+  onClose, 
+  onCreate 
 }: {
   type: string;
   onClose: () => void;
@@ -1466,11 +1446,11 @@ const CreateModal = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
-
+    
     try {
       // ENHANCED DATA MAPPING FOR ALL TYPES
       let transformedData = { ...formData };
-
+      
       if (type === 'task') {
         transformedData = {
           userId: user?.id || 1,
@@ -1483,7 +1463,7 @@ const CreateModal = ({
           pjpId: formData.isPjp ? formData.pjpId : null // PJP OPTION
         };
       }
-
+      
       if (type === 'pjp') {
         transformedData = {
           userId: user?.id || 1,
@@ -1587,9 +1567,9 @@ const CreateModal = ({
             <>
               <div>
                 <Label className="text-gray-300">Task Title</Label>
-                <Input
+                <Input 
                   value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
                   placeholder="Enter task title"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1597,43 +1577,43 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Description</Label>
-                <Textarea
+                <Textarea 
                   value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
                   placeholder="Task description"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Task Date</Label>
-                <Input
+                <Input 
                   type="date"
                   value={formData.taskDate || ''}
-                  onChange={(e) => setFormData({ ...formData, taskDate: e.target.value })}
+                  onChange={(e) => setFormData({...formData, taskDate: e.target.value})}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Site/Location</Label>
-                <LocationPicker
+                <LocationPicker 
                   currentLocation={formData.siteName}
-                  onLocationSelect={(location) => setFormData({ ...formData, siteName: location })}
+                  onLocationSelect={(location) => setFormData({...formData, siteName: location})}
                 />
               </div>
               {/* PJP OPTION */}
               <div className="flex items-center space-x-2">
                 <Switch
                   checked={formData.isPjp || false}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isPjp: checked })}
+                  onCheckedChange={(checked) => setFormData({...formData, isPjp: checked})}
                 />
                 <Label className="text-gray-300">This is a PJP task</Label>
               </div>
               {formData.isPjp && (
                 <div>
                   <Label className="text-gray-300">Related PJP</Label>
-                  <Select
-                    value={formData.pjpId || ''}
-                    onValueChange={(value) => setFormData({ ...formData, pjpId: value })}
+                  <Select 
+                    value={formData.pjpId || ''} 
+                    onValueChange={(value) => setFormData({...formData, pjpId: value})}
                   >
                     <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
                       <SelectValue placeholder="Select PJP" />
@@ -1654,9 +1634,9 @@ const CreateModal = ({
             <>
               <div>
                 <Label className="text-gray-300">Objective</Label>
-                <Input
+                <Input 
                   value={formData.objective || ''}
-                  onChange={(e) => setFormData({ ...formData, objective: e.target.value })}
+                  onChange={(e) => setFormData({...formData, objective: e.target.value})}
                   placeholder="Journey objective"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1664,35 +1644,35 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Location</Label>
-                <LocationPicker
+                <LocationPicker 
                   currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
+                  onLocationSelect={(location) => setFormData({...formData, location})}
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Area to Visit</Label>
-                <Input
+                <Input 
                   value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                  onChange={(e) => setFormData({...formData, area: e.target.value})}
                   placeholder="Specific area"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Planned Date</Label>
-                <Input
+                <Input 
                   type="date"
                   value={formData.plannedDate || ''}
-                  onChange={(e) => setFormData({ ...formData, plannedDate: e.target.value })}
+                  onChange={(e) => setFormData({...formData, plannedDate: e.target.value})}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Expected Outcome</Label>
-                <Textarea
+                <Textarea 
                   value={formData.expectedOutcome || ''}
-                  onChange={(e) => setFormData({ ...formData, expectedOutcome: e.target.value })}
+                  onChange={(e) => setFormData({...formData, expectedOutcome: e.target.value})}
                   placeholder="What do you expect to achieve?"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
@@ -1705,9 +1685,9 @@ const CreateModal = ({
             <>
               <div>
                 <Label className="text-gray-300">Dealer Name</Label>
-                <Input
+                <Input 
                   value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) => setFormData({...formData, name: e.target.value})}
                   placeholder="Dealer name"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1715,9 +1695,9 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Region</Label>
-                <Input
+                <Input 
                   value={formData.region || ''}
-                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                  onChange={(e) => setFormData({...formData, region: e.target.value})}
                   placeholder="Region"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1725,9 +1705,9 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Area</Label>
-                <Input
+                <Input 
                   value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                  onChange={(e) => setFormData({...formData, area: e.target.value})}
                   placeholder="Area"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1735,16 +1715,16 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Address/Location</Label>
-                <LocationPicker
+                <LocationPicker 
                   currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
+                  onLocationSelect={(location) => setFormData({...formData, location})}
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Type</Label>
-                <Select
-                  value={formData.type || 'Standard'}
-                  onValueChange={(value) => setFormData({ ...formData, type: value })}
+                <Select 
+                  value={formData.type || 'Standard'} 
+                  onValueChange={(value) => setFormData({...formData, type: value})}
                 >
                   <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
                     <SelectValue />
@@ -1758,19 +1738,19 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Contact</Label>
-                <Input
+                <Input 
                   value={formData.contact || ''}
-                  onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
+                  onChange={(e) => setFormData({...formData, contact: e.target.value})}
                   placeholder="Phone number"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Total Potential (₹)</Label>
-                <Input
+                <Input 
                   type="number"
                   value={formData.totalPotential || ''}
-                  onChange={(e) => setFormData({ ...formData, totalPotential: e.target.value })}
+                  onChange={(e) => setFormData({...formData, totalPotential: e.target.value})}
                   placeholder="Expected business value"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
@@ -1793,7 +1773,7 @@ const CreateModal = ({
                 </Label>
                 <Slider
                   value={[formData.dealerScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, dealerScore: value[0] })}
+                  onValueChange={(value) => setFormData({...formData, dealerScore: value[0]})}
                   max={10}
                   step={0.1}
                   className="mt-2"
@@ -1806,7 +1786,7 @@ const CreateModal = ({
                 </Label>
                 <Slider
                   value={[formData.trustWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, trustWorthinessScore: value[0] })}
+                  onValueChange={(value) => setFormData({...formData, trustWorthinessScore: value[0]})}
                   max={10}
                   step={0.1}
                   className="mt-2"
@@ -1819,7 +1799,7 @@ const CreateModal = ({
                 </Label>
                 <Slider
                   value={[formData.creditWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, creditWorthinessScore: value[0] })}
+                  onValueChange={(value) => setFormData({...formData, creditWorthinessScore: value[0]})}
                   max={10}
                   step={0.1}
                   className="mt-2"
@@ -1832,7 +1812,7 @@ const CreateModal = ({
                 </Label>
                 <Slider
                   value={[formData.orderHistoryScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, orderHistoryScore: value[0] })}
+                  onValueChange={(value) => setFormData({...formData, orderHistoryScore: value[0]})}
                   max={10}
                   step={0.1}
                   className="mt-2"
@@ -1845,7 +1825,7 @@ const CreateModal = ({
                 </Label>
                 <Slider
                   value={[formData.visitFrequencyScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, visitFrequencyScore: value[0] })}
+                  onValueChange={(value) => setFormData({...formData, visitFrequencyScore: value[0]})}
                   max={10}
                   step={0.1}
                   className="mt-2"
@@ -1859,9 +1839,9 @@ const CreateModal = ({
             <>
               <div>
                 <Label className="text-gray-300">Report Title</Label>
-                <Input
+                <Input 
                   value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  onChange={(e) => setFormData({...formData, title: e.target.value})}
                   placeholder={`${type.toUpperCase()} Report`}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
@@ -1869,16 +1849,16 @@ const CreateModal = ({
               </div>
               <div>
                 <Label className="text-gray-300">Location</Label>
-                <LocationPicker
+                <LocationPicker 
                   currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
+                  onLocationSelect={(location) => setFormData({...formData, location})}
                 />
               </div>
               <div>
                 <Label className="text-gray-300">Description</Label>
-                <Textarea
+                <Textarea 
                   value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  onChange={(e) => setFormData({...formData, description: e.target.value})}
                   placeholder="Report details"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   rows={3}
@@ -1887,10 +1867,10 @@ const CreateModal = ({
               {type === 'dvr' && (
                 <div>
                   <Label className="text-gray-300">Amount Collected (₹)</Label>
-                  <Input
+                  <Input 
                     type="number"
                     value={formData.amount || ''}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
                     placeholder="0"
                     className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   />
@@ -1898,10 +1878,10 @@ const CreateModal = ({
               )}
               <div>
                 <Label className="text-gray-300">Date</Label>
-                <Input
+                <Input 
                   type="date"
                   value={formData.date || ''}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  onChange={(e) => setFormData({...formData, date: e.target.value})}
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                 />
               </div>
@@ -1909,9 +1889,9 @@ const CreateModal = ({
           )}
 
           <div className="flex space-x-3 pt-4">
-            <Button
-              type="submit"
-              disabled={isSubmitting}
+            <Button 
+              type="submit" 
+              disabled={isSubmitting} 
               className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
             >
               {isSubmitting ? (
@@ -1919,9 +1899,9 @@ const CreateModal = ({
               ) : null}
               {isSubmitting ? 'Creating...' : 'Create'}
             </Button>
-            <Button
+            <Button 
               type="button"
-              variant="outline"
+              variant="outline" 
               onClick={onClose}
               className="border-gray-600 text-gray-300 hover:bg-gray-700"
             >
