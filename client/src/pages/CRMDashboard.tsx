@@ -145,7 +145,8 @@ const useAPI = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
+        const txt = await response.text().catch(() => '');
+        throw new Error(`API Error: ${response.status} ${txt}`);
       }
 
       const data = await response.json();
@@ -179,7 +180,6 @@ const useAPI = () => {
       const completedPJPs = pjpData.status === 'fulfilled' ? pjpData.value.data?.length || 0 : 0;
       const completedReports = reportData.status === 'fulfilled' ? reportData.value.data?.length || 0 : 0;
 
-      // Calculate real targets based on actual data
       const realTargets = [
         { label: 'PJPs Completed', current: completedPJPs, target: 25, icon: Navigation, color: 'text-purple-400' },
         { label: 'Reports Submitted', current: completedReports, target: 30, icon: FileText, color: 'text-blue-400' },
@@ -207,29 +207,36 @@ const useAPI = () => {
         leaveRes,
         clientRes,
         competitionRes,
-        dealerScoresRes
+        dealerScoresRes,
+        geoTrackingRes,
+        dealerCheckinsRes
       ] = await Promise.allSettled([
         apiCall(`/api/daily-tasks/user/${user.id}`),
         apiCall(`/api/pjp/user/${user.id}`),
         apiCall(`/api/dealers/user/${user.id}`),
         apiCall(`/api/dvr/user/${user.id}?limit=20`),
         apiCall(`/api/tvr/user/${user.id}`),
-        apiCall(`/api/attendance/user/${user.id}`),
+        apiCall(`/api/attendance/user/${user.id}`),           // Radar CRUD
         apiCall(`/api/leave-applications/user/${user.id}`),
         apiCall(`/api/client-reports/user/${user.id}`),
         apiCall(`/api/competition-reports/user/${user.id}`),
-        apiCall(`/api/dealer-reports-scores/user/${user.id}`)
+        apiCall(`/api/dealer-reports-scores/user/${user.id}`),
+        apiCall(`/api/geo-tracking/user/${user.id}?limit=100`), // Radar CRUD
+        apiCall(`/api/dealer-checkins/user/${user.id}?limit=50`) // Radar CRUD
       ]);
 
       if (tasksRes.status === 'fulfilled') setData('dailyTasks', tasksRes.value.data || []);
       if (pjpsRes.status === 'fulfilled') setData('pjps', pjpsRes.value.data || []);
       if (dealersRes.status === 'fulfilled') setData('dealers', dealersRes.value.data || []);
       if (dvrRes.status === 'fulfilled') setData('reports', dvrRes.value.data || []);
+      if (tvrRes.status === 'fulfilled') setData('tvr', tvrRes.value.data || []);
       if (attendanceRes.status === 'fulfilled') setData('attendance', attendanceRes.value.data || []);
       if (leaveRes.status === 'fulfilled') setData('leaveApplications', leaveRes.value.data || []);
       if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
       if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
       if (dealerScoresRes.status === 'fulfilled') setData('dealerScores', dealerScoresRes.value.data || []);
+      if (geoTrackingRes.status === 'fulfilled') setData('geoTracking', geoTrackingRes.value.data || []);
+      if (dealerCheckinsRes.status === 'fulfilled') setData('dealerCheckins', dealerCheckinsRes.value.data || []);
 
       await Promise.all([fetchDashboardStats(), fetchUserTargets()]);
     } catch (error) {
@@ -238,53 +245,140 @@ const useAPI = () => {
       setLoading(false);
     }
   }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
-  const handleAttendancePunch = useCallback(async () => {
+
+  // ---- Attendance punch using Radar-aware CRUD ----
+  const handleAttendancePunch = useCallback(async (opts?: {
+    siteName?: string; // if you want to bind to a specific dealer/site the UI selected
+  }) => {
     if (!user) return;
 
     try {
       setLoading(true);
+
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
+      });
+
+      const { latitude, longitude, accuracy } = position.coords;
+      const status = useAppStore.getState().attendanceStatus;
+
+      if (status === 'out') {
+        // === PUNCH-IN -> CREATE ===
+        const body = {
+          userId: user.id,
+          companyId: user.companyId,
+          // fields that our Radar CRUD expects for track()
+          inTimeLatitude: latitude,
+          inTimeLongitude: longitude,
+          inTimeAccuracy: accuracy,
+          // optional if you want to force/validate a specific dealer geofence
+          siteName: opts?.siteName
+        };
+
+        const response = await apiCall('/api/attendance', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+
+        if (response.success) {
+          useAppStore.getState().setAttendanceStatus('in');
+          await fetchDashboardStats();
+        }
+      } else {
+        // === PUNCH-OUT -> UPDATE last open row ===
+        // You might already store open row id, but let's derive it safely:
+        const list = await apiCall(`/api/attendance/user/${user.id}?limit=1`);
+        const latest = Array.isArray(list?.data) ? list.data[0] : undefined;
+        if (!latest || latest.outTime) {
+          throw new Error('No open attendance record found for punch-out.');
+        }
+
+        const body = {
+          outTimeLatitude: latitude,
+          outTimeLongitude: longitude,
+          outTimeAccuracy: accuracy
+        };
+
+        const response = await apiCall(`/api/attendance/${latest.id}`, {
+          method: 'PUT',
+          body: JSON.stringify(body),
+        });
+
+        if (response.success) {
+          useAppStore.getState().setAttendanceStatus('out');
+          await fetchDashboardStats();
+        }
+      }
+    } catch (error) {
+      console.error('Attendance punch failed:', error);
+      // Optional: surface backend geofence error message to UI toast
+    } finally {
+      setLoading(false);
+    }
+  }, [user, apiCall, setLoading, fetchDashboardStats]);
+
+  // ---- Geo-tracking ping (one-off) ----
+  const sendGeoTrackingPing = useCallback(async (extra?: {
+    siteName?: string;
+    description?: string;
+  }) => {
+    if (!user) return;
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
       });
 
       const { latitude, longitude, accuracy } = position.coords;
 
-      // Hit your backend, let it reverse geocode & validate location
-      const endpoint =
-        useAppStore.getState().attendanceStatus === "out"
-          ? "/api/attendance/punch-in"
-          : "/api/attendance/punch-out";
-
-      const response = await apiCall(endpoint, {
-        method: "POST",
+      const response = await apiCall('/api/geo-tracking', {
+        method: 'POST',
         body: JSON.stringify({
           userId: user.id,
           companyId: user.companyId,
           latitude,
           longitude,
           accuracy,
-          // ⚡ remove hardcoded "Mobile App"
-          // let backend fill locationName via reverse geocode
-        }),
+          siteName: extra?.siteName,
+          description: extra?.description
+        })
       });
 
-      if (response.success) {
-        useAppStore
-          .getState()
-          .setAttendanceStatus(
-            useAppStore.getState().attendanceStatus === "out"
-              ? "in"
-              : "out"
-          );
-        await fetchDashboardStats();
-      }
-    } catch (error) {
-      console.error("Attendance punch failed:", error);
-    } finally {
-      setLoading(false);
+      return response;
+    } catch (e) {
+      console.error('sendGeoTrackingPing failed:', e);
+      throw e;
     }
-  }, [user, apiCall, setLoading, fetchDashboardStats]);
+  }, [user, apiCall]);
 
+  // ---- Dealer check-in (uses Radar geofence gate) ----
+  const dealerCheckIn = useCallback(async (siteName: string) => {
+    if (!user) return;
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
+      });
+
+      const { latitude, longitude, accuracy } = position.coords;
+
+      const response = await apiCall('/api/dealer-checkins', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: user.id,
+          companyId: user.companyId,
+          latitude,
+          longitude,
+          accuracy,
+          siteName // server will enforce inside dealer geofence tagged "dealer"
+        })
+      });
+
+      return response;
+    } catch (e) {
+      console.error('dealerCheckIn failed:', e);
+      throw e;
+    }
+  }, [user, apiCall]);
 
   const createRecord = useCallback(async (type: string, data: any) => {
     if (!user) return;
@@ -298,14 +392,21 @@ const useAPI = () => {
       leave: '/api/leave-applications',
       'client-report': '/api/client-reports',
       'competition-report': '/api/competition-reports',
-      'dealer-score': '/api/dealer-reports-scores'
-    };
+      'dealer-score': '/api/dealer-reports-scores',
+      // new:
+      'geo-tracking': '/api/geo-tracking',
+      'dealer-checkin': '/api/dealer-checkins',
+      attendance: '/api/attendance'
+    } as const;
+
+    const url = (endpoints as any)[type];
+    if (!url) throw new Error(`Unknown type ${type}`);
 
     try {
       setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
+      const response = await apiCall(url, {
         method: 'POST',
-        body: JSON.stringify({ ...data, userId: user.id })
+        body: JSON.stringify({ ...data, userId: user.id, companyId: user.companyId })
       });
 
       if (response.success) {
@@ -333,12 +434,19 @@ const useAPI = () => {
       leave: `/api/leave-applications/${id}`,
       'client-report': `/api/client-reports/${id}`,
       'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`
-    };
+      'dealer-score': `/api/dealer-reports-scores/${id}`,
+      // new:
+      'geo-tracking': `/api/geo-tracking/${id}`,
+      'dealer-checkin': `/api/dealer-checkins/${id}`,
+      attendance: `/api/attendance/${id}`
+    } as const;
+
+    const url = (endpoints as any)[type];
+    if (!url) throw new Error(`Unknown type ${type}`);
 
     try {
       setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
+      const response = await apiCall(url, {
         method: 'PUT',
         body: JSON.stringify(data)
       });
@@ -367,12 +475,19 @@ const useAPI = () => {
       leave: `/api/leave-applications/${id}`,
       'client-report': `/api/client-reports/${id}`,
       'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`
-    };
+      'dealer-score': `/api/dealer-reports-scores/${id}`,
+      // new:
+      'geo-tracking': `/api/geo-tracking/${id}`,
+      'dealer-checkin': `/api/dealer-checkins/${id}`,
+      attendance: `/api/attendance/${id}`
+    } as const;
+
+    const url = (endpoints as any)[type];
+    if (!url) throw new Error(`Unknown type ${type}`);
 
     try {
       setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
+      const response = await apiCall(url, {
         method: 'DELETE'
       });
 
@@ -393,6 +508,8 @@ const useAPI = () => {
     fetchDashboardStats,
     fetchUserTargets,
     handleAttendancePunch,
+    sendGeoTrackingPing,
+    dealerCheckIn,
     createRecord,
     updateRecord,
     deleteRecord
@@ -414,13 +531,13 @@ const LocationPicker = ({
     setIsLoading(true);
     try {
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
       });
 
-      const { latitude, longitude } = position.coords;
+      const { latitude, longitude, accuracy } = position.coords;
 
-      // Reverse geocoding (in real app, use Google Maps API)
-      const locationName = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`;
+      // Let backend (Radar) enrich; here we just display quick coords
+      const locationName = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)} (~${Math.round(accuracy)}m)`;
       onLocationSelect(locationName, { lat: latitude, lng: longitude });
       setSearchQuery(locationName);
     } catch (error) {
@@ -429,7 +546,6 @@ const LocationPicker = ({
       setIsLoading(false);
     }
   };
-
   return (
     <div className="space-y-3">
       <div className="flex space-x-2">

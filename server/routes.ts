@@ -30,11 +30,241 @@ import {
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import multer from 'multer';
-import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
-import PureRAGService from 'server/bot/aiService';
-import { telegramBot } from './bot/telegram';
+import EnhancedRAGService from 'server/bot/aiService';
+
+// ========================= Radar.com SINGLE FUNCTION WRAPPER =========================
+// Supports: track, context, geocode (forward/reverse/ip), search (autocomplete/users/geofences/places),
+// address validate, route (distance/matrix/match/directions/optimize).
+// Uses env: RADAR_PUBLISHABLE_KEY, RADAR_SECRET_KEY
+// ------------------------------------------------------------------------------------
+
+type LatLng = { lat: number; lng: number };
+type AnyDict = Record<string, any>;
+
+export type RadarAction =
+  // Tracking & Context
+  | "track"
+  | "context"
+  // Geocoding
+  | "geocode.forward" | "geocode.reverse" | "geocode.ip"
+  // Search
+  | "search.autocomplete" | "search.users" | "search.geofences" | "search.places"
+  // Address validate
+  | "address.validate"
+  // Routing
+  | "route.distance" | "route.matrix" | "route.match" | "route.directions" | "route.optimize";
+
+const RADAR_BASE = "https://api.radar.io/v1";
+const RADAR_PUBLISHABLE_KEY = process.env.RADAR_PUBLISHABLE_KEY || "";
+const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY || "";
+
+/** Build query string from object, skipping empty values */
+function qs(params: AnyDict): string {
+  const clean: AnyDict = {};
+  Object.keys(params || {}).forEach((k) => {
+    const v = params[k];
+    if (v !== undefined && v !== null && v !== "") clean[k] = v;
+  });
+  const s = new URLSearchParams(clean).toString();
+  return s ? `?${s}` : "";
+}
+
+/** Turn [{lat,lng}] into "lat,lng|lat,lng|..." */
+function coordsList(points: LatLng[] = []): string {
+  return points.map((p) => `${p.lat},${p.lng}`).join("|");
+}
+
+/** Pick publishable vs secret key */
+function pickAuthKey(action: RadarAction): string {
+  return action === "search.users" ? RADAR_SECRET_KEY : RADAR_PUBLISHABLE_KEY;
+}
+
+/**
+ * Unified Radar API function
+ */
+export async function radar(action: RadarAction, payload: AnyDict = {}): Promise<any> {
+  if (!RADAR_PUBLISHABLE_KEY) {
+    throw new Error("Missing RADAR_PUBLISHABLE_KEY in environment");
+  }
+  if (action === "search.users" && !RADAR_SECRET_KEY) {
+    throw new Error("Missing RADAR_SECRET_KEY in environment (required for search.users)");
+  }
+
+  let endpoint = "";
+  let method: "GET" | "POST" = "GET";
+  let body: any = null;
+
+  switch (action) {
+    // -------------------- Tracking & Context --------------------
+    case "track": {
+      method = "POST";
+      endpoint = "track";
+      const {
+        deviceId, userId, latitude, longitude, accuracy,
+        foreground, stopped, description, metadata, deviceType,
+      } = payload;
+
+      if (!deviceId && !userId) {
+        throw new Error("Radar.track requires either deviceId or userId");
+      }
+
+      body = {
+        deviceId, userId, latitude, longitude, accuracy,
+        foreground, stopped, description, metadata, deviceType,
+      };
+      break;
+    }
+    case "context": {
+      const { lat, lng, userId } = payload;
+      endpoint = `context${qs({ coordinates: `${lat},${lng}`, userId })}`;
+      break;
+    }
+
+    // -------------------- Geocoding --------------------
+    case "geocode.forward": {
+      const { query, layers, country, lang } = payload;
+      endpoint = `geocode/forward${qs({ query, layers, country, lang })}`;
+      break;
+    }
+    case "geocode.reverse": {
+      const { lat, lng, layers } = payload;
+      endpoint = `geocode/reverse${qs({ coordinates: `${lat},${lng}`, layers })}`;
+      break;
+    }
+    case "geocode.ip": {
+      endpoint = "geocode/ip";
+      break;
+    }
+
+    // -------------------- Search --------------------
+    case "search.autocomplete": {
+      const { query, near, layers, limit, countryCode, lang } = payload;
+      endpoint = `search/autocomplete${qs({
+        query,
+        near: near ? `${near.lat},${near.lng}` : undefined,
+        layers, limit, countryCode, lang,
+      })}`;
+      break;
+    }
+    case "search.users": {
+      const { near, radius, mode, limit, metadata = {} } = payload;
+      const base = {
+        near: near ? `${near.lat},${near.lng}` : undefined,
+        radius, mode, limit,
+      };
+      const metaEntries: AnyDict = {};
+      Object.keys(metadata).forEach((k) => {
+        metaEntries[`metadata[${k}]`] = metadata[k];
+      });
+      endpoint = `search/users${qs({ ...base, ...metaEntries })}`;
+      break;
+    }
+    case "search.geofences": {
+      const { near, limit, radius, tags, includeGeometry, metadata = {} } = payload;
+      const base = {
+        near: near ? `${near.lat},${near.lng}` : undefined,
+        limit, radius, tags, includeGeometry,
+      };
+      const metaEntries: AnyDict = {};
+      Object.keys(metadata).forEach((k) => {
+        metaEntries[`metadata[${k}]`] = metadata[k];
+      });
+      endpoint = `search/geofences${qs({ ...base, ...metaEntries })}`;
+      break;
+    }
+    case "search.places": {
+      const { chains, categories, iataCode, near, radius, limit, chainMetadata = {} } = payload;
+      const base = {
+        chains, categories, iataCode,
+        near: near ? `${near.lat},${near.lng}` : undefined,
+        radius, limit,
+      };
+      const cm: AnyDict = {};
+      Object.keys(chainMetadata).forEach((k) => {
+        cm[`chainMetadata[${k}]`] = chainMetadata[k];
+      });
+      endpoint = `search/places${qs({ ...base, ...cm })}`;
+      break;
+    }
+
+    // -------------------- Address validate --------------------
+    case "address.validate": {
+      const { city, stateCode, postalCode, countryCode, number, street, unit, addressLabel } = payload;
+      endpoint = `addresses/validate${qs({
+        city, stateCode, postalCode, countryCode, number, street, unit, addressLabel,
+      })}`;
+      break;
+    }
+
+    // -------------------- Routing --------------------
+    case "route.distance": {
+      const { origin, destination, modes, units, avoid, geometry } = payload;
+      endpoint = `route/distance${qs({
+        origin: `${origin.lat},${origin.lng}`,
+        destination: `${destination.lat},${destination.lng}`,
+        modes, units, avoid, geometry,
+      })}`;
+      break;
+    }
+    case "route.matrix": {
+      const { origins = [], destinations = [], mode, units, avoid } = payload;
+      endpoint = `route/matrix${qs({
+        origins: coordsList(origins),
+        destinations: coordsList(destinations),
+        mode, units, avoid,
+      })}`;
+      break;
+    }
+    case "route.match": {
+      method = "POST";
+      endpoint = "route/match";
+      const { path, mode, roadAttributes, units, geometry } = payload;
+      body = { path, mode, roadAttributes, units, geometry };
+      break;
+    }
+    case "route.directions": {
+      const { locations = [], mode, units, avoid, geometry, alternatives, lang } = payload;
+      endpoint = `route/directions${qs({
+        locations: coordsList(locations),
+        mode, units, avoid, geometry, alternatives, lang,
+      })}`;
+      break;
+    }
+    case "route.optimize": {
+      const { locations = [], mode, units, geometry } = payload;
+      endpoint = `route/optimize${qs({
+        locations: coordsList(locations),
+        mode, units, geometry,
+      })}`;
+      break;
+    }
+
+    default:
+      const _never: never = action;
+      throw new Error(`Unsupported Radar action: ${String(_never)}`);
+  }
+
+  const authKey = pickAuthKey(action);
+  if (!authKey) throw new Error(`Missing API key for action ${action}`);
+
+  const res = await fetch(`${RADAR_BASE}/${endpoint}`, {
+    method,
+    headers: {
+      Authorization: authKey,
+      "Content-Type": method === "POST" ? "application/json" : "text/plain",
+    },
+    body: method === "POST" && body ? JSON.stringify(body) : null,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Radar ${action} failed: ${res.status} ${text}`);
+  }
+  return res.json();
+}
+
 
 // Fix multer typing
 interface MulterRequest extends Request {
@@ -289,6 +519,291 @@ function createAutoCRUD(app: Express, config: {
   });
 }
 
+// ========================= Radar-aware AUTO CRUD =========================
+// Adds Radar steps (track/context/geofence check) during CREATE,
+// still gives you GET/PUT/DELETE like your generic builder.
+// ========================================================================
+
+type RadarGeofenceRule = {
+  /** e.g. "dealer" or "store" — what you tagged geofences with in Radar */
+  tag: string;
+  /** Which request field should match Radar geofence.externalId (or description)? */
+  externalIdField?: string; // e.g. "siteName" or "dealerExternalId"
+  /** If you want to accept by description match instead of externalId */
+  matchBy?: "externalId" | "description";
+  /** Radius soft-fail: if provided, also allow within X meters of geometryCenter (if geometry included) */
+  softRadiusMeters?: number;
+  /** Custom error if geofence not satisfied */
+  errorMessage?: string;
+};
+
+type RadarCreateOptions = {
+  /** Use radar.track with incoming lat/lng/accuracy and write to columns on the row */
+  track?: {
+    latField?: string;        // default "latitude"
+    lngField?: string;        // default "longitude"
+    accField?: string;        // default "accuracy"
+    deviceIdField?: string;   // in req.body (or headers), optional
+    userIdField?: string;     // in req.body (or headers), optional
+  };
+  /** Use radar.context to enrich address/place into columns on the row */
+  enrich?: {
+    /** map { tableField: "context.path" } e.g. { locationName: "place.name" } */
+    mappings?: Record<string, string>;
+  };
+  /** Require user to be inside a Radar geofence (by tag + externalId/description) */
+  requireGeofence?: RadarGeofenceRule;
+  /** If true, return nearby geofences (and we won't block if not inside) */
+  nearbyGeofences?: {
+    limit?: number;    // default 5
+    radius?: number;   // meters, default 1000
+    includeGeometry?: boolean; // default false
+    tags?: string;     // optional tag filter, comma-separated
+  };
+};
+
+function readFrom(obj: any, dotted: string): any {
+  // "place.name" -> obj.place?.name
+  return dotted.split(".").reduce((o, k) => (o ? o[k] : undefined), obj);
+}
+
+function coerceNum(x: any) {
+  if (typeof x === "number") return x;
+  if (typeof x === "string") return parseFloat(x);
+  return undefined;
+}
+
+function valueOr<T>(v: T | undefined, fallback: T): T {
+  return v === undefined || v === null ? fallback : v;
+}
+
+function http400(res: Response, msg: string, details?: any) {
+  return res.status(400).json({ success: false, error: msg, details });
+}
+
+function http500(res: Response, msg: string, err: any) {
+  return res.status(500).json({
+    success: false,
+    error: msg,
+    details: err instanceof Error ? err.message : "Unknown error",
+  });
+}
+
+function buildWhereByUserId(table: any, userId: string | number) {
+  return eq(table.userId, typeof userId === "string" ? parseInt(userId, 10) : userId);
+}
+
+function createRadarCRUD(app: Express, config: {
+  endpoint: string;
+  table: any;
+  schema: z.ZodSchema;
+  tableName: string;
+  dateField?: string;
+  autoFields?: { [key: string]: () => any };
+  radar?: RadarCreateOptions;
+}) {
+  const { endpoint, table, schema, tableName, dateField, autoFields = {}, radar: radarOpts } = config;
+
+  // ---------------- CREATE (POST) with Radar steps ----------------
+  app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
+    try {
+      // 1) Validate body against schema (exact, like your generic builder)
+      const parse = schema.safeParse(req.body);
+      if (!parse.success) {
+        return res.status(400).json({
+          success: false,
+          error: `Validation failed for ${tableName}`,
+          details: parse.error.errors.map(e => ({
+            field: e.path.join("."),
+            message: e.message,
+            received: (e as any).received
+          }))
+        });
+      }
+
+      // 2) Prepare data and apply auto fields
+      const validated = parse.data as Record<string, any>;
+      const finalData: Record<string, any> = { ...validated };
+      for (const [k, g] of Object.entries(autoFields)) {
+        if (finalData[k] === undefined || finalData[k] === null) finalData[k] = g();
+      }
+      if (table.createdAt && !finalData.createdAt) finalData.createdAt = new Date();
+      if (table.updatedAt && !finalData.updatedAt) finalData.updatedAt = new Date();
+
+      // 3) Radar: track + enrich + geofence checks (if configured)
+      let lat = undefined as number | undefined;
+      let lng = undefined as number | undefined;
+      let accuracy = undefined as number | undefined;
+
+      if (radarOpts?.track) {
+        const latField = radarOpts.track.latField ?? "latitude";
+        const lngField = radarOpts.track.lngField ?? "longitude";
+        const accField = radarOpts.track.accField ?? "accuracy";
+        const deviceId = radarOpts.track.deviceIdField ? finalData[radarOpts.track.deviceIdField] : finalData.deviceId || req.headers["x-device-id"];
+        const userId = radarOpts.track.userIdField ? finalData[radarOpts.track.userIdField] : finalData.userId || req.headers["x-user-id"];
+
+        lat = coerceNum(finalData[latField]);
+        lng = coerceNum(finalData[lngField]);
+        accuracy = coerceNum(finalData[accField]);
+
+        if (lat === undefined || lng === undefined || accuracy === undefined) {
+          return http400(res, `Missing ${latField}/${lngField}/${accField} for ${tableName} track`);
+        }
+
+        // Radar.track
+        await radar("track", {
+          deviceId, userId,
+          latitude: lat, longitude: lng, accuracy,
+          metadata: { endpoint, tableName }
+        });
+      }
+
+      // Radar.context enrichment
+      let contextResp: any | undefined;
+      if (radarOpts?.enrich && lat !== undefined && lng !== undefined) {
+        contextResp = await radar("context", { lat, lng, userId: finalData.userId });
+        const ctx = contextResp?.context || {};
+        for (const [field, ctxPath] of Object.entries(radarOpts.enrich.mappings || {})) {
+          const v = readFrom(ctx, ctxPath);
+          if (v !== undefined && v !== null) finalData[field] = v;
+        }
+      }
+
+      // Require inside geofence (dealer or site) before allowing CREATE
+      if (radarOpts?.requireGeofence && lat !== undefined && lng !== undefined) {
+        const rule = radarOpts.requireGeofence;
+        const limit = 50;
+        const r = await radar("search.geofences", {
+          near: { lat, lng },
+          limit,
+          radius: 1000,
+          includeGeometry: false,
+          tags: rule.tag
+        });
+
+        const target = (rule.externalIdField && finalData[rule.externalIdField]) || finalData.siteName || finalData.dealerExternalId;
+        const mode = rule.matchBy ?? "externalId";
+
+        const found = (r?.geofences || []).some((g: any) => {
+          if (mode === "externalId") return g.externalId == target;
+          return (g.description || "").toLowerCase() === String(target || "").toLowerCase();
+        });
+
+        if (!found) {
+          return http400(
+            res,
+            rule.errorMessage || `You are not inside the required ${rule.tag} geofence for ${String(target || "")}.`
+          );
+        }
+      }
+
+      // Optionally: attach nearby geofences info to response
+      let nearby: any[] | undefined;
+      if (radarOpts?.nearbyGeofences && lat !== undefined && lng !== undefined) {
+        const { limit = 5, radius = 1000, includeGeometry = false, tags } = radarOpts.nearbyGeofences;
+        const r = await radar("search.geofences", {
+          near: { lat, lng }, limit, radius, includeGeometry, tags
+        });
+        nearby = r?.geofences || [];
+      }
+
+      // 4) Create row
+      const created = await db.insert(table).values(finalData).returning();
+
+      return res.json({
+        success: true,
+        data: created[0],
+        message: `${tableName} created successfully`,
+        ...(nearby ? { nearbyGeofences: nearby } : {})
+      });
+    } catch (err) {
+      console.error(`Create ${tableName} error:`, err);
+      return http500(res, `Failed to create ${tableName}`, err);
+    }
+  });
+
+  // ---------------- LIST by user ----------------
+  app.get(`/api/${endpoint}/user/:userId`, async (req: Request, res: Response) => {
+    try {
+      const { userId } = req.params;
+      const { startDate, endDate, limit = "50", ...filters } = req.query;
+      let whereCond = buildWhereByUserId(table, userId);
+
+      if (startDate && endDate && dateField && table[dateField]) {
+        whereCond = and(whereCond,
+          gte(table[dateField], startDate as string),
+          lte(table[dateField], endDate as string)
+        );
+      }
+
+      for (const [k, v] of Object.entries(filters)) {
+        if (v && table[k]) whereCond = and(whereCond, eq(table[k], v));
+      }
+
+      const orderField = table[dateField] || table.createdAt || table.updatedAt;
+      const rows = await db.select().from(table)
+        .where(whereCond)
+        .orderBy(desc(orderField))
+        .limit(parseInt(limit as string, 10));
+
+      res.json({ success: true, data: rows });
+    } catch (err) {
+      console.error(`Get ${tableName}s error:`, err);
+      return http500(res, `Failed to fetch ${tableName}s`, err);
+    }
+  });
+
+  // ---------------- GET by id ----------------
+  app.get(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const [row] = await db.select().from(table).where(eq(table.id, id)).limit(1);
+      if (!row) return res.status(404).json({ success: false, error: `${tableName} not found` });
+      res.json({ success: true, data: row });
+    } catch (err) {
+      console.error(`Get ${tableName} error:`, err);
+      return http500(res, `Failed to fetch ${tableName}`, err);
+    }
+  });
+
+  // ---------------- UPDATE ----------------
+  app.put(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const partial = config.schema.partial();
+      const parsed = partial.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          success: false,
+          error: `Validation failed for ${tableName} update`,
+          details: parsed.error.errors.map(e => ({
+            field: e.path.join("."), message: e.message, received: (e as any).received
+          }))
+        });
+      }
+      const updateData = { ...parsed.data, updatedAt: new Date() };
+      const updated = await db.update(table).set(updateData).where(eq(table.id, req.params.id)).returning();
+      if (!updated?.length) return res.status(404).json({ success: false, error: `${tableName} not found` });
+      res.json({ success: true, data: updated[0], message: `${tableName} updated successfully` });
+    } catch (err) {
+      console.error(`Update ${tableName} error:`, err);
+      return http500(res, `Failed to update ${tableName}`, err);
+    }
+  });
+
+  // ---------------- DELETE ----------------
+  app.delete(`/api/${endpoint}/:id`, async (req: Request, res: Response) => {
+    try {
+      const deleted = await db.delete(table).where(eq(table.id, req.params.id)).returning();
+      if (!deleted?.length) return res.status(404).json({ success: false, error: `${tableName} not found` });
+      res.json({ success: true, message: `${tableName} deleted successfully`, data: deleted[0] });
+    } catch (err) {
+      console.error(`Delete ${tableName} error:`, err);
+      return http500(res, `Failed to delete ${tableName}`, err);
+    }
+  });
+}
+
+
 export function setupWebRoutes(app: Express) {
   // PWA route
   app.get('/pwa', (req: Request, res: Response) => {
@@ -345,8 +860,6 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== ENHANCED AI/RAG ROUTES ====================
-  // Import the enhanced service
-  import EnhancedRAGService from 'server/bot/aiService';
 
   // 🚀 ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
@@ -781,160 +1294,108 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ============================================
-  // SPECIAL ATTENDANCE ROUTES (with schema validation)
-  // ============================================
-  app.get('/api/attendance/user/:userId', async (req: Request, res: Response) => {
-    try {
-      const { userId } = req.params;
-      const { startDate, endDate, limit = '50' } = req.query;
-
-      let whereCondition = eq(salesmanAttendance.userId, parseInt(userId));
-
-      if (startDate && endDate) {
-        whereCondition = and(
-          whereCondition,
-          gte(salesmanAttendance.attendanceDate, startDate as string),
-          lte(salesmanAttendance.attendanceDate, endDate as string)
-        );
-      }
-
-      const records = await db.select().from(salesmanAttendance)
-        .where(whereCondition)
-        .orderBy(desc(salesmanAttendance.attendanceDate))
-        .limit(parseInt(limit as string));
-
-      res.json({ success: true, data: records });
-    } catch (error) {
-      res.status(500).json({ success: false, error: 'Failed to fetch attendance' });
-    }
-  });
-
-  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-    try {
-      // Validate input against schema expectations
-      const { userId, latitude, longitude, locationName, accuracy, selfieUrl } = req.body;
-
-      if (!userId || !latitude || !longitude) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId, latitude, and longitude are required'
-        });
-      }
-
-      // Geo-fencing validation
-      const userPoint = turf.point([longitude, latitude]);
-      let isValid = false;
-      let officeName = '';
-
-      for (const office of OFFICE_LOCATIONS) {
-        if (turf.booleanPointInPolygon(userPoint, office.polygon)) {
-          isValid = true;
-          officeName = office.name;
-          break;
+  createRadarCRUD(app, {
+    endpoint: "attendance",
+    table: salesmanAttendance,
+    schema: insertSalesmanAttendanceSchema,
+    tableName: "Attendance",
+    dateField: "date",
+    autoFields: {
+      checkInTime: () => new Date(), // you'll also have out fields when you do a second PUT
+    },
+    radar: {
+      track: {
+        latField: "inTimeLatitude",   // <-- match your schema field names
+        lngField: "inTimeLongitude",
+        accField: "inTimeAccuracy",
+        userIdField: "userId",
+        // deviceIdField: "deviceId" // if you carry it in body/headers
+      },
+      enrich: {
+        // Fill a readable name from context.place or postal context
+        mappings: {
+          locationName: "place.name", // fallback handled by UI if undefined
         }
-      }
-
-      if (!isValid) {
-        return res.status(400).json({
-          success: false,
-          error: 'You are not within office premises'
-        });
-      }
-
-      const today = new Date().toISOString().split('T')[0];
-
-      // Build data matching exact schema
-      const attendanceData = {
-        userId: parseInt(userId), // integer type
-        attendanceDate: today, // date type
-        locationName: locationName || officeName, // varchar not null
-        inTimeTimestamp: new Date(), // timestamp not null
-        inTimeImageCaptured: !!selfieUrl, // boolean not null
-        outTimeImageCaptured: false, // boolean not null  
-        inTimeImageUrl: selfieUrl || null, // varchar nullable
-        inTimeLatitude: latitude.toString(), // decimal as string
-        inTimeLongitude: longitude.toString(), // decimal as string
-        inTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal nullable
-        // All other nullable fields will be null by default
-      };
-
-      // Validate against schema
-      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: 'Attendance data validation failed',
-          details: parseResult.error.errors
-        });
-      }
-
-      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
-      res.json({
-        success: true,
-        data: result,
-        message: `Punched in at ${officeName}`,
-        geoInfo: { officeName, isValid }
-      });
-    } catch (error) {
-      console.error('Punch in error:', error);
-      res.status(500).json({ success: false, error: 'Punch in failed' });
+      },
+      requireGeofence: {
+        tag: "dealer",
+        externalIdField: "siteName",     // e.g. you pass which dealer/site the user says they’re at
+        matchBy: "externalId",           // or "description" if you stored names
+        errorMessage: "You must be inside the selected dealer geofence to check in."
+      },
+      // Optional nearby list if you want the client to show suggestions
+      nearbyGeofences: { limit: 5, radius: 800, includeGeometry: false, tags: "dealer" }
+    }
+  });
+  
+  createRadarCRUD(app, {
+    endpoint: "geo-tracking",
+    table: geoTracking,
+    schema: insertGeoTrackingSchema,
+    tableName: "Geo Tracking",
+    dateField: "recordedAt",
+    autoFields: {
+      recordedAt: () => new Date(),
+    },
+    radar: {
+      track: {
+        latField: "latitude",
+        lngField: "longitude",
+        accField: "accuracy",
+        userIdField: "userId",
+      },
+      enrich: {
+        mappings: {
+          locationType: "place.categories.0", // e.g. first category of place
+          siteName: "place.name",
+        }
+      },
+      nearbyGeofences: { limit: 5, radius: 1000, tags: "dealer" }
     }
   });
 
-  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-    try {
-      const { userId, latitude, longitude, selfieUrl } = req.body;
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: 'userId is required'
-        });
+  // C) DEALER CHECK-IN (using geoTracking as the record) ---------------
+  // If you don't have a dedicated schema yet, reuse geoTracking rows for check-ins.
+  // We enforce geofence presence by 'siteName' (or change to "dealerExternalId" if you add it).
+  createRadarCRUD(app, {
+    endpoint: "dealer-checkins",
+    table: geoTracking,                  // reuse until you add a dedicated table
+    schema: insertGeoTrackingSchema,
+    tableName: "Dealer Check-in",
+    dateField: "recordedAt",
+    autoFields: {
+      checkInTime: () => new Date(),
+    },
+    radar: {
+      track: {
+        latField: "latitude",
+        lngField: "longitude",
+        accField: "accuracy",
+        userIdField: "userId",
+      },
+      enrich: {
+        mappings: {
+          siteName: "place.name",
+        }
+      },
+      requireGeofence: {
+        tag: "dealer",
+        externalIdField: "siteName",     // change later to "dealerExternalId" if you add that column
+        matchBy: "externalId",
+        errorMessage: "Not inside the selected dealer geofence."
       }
+    }
+  });
 
-      const today = new Date().toISOString().split('T')[0];
-
-      // Find unpunched record
-      const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-        .where(and(
-          eq(salesmanAttendance.userId, parseInt(userId)),
-          eq(salesmanAttendance.attendanceDate, today),
-          isNull(salesmanAttendance.outTimeTimestamp)
-        ))
-        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-        .limit(1);
-
-      if (unpunchedRecord) {
-        // Update with proper data types
-        const updateData = {
-          outTimeTimestamp: new Date(), // timestamp
-          outTimeImageCaptured: !!selfieUrl, // boolean
-          outTimeImageUrl: selfieUrl || null, // varchar nullable
-          outTimeLatitude: latitude ? latitude.toString() : null, // decimal nullable
-          outTimeLongitude: longitude ? longitude.toString() : null, // decimal nullable
-          updatedAt: new Date()
-        };
-
-        const [result] = await db.update(salesmanAttendance)
-          .set(updateData)
-          .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-          .returning();
-
-        res.json({
-          success: true,
-          data: result,
-          message: 'Punched out successfully'
-        });
-      } else {
-        res.status(404).json({
-          success: false,
-          error: 'No active punch-in record found'
-        });
-      }
-    } catch (error) {
-      console.error('Punch out error:', error);
-      res.status(500).json({ success: false, error: 'Punch out failed' });
+  // D) Dealer Reports & Scores (no Radar needed) ------------------------
+  // Keep this on your original generic AUTO-CRUD (already in your file):
+  createAutoCRUD(app, {
+    endpoint: 'dealer-reports-scores',
+    table: dealerReportsAndScores,
+    schema: insertDealerReportsAndScoresSchema,
+    tableName: 'Dealer Report and Score',
+    autoFields: {
+      lastUpdatedDate: () => new Date()
     }
   });
 
