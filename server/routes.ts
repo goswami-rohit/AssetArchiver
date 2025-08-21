@@ -102,7 +102,7 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 
 // ----------------- Radar client (server-side) -----------------
 const RADAR_BASE = "https://api.radar.io/v1";
-const RADAR_SECRET = process.env.RADAR_SECRET; // server key
+const RADAR_SECRET = process.env.RADAR_SECRET_KEY; // server key
 async function radarGet(path: string, params: Record<string, string>) {
   if (!RADAR_SECRET) throw new Error("RADAR_SECRET not configured");
   const url = new URL(RADAR_BASE + path);
