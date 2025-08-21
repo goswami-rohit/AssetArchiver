@@ -808,131 +808,153 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Failed to fetch attendance' });
     }
   });
+  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        companyId,          // REQUIRED to match externalId=company:<id>
+        latitude,
+        longitude,
+        locationName,
+        accuracy,
+        speed,
+        heading,
+        altitude,
+        selfieUrl
+      } = req.body;
 
-app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-  try {
-    const { userId, companyId, latitude, longitude, locationName, accuracy, speed, heading, altitude, selfieUrl } = req.body;
+      if (!userId || !companyId || latitude == null || longitude == null) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId, companyId, latitude, and longitude are required'
+        });
+      }
 
-    if (!userId || !companyId || latitude == null || longitude == null) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId, companyId, latitude, and longitude are required'
+      // 1) Fetch ALL geofences (your curl, translated 1:1)
+      const gfRes = await fetch('https://api.radar.io/v1/geofences', {
+        method: 'GET',
+        headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
       });
-    }
+      const gfJson = await gfRes.json().catch(() => ({} as any));
 
-    // Fetch the geofence from Radar dashboard
-    const url = `https://api.radar.io/v1/geofences/office/company:${companyId}`;
-    const radarRes = await fetch(url, {
-      method: "GET",
-      headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
-    });
-    const radarJson = await radarRes.json();
-    if (!radarRes.ok || !radarJson.geofence) {
-      return res.status(400).json({
-        success: false,
-        error: "Could not fetch geofence from Radar"
+      if (!gfRes.ok || !Array.isArray(gfJson?.geofences)) {
+        return res.status(gfRes.status || 502).json({
+          success: false,
+          error: gfJson?.message || 'Failed to fetch geofences from Radar'
+        });
+      }
+
+      // 2) Compare "one value that concerns us" → externalId by companyId (no geometry)
+      const targetExternalId = `company:${companyId}`;
+      const fence = gfJson.geofences.find(
+        (g: any) => g?.tag === 'office' && g?.externalId === targetExternalId
+      );
+
+      if (!fence) {
+        return res.status(400).json({
+          success: false,
+          error: 'No office geofence found for this company'
+        });
+      }
+
+      // 3) Schema-perfect insert
+      const today = new Date().toISOString().split('T')[0];
+
+      const attendanceData = {
+        userId: parseInt(userId),                 // integer
+        attendanceDate: today,                    // date
+        locationName: locationName || fence.description || 'Office', // varchar(500) NOT NULL
+        inTimeTimestamp: new Date(),              // timestamptz NOT NULL
+        outTimeTimestamp: null,                   // nullable
+        inTimeImageCaptured: !!selfieUrl,         // boolean NOT NULL
+        outTimeImageCaptured: false,              // boolean NOT NULL
+        inTimeImageUrl: selfieUrl || null,        // varchar(500)
+        outTimeImageUrl: null,                    // varchar(500)
+        inTimeLatitude: latitude.toString(),      // decimal(10,7) NOT NULL
+        inTimeLongitude: longitude.toString(),    // decimal(10,7) NOT NULL
+        inTimeAccuracy: accuracy != null ? Number(accuracy).toFixed(2) : null, // decimal(10,2)
+        inTimeSpeed: speed != null ? Number(speed).toFixed(2) : null, // decimal(10,2)
+        inTimeHeading: heading != null ? Number(heading).toFixed(2) : null, // decimal(10,2)
+        inTimeAltitude: altitude != null ? Number(altitude).toFixed(2) : null, // decimal(10,2)
+        outTimeLatitude: null,
+        outTimeLongitude: null,
+        outTimeAccuracy: null,
+        outTimeSpeed: null,
+        outTimeHeading: null,
+        outTimeAltitude: null
+        // createdAt / updatedAt handled by defaults
+      };
+
+      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Attendance data validation failed',
+          details: parseResult.error.errors
+        });
+      }
+
+      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+      return res.json({
+        success: true,
+        data: result,
+        message: `Punched in at ${attendanceData.locationName}`,
+        geofence: { tag: fence.tag, externalId: fence.externalId }
       });
+
+    } catch (err: any) {
+      console.error('Punch in error:', err);
+      res.status(500).json({ success: false, error: 'Punch in failed' });
     }
+  });
+  app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
+    try {
+      const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } = req.body;
 
-    // Optional: just trust the geofence exists for this company
-    // If you insist on checking coords manually, you'd do it here.
-    // Otherwise, this is your "inside geofence" confirmation.
-    const geofence = radarJson.geofence;
+      if (!userId) {
+        return res.status(400).json({ success: false, error: 'userId is required' });
+      }
 
-    const today = new Date().toISOString().split("T")[0];
+      const today = new Date().toISOString().split('T')[0];
 
-    const attendanceData = {
-      userId: parseInt(userId),
-      attendanceDate: today,
-      locationName: locationName || geofence.description || "Office",
-      inTimeTimestamp: new Date(),
-      inTimeImageCaptured: !!selfieUrl,
-      outTimeImageCaptured: false,
-      inTimeImageUrl: selfieUrl || null,
-      inTimeLatitude: latitude.toString(),
-      inTimeLongitude: longitude.toString(),
-      inTimeAccuracy: accuracy ? accuracy.toString() : null,
-      inTimeSpeed: speed ? speed.toString() : null,
-      inTimeHeading: heading ? heading.toString() : null,
-      inTimeAltitude: altitude ? altitude.toString() : null
-    };
+      const [unpunched] = await db.select().from(salesmanAttendance)
+        .where(and(
+          eq(salesmanAttendance.userId, parseInt(userId)),
+          eq(salesmanAttendance.attendanceDate, today),
+          isNull(salesmanAttendance.outTimeTimestamp)
+        ))
+        .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+        .limit(1);
 
-    const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-    if (!parseResult.success) {
-      return res.status(400).json({ success: false, error: "Validation failed", details: parseResult.error.errors });
+      if (!unpunched) {
+        return res.status(404).json({ success: false, error: 'No active punch-in record found' });
+      }
+
+      const updateData = {
+        outTimeTimestamp: new Date(),
+        outTimeImageCaptured: !!selfieUrl,
+        outTimeImageUrl: selfieUrl || null,
+        outTimeLatitude: latitude != null ? latitude.toString() : null,
+        outTimeLongitude: longitude != null ? longitude.toString() : null,
+        outTimeAccuracy: accuracy != null ? Number(accuracy).toFixed(2) : null,
+        outTimeSpeed: speed != null ? Number(speed).toFixed(2) : null,
+        outTimeHeading: heading != null ? Number(heading).toFixed(2) : null,
+        outTimeAltitude: altitude != null ? Number(altitude).toFixed(2) : null,
+        updatedAt: new Date()
+      };
+
+      const [result] = await db.update(salesmanAttendance)
+        .set(updateData)
+        .where(eq(salesmanAttendance.id, unpunched.id))
+        .returning();
+
+      return res.json({ success: true, data: result, message: 'Punched out successfully' });
+
+    } catch (error) {
+      console.error('Punch out error:', error);
+      res.status(500).json({ success: false, error: 'Punch out failed' });
     }
-
-    const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
-    return res.json({
-      success: true,
-      data: result,
-      message: `Punched in at ${attendanceData.locationName}`
-    });
-
-  } catch (err: any) {
-    console.error("Punch in error:", err);
-    res.status(500).json({ success: false, error: "Punch in failed" });
-  }
-});
-
-app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
-  try {
-    const { userId, latitude, longitude, accuracy, speed, heading, altitude, selfieUrl } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId is required'
-      });
-    }
-
-    const today = new Date().toISOString().split('T')[0];
-
-    const [unpunchedRecord] = await db.select().from(salesmanAttendance)
-      .where(and(
-        eq(salesmanAttendance.userId, parseInt(userId)),
-        eq(salesmanAttendance.attendanceDate, today),
-        isNull(salesmanAttendance.outTimeTimestamp)
-      ))
-      .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-      .limit(1);
-
-    if (!unpunchedRecord) {
-      return res.status(404).json({
-        success: false,
-        error: 'No active punch-in record found'
-      });
-    }
-
-    const updateData = {
-      outTimeTimestamp: new Date(), // timestamp
-      outTimeImageCaptured: !!selfieUrl, // boolean
-      outTimeImageUrl: selfieUrl || null, // varchar(500)
-      outTimeLatitude: latitude ? latitude.toString() : null, // decimal(10,7)
-      outTimeLongitude: longitude ? longitude.toString() : null, // decimal(10,7)
-      outTimeAccuracy: accuracy ? accuracy.toString() : null, // decimal(10,2)
-      outTimeSpeed: speed ? speed.toString() : null, // decimal(10,2)
-      outTimeHeading: heading ? heading.toString() : null, // decimal(10,2)
-      outTimeAltitude: altitude ? altitude.toString() : null, // decimal(10,2)
-      updatedAt: new Date()
-    };
-
-    const [result] = await db.update(salesmanAttendance)
-      .set(updateData)
-      .where(eq(salesmanAttendance.id, unpunchedRecord.id))
-      .returning();
-
-    return res.json({
-      success: true,
-      data: result,
-      message: 'Punched out successfully'
-    });
-
-  } catch (error) {
-    console.error('Punch out error:', error);
-    res.status(500).json({ success: false, error: 'Punch out failed' });
-  }
-});
+  });
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)
