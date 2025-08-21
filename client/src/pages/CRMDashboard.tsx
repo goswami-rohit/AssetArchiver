@@ -37,7 +37,6 @@ interface User {
   lastName: string;
   email: string;
   role: string;
-
   companyId: number;   // <-- FK, required for punch-in/out
   company?: {          // <-- optional relation when joined
     id: number;
@@ -252,8 +251,8 @@ const useAPI = () => {
       // Hit your backend, let it reverse geocode & validate location
       const endpoint =
         useAppStore.getState().attendanceStatus === "out"
-          ? "/api/attendance/punch-in"
-          : "/api/attendance/punch-out";
+          ? "/api/attendance2/punch-in"
+          : "/api/attendance2/punch-out";
 
       const response = await apiCall(endpoint, {
         method: "POST",

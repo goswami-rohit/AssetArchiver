@@ -127,7 +127,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   const [addressInput, setAddressInput] = useState('');
   const [realtimeValidation, setRealtimeValidation] = useState<GeofenceValidationResult | null>(null);
   const [geofenceEvents, setGeofenceEvents] = useState<GeofenceEvent[]>([]);
-  
+
   const [geofenceSettings, setGeofenceSettings] = useState<GeofenceSettings>({
     companyId: null,
     officeGeofence: null,
@@ -135,7 +135,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     currentAddress: '',
     officeAddress: ''
   });
-  
+
   const [officeValidation, setOfficeValidation] = useState<{
     isValidating: boolean;
     result: any;
@@ -186,15 +186,15 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
   // Enhanced address resolution
   const resolveCurrentAddress = useCallback(async (lat: number, lng: number) => {
     if (isResolvingAddress) return;
-    
+
     setIsResolvingAddress(true);
     try {
       const response = await fetch('/reverse-geocode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          latitude: lat, 
-          longitude: lng 
+        body: JSON.stringify({
+          latitude: lat,
+          longitude: lng
         })
       });
 
@@ -202,7 +202,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       if (data.success && data.address) {
         const formattedAddress = data.address.formatted || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
         setCurrentAddress(formattedAddress);
-        
+
         // Update geofence settings with current address
         setGeofenceSettings(prev => ({
           ...prev,
@@ -262,7 +262,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       const data = await response.json();
       if (data.success) {
         const newValidation = data.data;
-        
+
         // Check for geofence entry/exit events
         if (realtimeValidation && realtimeValidation.isInside !== newValidation.isInside) {
           const event: GeofenceEvent = {
@@ -271,16 +271,16 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             timestamp: new Date().toLocaleTimeString(),
             location: currentAddress
           };
-          
+
           setGeofenceEvents(prev => [event, ...prev.slice(0, 9)]); // Keep last 10 events
-          
+
           setSuccessMessage(
-            newValidation.isInside 
-              ? '🏢 Entered office area' 
+            newValidation.isInside
+              ? '🏢 Entered office area'
               : '🚗 Left office area'
           );
         }
-        
+
         setRealtimeValidation(newValidation);
       }
     } catch (error) {
@@ -303,16 +303,28 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
       const companyId = userData.data.companyId;
 
       // Now check if office geofence exists for this company
-      const response = await fetch(`/office/${companyId}`);
+      const response = await fetch(`/api/office/${companyId}`);
       const data = await response.json();
 
-      if (data.success) {
+      if (data?.success && data?.data) {
+        const { address, lat, lng } = data.data;
+
         setGeofenceSettings({
           companyId,
-          officeGeofence: data.data,
+          officeGeofence: {
+            _id: 'local-office',
+            description: 'Company Office',
+            geometryRadius: 100,
+            geometryCenter: {
+              // keep the [lng, lat] ordering your map code expects
+              coordinates: [lng, lat],
+            },
+            metadata: { companyName: '', region: '', area: '' },
+            address,
+          },
           isSetupRequired: false,
           currentAddress: '',
-          officeAddress: data.data.address || ''
+          officeAddress: address || '',
         });
       } else {
         setGeofenceSettings({
@@ -320,7 +332,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
           officeGeofence: null,
           isSetupRequired: true,
           currentAddress: '',
-          officeAddress: ''
+          officeAddress: '',
         });
       }
     } catch (error) {
@@ -330,10 +342,11 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
         officeGeofence: null,
         isSetupRequired: true,
         currentAddress: '',
-        officeAddress: ''
+        officeAddress: '',
       });
     }
   };
+
 
   // Enhanced office geofence creation with address support
   const handleCreateOfficeGeofence = async (useAddress = false) => {
@@ -342,50 +355,68 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
     setIsLoading(true);
     try {
       let coordinates = null;
-      
+
       if (useAddress && addressInput.trim()) {
         coordinates = await geocodeAddress(addressInput.trim());
         if (!coordinates) {
-          setErrorMessage('Could not find coordinates for the provided address');
+          setErrorMessage("Could not find coordinates for the provided address");
           setIsLoading(false);
           return;
         }
       } else if (!currentLocation) {
-        setErrorMessage('Current location not available');
+        setErrorMessage("Current location not available");
         setIsLoading(false);
         return;
       }
 
-      const requestData = {
-        companyId: geofenceSettings.companyId,
-        ...(coordinates ? coordinates : {
-          latitude: currentLocation!.lat,
-          longitude: currentLocation!.lng
-        }),
-        address: useAddress ? addressInput.trim() : currentAddress
-      };
-
-      const response = await fetch('/create-office', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestData)
-      });
+      const response = await fetch(
+        useAddress ? "/api/office/set-address" : "/api/office/set-current",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            useAddress
+              ? {
+                companyId: geofenceSettings.companyId,
+                address: addressInput.trim(),
+              }
+              : {
+                companyId: geofenceSettings.companyId,
+                latitude: coordinates?.lat ?? currentLocation!.lat,
+                longitude: coordinates?.lng ?? currentLocation!.lng,
+                address: currentAddress, // optional
+              }
+          ),
+        }
+      );
 
       const data = await response.json();
-      if (data.success) {
+
+      if (data?.success && data?.data) {
+        const { address, lat, lng } = data.data;
+
         setGeofenceSettings(prev => ({
           ...prev,
-          officeGeofence: data.data.geofence,
+          officeGeofence: {
+            _id: "local-office",
+            description: "Company Office",
+            geometryRadius: 100,
+            geometryCenter: { coordinates: [lng, lat] }, // [lng, lat]
+            metadata: { companyName: "", region: "", area: "" },
+            address,
+          },
           isSetupRequired: false,
-          officeAddress: data.data.geofence.address || currentAddress
+          officeAddress: address || currentAddress,
         }));
-        setSuccessMessage('✅ Office geofence created successfully!');
-        setAddressInput('');
+
+        setSuccessMessage("✅ Office geofence created successfully!");
+        setAddressInput("");
       } else {
-        setErrorMessage(data.error || 'Failed to create office geofence');
+        setErrorMessage(data?.error || "Failed to create office geofence");
       }
     } catch (error) {
-      setErrorMessage('Network error: Failed to create office geofence');
+      console.error("Create office geofence failed:", error);
+      setErrorMessage("An unexpected error occurred");
     } finally {
       setIsLoading(false);
     }
@@ -397,7 +428,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
 
     setIsLoading(true);
     try {
-      const response = await fetch(`/office/${geofenceSettings.companyId}`, {
+      const response = await fetch(`/api/office/${geofenceSettings.companyId}`, {
         method: 'DELETE'
       });
 
@@ -464,9 +495,9 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
             heading: position.coords.heading || 0,
             altitude: position.coords.altitude || 0
           };
-          
+
           setCurrentLocation(newLocation);
-          
+
           // Resolve address for current location
           await resolveCurrentAddress(newLocation.lat, newLocation.lng);
         },
@@ -942,20 +973,19 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         <Signal className="w-3 h-3 mr-1" />
                         {currentLocation.accuracy?.toFixed(0)}m
                       </Badge>
-                      
+
                       {/* Geofence status indicator */}
                       {realtimeValidation && (
-                        <Badge className={`${
-                          realtimeValidation.isInside 
-                            ? 'bg-blue-100 text-blue-800 border-blue-300' 
-                            : 'bg-orange-100 text-orange-800 border-orange-300'
-                        }`} data-testid="badge-geofence-status">
+                        <Badge className={`${realtimeValidation.isInside
+                          ? 'bg-blue-100 text-blue-800 border-blue-300'
+                          : 'bg-orange-100 text-orange-800 border-orange-300'
+                          }`} data-testid="badge-geofence-status">
                           {realtimeValidation.isInside ? '🏢 At Office' : '🚗 Outside'}
                         </Badge>
                       )}
                     </div>
                   </div>
-                  
+
                   {/* Real-time distance to office */}
                   {realtimeValidation && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
@@ -1129,11 +1159,10 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       <p className="text-sm font-medium" data-testid="text-active-accuracy">{currentLocation.accuracy?.toFixed(0)}m</p>
                       <p className="text-xs text-gray-500">accuracy</p>
                       {realtimeValidation && (
-                        <Badge className={`mt-1 ${
-                          realtimeValidation.isInside 
-                            ? 'bg-blue-100 text-blue-800 border-blue-300' 
-                            : 'bg-orange-100 text-orange-800 border-orange-300'
-                        }`} data-testid="badge-active-geofence">
+                        <Badge className={`mt-1 ${realtimeValidation.isInside
+                          ? 'bg-blue-100 text-blue-800 border-blue-300'
+                          : 'bg-orange-100 text-orange-800 border-orange-300'
+                          }`} data-testid="badge-active-geofence">
                           {realtimeValidation.isInside ? '🏢' : '🚗'}
                         </Badge>
                       )}
@@ -1276,28 +1305,26 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         <AlertCircle className="w-5 h-5 text-orange-600" />
                         <span className="text-sm font-medium">Setup Required</span>
                       </div>
-                      
+
                       {/* Office setup mode selector */}
                       <div className="mb-4">
                         <div className="flex rounded-lg bg-gray-100 p-1">
                           <button
                             onClick={() => setOfficeSetupMode('current')}
-                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                              officeSetupMode === 'current'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
-                            }`}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${officeSetupMode === 'current'
+                              ? 'bg-white text-gray-900 shadow-sm'
+                              : 'text-gray-600 hover:text-gray-900'
+                              }`}
                             data-testid="button-setup-current"
                           >
                             Current Location
                           </button>
                           <button
                             onClick={() => setOfficeSetupMode('address')}
-                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${
-                              officeSetupMode === 'address'
-                                ? 'bg-white text-gray-900 shadow-sm'
-                                : 'text-gray-600 hover:text-gray-900'
-                            }`}
+                            className={`flex-1 py-2 px-3 rounded-md text-sm font-medium transition-colors ${officeSetupMode === 'address'
+                              ? 'bg-white text-gray-900 shadow-sm'
+                              : 'text-gray-600 hover:text-gray-900'
+                              }`}
                             data-testid="button-setup-address"
                           >
                             Enter Address
@@ -1322,12 +1349,12 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                       )}
 
                       <p className="text-sm text-gray-600 mb-3">
-                        {officeSetupMode === 'current' 
+                        {officeSetupMode === 'current'
                           ? 'Create office geofence at your current location'
                           : 'Create office geofence at the specified address'
                         }
                       </p>
-                      
+
                       <Button
                         onClick={() => handleCreateOfficeGeofence(officeSetupMode === 'address')}
                         disabled={isLoading || (officeSetupMode === 'address' && !addressInput.trim())}
@@ -1346,7 +1373,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                           <CheckCircle className="w-5 h-5 text-green-600" />
                           <span className="text-sm font-medium">Office Configured</span>
                         </div>
-                        
+
                         {/* Delete button */}
                         <Button
                           onClick={handleDeleteOfficeGeofence}
@@ -1359,7 +1386,7 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                           Delete
                         </Button>
                       </div>
-                      
+
                       <div className="space-y-2 text-sm text-gray-600">
                         <p><strong>Company:</strong> {geofenceSettings.officeGeofence.metadata.companyName}</p>
                         <p><strong>Description:</strong> {geofenceSettings.officeGeofence.description}</p>
@@ -1382,11 +1409,10 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         </Button>
 
                         {officeValidation?.result && (
-                          <div className={`p-3 rounded-lg text-sm ${
-                            officeValidation.result.isInside
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                          }`} data-testid="validation-result">
+                          <div className={`p-3 rounded-lg text-sm ${officeValidation.result.isInside
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                            }`} data-testid="validation-result">
                             <div className="flex items-center space-x-2">
                               {officeValidation.result.isInside ? (
                                 <CheckCircle className="w-4 h-4" />
@@ -1428,9 +1454,8 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
                         {geofenceEvents.map((event) => (
                           <div key={event.id} className="flex items-center justify-between text-xs" data-testid={`event-${event.id}`}>
                             <div className="flex items-center space-x-2">
-                              <div className={`w-2 h-2 rounded-full ${
-                                event.type === 'entry' ? 'bg-green-500' : 'bg-orange-500'
-                              }`} />
+                              <div className={`w-2 h-2 rounded-full ${event.type === 'entry' ? 'bg-green-500' : 'bg-orange-500'
+                                }`} />
                               <span className="text-blue-800">
                                 {event.type === 'entry' ? 'Entered' : 'Left'} office
                               </span>
