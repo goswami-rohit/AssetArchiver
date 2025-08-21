@@ -2,7 +2,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { db } from '../db.js';
 import { users, companies } from '../../shared/schema.js';
-import { PureRAGService } from 'server/bot/aiService';
+import { EnhancedRAGService } from 'server/bot/aiService';
 import { eq } from 'drizzle-orm';
 import { Server as SocketIOServer } from 'socket.io';
 
@@ -40,7 +40,7 @@ export class TelegramBotService {
     };
 
     // 🚀 INITIALIZE RAG SERVICE
-    this.ragService = new PureRAGService();
+    this.ragService = new EnhancedRAGService();
     console.log('🧠 RAG Service initialized for Telegram bot');
 
     this.setupCleanupInterval();
