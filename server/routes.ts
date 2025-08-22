@@ -1010,12 +1010,10 @@ export function setupWebRoutes(app: Express) {
         return res.status(400).json({ success: false, error: 'Invalid userId - must be a number' });
       }
 
-      // Build proper date boundaries
-      const todayStr = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
-      const [y, m] = todayStr.split('-').map(Number);
-      const monthStartStr = `${y}-${String(m).padStart(2, '0')}-01`;
-      const nextMonth = m === 12 ? { y: y + 1, m: 1 } : { y, m: m + 1 };
-      const nextMonthStartStr = `${nextMonth.y}-${String(nextMonth.m).padStart(2, '0')}-01`;
+      // Use server-side dates, not JS strings
+      const monthStart = sql`date_trunc('month', current_date)::date`;
+      const nextMonthStart = sql`(date_trunc('month', current_date) + interval '1 month')::date`;
+      const today = sql`current_date`;
 
       const [
         todayAttendance,
@@ -1028,7 +1026,7 @@ export function setupWebRoutes(app: Express) {
         db.select().from(salesmanAttendance)
           .where(and(
             eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, sql`DATE ${todayStr}`)
+            eq(salesmanAttendance.attendanceDate, today)
           ))
           .orderBy(desc(salesmanAttendance.inTimeTimestamp))
           .limit(1),
@@ -1038,8 +1036,8 @@ export function setupWebRoutes(app: Express) {
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            gte(dailyVisitReports.reportDate, sql`DATE ${monthStartStr}`),
-            lt(dailyVisitReports.reportDate, sql`DATE ${nextMonthStartStr}`)
+            gte(dailyVisitReports.reportDate, monthStart),
+            lt(dailyVisitReports.reportDate, nextMonthStart)
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
