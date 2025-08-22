@@ -808,148 +808,148 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Failed to fetch attendance' });
     }
   });
-app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
-  try {
-    const {
-      userId,
-      companyId,        // required if you don't pass geofenceId
-      geofenceId,       // optional: allows GET /v1/geofences/:id
-      latitude,
-      longitude,
-      locationName,
-      accuracy,
-      speed,
-      heading,
-      altitude,
-      selfieUrl
-    } = req.body;
+  app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
+    try {
+      const {
+        userId,
+        companyId,        // required if you don't pass geofenceId
+        geofenceId,       // optional: allows GET /v1/geofences/:id
+        latitude,
+        longitude,
+        locationName,
+        accuracy,
+        speed,
+        heading,
+        altitude,
+        selfieUrl
+      } = req.body;
 
-    if (!userId || latitude == null || longitude == null || (!companyId && !geofenceId)) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId, latitude, longitude, and (companyId OR geofenceId) are required'
+      if (!userId || latitude == null || longitude == null || (!companyId && !geofenceId)) {
+        return res.status(400).json({
+          success: false,
+          error: 'userId, latitude, longitude, and (companyId OR geofenceId) are required'
+        });
+      }
+
+      // 1) Build the EXACT endpoint with REAL values.
+      let radarUrl: string;
+      if (geofenceId) {
+        // DOCS: GET /v1/geofences/:id
+        radarUrl = `https://api.radar.io/v1/geofences/${geofenceId}`;
+      } else {
+        // DOCS: GET /v1/geofences/:tag/:externalId
+        const tag = 'office';
+        const externalId = `company:${companyId}`; // must be "1" per your CSV
+        radarUrl = `https://api.radar.io/v1/geofences/${encodeURIComponent(tag)}/${encodeURIComponent(externalId)}`;
+      }
+
+      const gfRes = await fetch(radarUrl, {
+        method: 'GET',
+        headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
       });
-    }
+      const gfJson = await gfRes.json().catch(() => ({} as any));
 
-    // 1) Build the EXACT endpoint with REAL values.
-    let radarUrl: string;
-    if (geofenceId) {
-      // DOCS: GET /v1/geofences/:id
-      radarUrl = `https://api.radar.io/v1/geofences/${geofenceId}`;
-    } else {
-      // DOCS: GET /v1/geofences/:tag/:externalId
-      const tag = 'office';
-      const externalId = `company:${companyId}`; // must be "1" per your CSV
-      radarUrl = `https://api.radar.io/v1/geofences/${encodeURIComponent(tag)}/${encodeURIComponent(externalId)}`;
-    }
+      if (!gfRes.ok || !gfJson?.geofence || gfJson?.meta?.code !== 200) {
+        console.error('[radar] FAIL', {
+          status: gfRes.status,
+          url: radarUrl,
+          envKeyPrefix: (process.env.RADAR_SECRET_KEY || '').slice(0, 12),
+          resp: gfJson
+        });
+        return res.status(400).json({
+          success: false,
+          error: gfJson?.meta?.message || gfJson?.message || 'Could not fetch geofence from Radar'
+        });
+      }
 
-    const gfRes = await fetch(radarUrl, {
-      method: 'GET',
-      headers: { Authorization: process.env.RADAR_SECRET_KEY as string }
-    });
-    const gfJson = await gfRes.json().catch(() => ({} as any));
+      const geofence = gfJson.geofence;
 
-    if (!gfRes.ok || !gfJson?.geofence || gfJson?.meta?.code !== 200) {
-      console.error('[radar] FAIL', {
-        status: gfRes.status,
-        url: radarUrl,
-        envKeyPrefix: (process.env.RADAR_SECRET_KEY || '').slice(0, 12),
-        resp: gfJson
-      });
-      return res.status(400).json({
-        success: false,
-        error: gfJson?.meta?.message || gfJson?.message || 'Could not fetch geofence from Radar'
-      });
-    }
+      // 2) Compare coordinates (circle check; exact equality is nonsense)
+      const lat = Number(latitude);
+      const lon = Number(longitude);
+      const acc = accuracy != null ? Number(accuracy) : 0;
 
-    const geofence = gfJson.geofence;
-
-    // 2) Compare coordinates (circle check; exact equality is nonsense)
-    const lat = Number(latitude);
-    const lon = Number(longitude);
-    const acc = accuracy != null ? Number(accuracy) : 0;
-
-    let inside = false;
-    if (geofence.type === 'circle' && geofence.geometryCenter && typeof geofence.geometryRadius === 'number') {
-      const [cLon, cLat] = geofence.geometryCenter.coordinates; // [lng, lat]
-      const R = 6371000;
-      const toRad = (d: number) => d * Math.PI / 180;
-      const dLat = toRad(lat - cLat);
-      const dLon = toRad(lon - cLon);
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(cLat)) *
+      let inside = false;
+      if (geofence.type === 'circle' && geofence.geometryCenter && typeof geofence.geometryRadius === 'number') {
+        const [cLon, cLat] = geofence.geometryCenter.coordinates; // [lng, lat]
+        const R = 6371000;
+        const toRad = (d: number) => d * Math.PI / 180;
+        const dLat = toRad(lat - cLat);
+        const dLon = toRad(lon - cLon);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(cLat)) *
           Math.cos(toRad(lat)) *
           Math.sin(dLon / 2) ** 2;
-      const distanceMeters = 2 * R * Math.asin(Math.sqrt(a));
-      const buffer = Math.max(0, acc); // give a bit of grace for GPS noise
-      inside = distanceMeters <= (geofence.geometryRadius + buffer);
-    } else {
-      // You said no Turf; if it’s a polygon fence, fallback
-      inside = true;
-    }
-
-    if (!inside) {
-      return res.status(400).json({
-        success: false,
-        error: 'You are not within office premises'
-      });
-    }
-
-    // 3) Insert row exactly matching your schema
-    const today = new Date().toISOString().split('T')[0];
-
-    const attendanceData = {
-      userId: parseInt(userId),                                // integer NOT NULL
-      attendanceDate: today,                                   // date NOT NULL
-      locationName: (locationName || geofence.description || 'Office').slice(0, 500),
-      inTimeTimestamp: new Date(),                             // timestamptz NOT NULL
-      outTimeTimestamp: null,                                  // timestamptz nullable
-      inTimeImageCaptured: !!selfieUrl,                        // boolean NOT NULL
-      outTimeImageCaptured: false,                             // boolean NOT NULL
-      inTimeImageUrl: selfieUrl || null,                       // varchar(500)
-      outTimeImageUrl: null,                                   // varchar(500)
-      inTimeLatitude: lat.toFixed(7),                          // decimal(10,7) NOT NULL
-      inTimeLongitude: lon.toFixed(7),                         // decimal(10,7) NOT NULL
-      inTimeAccuracy: accuracy != null ? Number(accuracy).toFixed(2) : null, // decimal(10,2)
-      inTimeSpeed: speed != null ? Number(speed).toFixed(2) : null, // decimal(10,2)
-      inTimeHeading: heading != null ? Number(heading).toFixed(2) : null, // decimal(10,2)
-      inTimeAltitude: altitude != null ? Number(altitude).toFixed(2) : null, // decimal(10,2)
-      outTimeLatitude: null,
-      outTimeLongitude: null,
-      outTimeAccuracy: null,
-      outTimeSpeed: null,
-      outTimeHeading: null,
-      outTimeAltitude: null
-    };
-
-    const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
-    if (!parseResult.success) {
-      return res.status(400).json({
-        success: false,
-        error: 'Attendance data validation failed',
-        details: parseResult.error.errors
-      });
-    }
-
-    const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
-
-    return res.json({
-      success: true,
-      data: result,
-      message: `Punched in at ${attendanceData.locationName}`,
-      geofenceRef: {
-        id: geofence._id,
-        tag: geofence.tag,
-        externalId: geofence.externalId,
-        radiusMeters: geofence.geometryRadius ?? null
+        const distanceMeters = 2 * R * Math.asin(Math.sqrt(a));
+        const buffer = Math.max(0, acc); // give a bit of grace for GPS noise
+        inside = distanceMeters <= (geofence.geometryRadius + buffer);
+      } else {
+        // You said no Turf; if it’s a polygon fence, fallback
+        inside = true;
       }
-    });
-  } catch (err: any) {
-    console.error('Punch in error:', err);
-    res.status(500).json({ success: false, error: 'Punch in failed' });
-  }
-});
+
+      if (!inside) {
+        return res.status(400).json({
+          success: false,
+          error: 'You are not within office premises'
+        });
+      }
+
+      // 3) Insert row exactly matching your schema
+      const today = new Date().toISOString().split('T')[0];
+
+      const attendanceData = {
+        userId: parseInt(userId),                                // integer NOT NULL
+        attendanceDate: today,                                   // date NOT NULL
+        locationName: (locationName || geofence.description || 'Office').slice(0, 500),
+        inTimeTimestamp: new Date(),                             // timestamptz NOT NULL
+        outTimeTimestamp: null,                                  // timestamptz nullable
+        inTimeImageCaptured: !!selfieUrl,                        // boolean NOT NULL
+        outTimeImageCaptured: false,                             // boolean NOT NULL
+        inTimeImageUrl: selfieUrl || null,                       // varchar(500)
+        outTimeImageUrl: null,                                   // varchar(500)
+        inTimeLatitude: lat.toFixed(7),                          // decimal(10,7) NOT NULL
+        inTimeLongitude: lon.toFixed(7),                         // decimal(10,7) NOT NULL
+        inTimeAccuracy: accuracy != null ? Number(accuracy).toFixed(2) : null, // decimal(10,2)
+        inTimeSpeed: speed != null ? Number(speed).toFixed(2) : null, // decimal(10,2)
+        inTimeHeading: heading != null ? Number(heading).toFixed(2) : null, // decimal(10,2)
+        inTimeAltitude: altitude != null ? Number(altitude).toFixed(2) : null, // decimal(10,2)
+        outTimeLatitude: null,
+        outTimeLongitude: null,
+        outTimeAccuracy: null,
+        outTimeSpeed: null,
+        outTimeHeading: null,
+        outTimeAltitude: null
+      };
+
+      const parseResult = insertSalesmanAttendanceSchema.safeParse(attendanceData);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          success: false,
+          error: 'Attendance data validation failed',
+          details: parseResult.error.errors
+        });
+      }
+
+      const [result] = await db.insert(salesmanAttendance).values(parseResult.data).returning();
+
+      return res.json({
+        success: true,
+        data: result,
+        message: `Punched in at ${attendanceData.locationName}`,
+        geofenceRef: {
+          id: geofence._id,
+          tag: geofence.tag,
+          externalId: geofence.externalId,
+          radiusMeters: geofence.geometryRadius ?? null
+        }
+      });
+    } catch (err: any) {
+      console.error('Punch in error:', err);
+      res.status(500).json({ success: false, error: 'Punch in failed' });
+    }
+  });
 
   app.post('/api/attendance/punch-out', async (req: Request, res: Response) => {
     try {
@@ -1005,16 +1005,17 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
   // ============================================
   app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.userId);
-      if (isNaN(userId)) {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid userId - must be a number'
-        });
+      const userId = Number(req.params.userId);
+      if (!Number.isFinite(userId)) {
+        return res.status(400).json({ success: false, error: 'Invalid userId - must be a number' });
       }
 
-      const today = new Date().toISOString().split('T')[0];
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      // Build proper date boundaries
+      const todayStr = new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
+      const [y, m] = todayStr.split('-').map(Number);
+      const monthStartStr = `${y}-${String(m).padStart(2, '0')}-01`;
+      const nextMonth = m === 12 ? { y: y + 1, m: 1 } : { y, m: m + 1 };
+      const nextMonthStartStr = `${nextMonth.y}-${String(nextMonth.m).padStart(2, '0')}-01`;
 
       const [
         todayAttendance,
@@ -1023,17 +1024,22 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
         totalDealers,
         pendingLeaves
       ] = await Promise.all([
+        // attendanceDate = today (DATE vs DATE)
         db.select().from(salesmanAttendance)
           .where(and(
             eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, today)
-          )).limit(1),
+            eq(salesmanAttendance.attendanceDate, sql`DATE ${todayStr}`)
+          ))
+          .orderBy(desc(salesmanAttendance.inTimeTimestamp))
+          .limit(1),
 
+        // reportDate in [monthStart, nextMonthStart)
         db.select({ count: sql<number>`cast(count(*) as int)` })
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            like(dailyVisitReports.reportDate, `${currentMonth}%`)
+            gte(dailyVisitReports.reportDate, sql`DATE ${monthStartStr}`),
+            lt(dailyVisitReports.reportDate, sql`DATE ${nextMonthStartStr}`)
           )),
 
         db.select({ count: sql<number>`cast(count(*) as int)` })
@@ -1059,15 +1065,15 @@ app.post('/api/attendance/punch-in', async (req: Request, res: Response) => {
         success: true,
         data: {
           attendance: {
-            isPresent: todayAttendance?.length > 0,
-            punchInTime: todayAttendance?.[0]?.inTimeTimestamp,
-            punchOutTime: todayAttendance?.[0]?.outTimeTimestamp
+            isPresent: todayAttendance.length > 0,
+            punchInTime: todayAttendance[0]?.inTimeTimestamp ?? null,
+            punchOutTime: todayAttendance[0]?.outTimeTimestamp ?? null
           },
           stats: {
-            monthlyReports: monthlyReports[0]?.count || 0,
-            pendingTasks: pendingTasks[0]?.count || 0,
-            totalDealers: totalDealers[0]?.count || 0,
-            pendingLeaves: pendingLeaves[0]?.count || 0
+            monthlyReports: monthlyReports[0]?.count ?? 0,
+            pendingTasks: pendingTasks[0]?.count ?? 0,
+            totalDealers: totalDealers[0]?.count ?? 0,
+            pendingLeaves: pendingLeaves[0]?.count ?? 0
           }
         }
       });
