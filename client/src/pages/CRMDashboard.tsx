@@ -204,7 +204,7 @@ const useAPI = () => {
       ] = await Promise.allSettled([
         apiCall(`/api/daily-tasks/user/${user.id}`),
         apiCall(`/api/pjp/user/${user.id}`),
-        apiCall(`/api/dealers/user/${user.id}`),
+        apiCall(`/api/dealers/user/${user.id}`), // This will fetch real dealers from API
         apiCall(`/api/dvr/user/${user.id}?limit=20`),
         apiCall(`/api/tvr/user/${user.id}`),
         apiCall(`/api/attendance/user/${user.id}`),
@@ -277,7 +277,7 @@ const useAPI = () => {
         // body.selfieUrl = selfieUrlRef.current ?? undefined;
       }
 
-      // 4) Network timeout so UI doesn’t hang forever
+      // 4) Network timeout so UI doesn't hang forever
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 15000);
 
@@ -413,6 +413,131 @@ const useAPI = () => {
     updateRecord,
     deleteRecord
   };
+};
+
+// ============= BRAND SELECTOR COMPONENT =============
+const BrandSelector = ({ 
+  selectedBrands = [], 
+  onChange 
+}: { 
+  selectedBrands: string[]; 
+  onChange: (brands: string[]) => void; 
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+
+  // Major brands as predefined options
+  const majorBrands = [
+    'Samsung', 'Apple', 'Xiaomi', 'OnePlus', 'Vivo', 'Oppo', 'Realme',
+    'Nokia', 'Motorola', 'Sony', 'Huawei', 'LG', 'Google Pixel',
+    'Nothing', 'Asus', 'Honor', 'Infinix', 'Tecno', 'Lava', 'Micromax'
+  ];
+
+  // Filter brands based on search query
+  const filteredBrands = majorBrands.filter(brand =>
+    brand.toLowerCase().includes(searchQuery.toLowerCase()) &&
+    !selectedBrands.includes(brand)
+  );
+
+  // Check if search query is a new brand not in the list
+  const isNewBrand = searchQuery && 
+    !majorBrands.some(brand => brand.toLowerCase() === searchQuery.toLowerCase()) &&
+    !selectedBrands.includes(searchQuery);
+
+  const addBrand = (brand: string) => {
+    if (!selectedBrands.includes(brand)) {
+      onChange([...selectedBrands, brand]);
+      setSearchQuery('');
+      setIsOpen(false);
+    }
+  };
+
+  const removeBrand = (brandToRemove: string) => {
+    onChange(selectedBrands.filter(brand => brand !== brandToRemove));
+  };
+
+  return (
+    <div className="space-y-3">
+      <Label className="text-gray-300">Brands Selling *</Label>
+      
+      {/* Selected Brands Display */}
+      {selectedBrands.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {selectedBrands.map((brand) => (
+            <Badge key={brand} variant="outline" className="text-blue-400 border-blue-400 py-1">
+              {brand}
+              <button
+                type="button"
+                onClick={() => removeBrand(brand)}
+                className="ml-2 text-red-400 hover:text-red-300"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+
+      {/* Search Input */}
+      <div className="relative">
+        <Input
+          value={searchQuery}
+          onChange={(e) => {
+            setSearchQuery(e.target.value);
+            setIsOpen(true);
+          }}
+          onFocus={() => setIsOpen(true)}
+          placeholder="Search or add new brand..."
+          className="bg-gray-900/50 border-gray-600 text-white"
+        />
+        
+        {/* Dropdown */}
+        {isOpen && (searchQuery || filteredBrands.length > 0) && (
+          <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg z-10 max-h-48 overflow-y-auto">
+            
+            {/* Add New Brand Option */}
+            {isNewBrand && (
+              <button
+                type="button"
+                onClick={() => addBrand(searchQuery)}
+                className="w-full px-3 py-2 text-left hover:bg-gray-700 flex items-center text-green-400"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add "{searchQuery}"
+              </button>
+            )}
+            
+            {/* Existing Brand Options */}
+            {filteredBrands.map((brand) => (
+              <button
+                key={brand}
+                type="button"
+                onClick={() => addBrand(brand)}
+                className="w-full px-3 py-2 text-left hover:bg-gray-700 text-gray-200"
+              >
+                {brand}
+              </button>
+            ))}
+            
+            {/* No results */}
+            {!isNewBrand && filteredBrands.length === 0 && searchQuery && (
+              <div className="px-3 py-2 text-gray-500 text-sm">
+                No brands found
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Click outside to close */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 z-0" 
+          onClick={() => setIsOpen(false)}
+        />
+      )}
+    </div>
+  );
 };
 
 // ============= LOCATION PICKER COMPONENT =============
@@ -833,7 +958,7 @@ export default function AdvancedCRM() {
             )}
           </Section>
 
-          {/* Dealers Section with Scoring */}
+          {/* UPDATED Dealers Section - REMOVED HARDCODED DATA */}
           <Section
             title="Recent Dealers"
             icon={Building2}
@@ -870,27 +995,10 @@ export default function AdvancedCRM() {
                 ))}
               </AnimatePresence>
             ) : (
-              <DealerCard
-                key="ns-traders"
-                dealer={{
-                  id: 'sample',
-                  name: 'NS Traders',
-                  region: 'North',
-                  area: 'Zone A',
-                  type: 'Premium',
-                  totalPotential: '50,000',
-                  contact: '+91-XXXXXXXXXX',
-                  address: 'Sample Address'
-                }}
-                index={0}
-                onEdit={() => { }}
-                onDelete={() => { }}
-                onView={(dealer) => {
-                  setUIState('selectedItem', dealer);
-                  setUIState('showDetailModal', true);
-                }}
-                onScore={() => { }}
-              />
+              <div className="text-center py-8 text-gray-400">
+                <Building2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>No dealers registered yet</p>
+              </div>
             )}
           </Section>
 
@@ -1269,6 +1377,9 @@ export default function AdvancedCRM() {
               <div className="flex items-center space-x-2 mt-3">
                 <Badge variant="outline">{dealer.type}</Badge>
                 <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
+                {dealer.phoneNo && (
+                  <span className="text-xs text-gray-500">{dealer.phoneNo}</span>
+                )}
               </div>
             </div>
             <div className="flex items-center space-x-2 ml-4">
@@ -1512,12 +1623,17 @@ const CreateModal = ({
         transformedData = {
           userId: user?.id || 1,
           name: formData.name,
+          type: formData.type,
+          parentDealerId: formData.parentDealerId || null,
           region: formData.region,
           area: formData.area,
-          type: formData.type || 'Standard',
-          contact: formData.contact || '',
-          address: formData.address || formData.location || '',
-          totalPotential: formData.totalPotential || '0'
+          phoneNo: formData.phoneNo,
+          address: formData.address,
+          totalPotential: formData.totalPotential,
+          bestPotential: formData.bestPotential,
+          brandSelling: formData.brandSelling || [],
+          feedbacks: formData.feedbacks,
+          remarks: formData.remarks || null
         };
       }
 
@@ -1711,79 +1827,175 @@ const CreateModal = ({
             </>
           )}
 
-          {/* ENHANCED DEALER FORM with location picker */}
+          {/* UPDATED DEALER FORM - WITH ALL SCHEMA FIELDS */}
           {type === 'dealer' && (
             <>
+              {/* Basic Info */}
               <div>
-                <Label className="text-gray-300">Dealer Name</Label>
+                <Label className="text-gray-300">Dealer Name *</Label>
                 <Input
                   value={formData.name || ''}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Dealer name"
+                  placeholder="Enter dealer name"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
                   required
                 />
               </div>
+              
               <div>
-                <Label className="text-gray-300">Region</Label>
-                <Input
-                  value={formData.region || ''}
-                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                  placeholder="Region"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Area</Label>
-                <Input
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                  placeholder="Area"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Address/Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Type</Label>
+                <Label className="text-gray-300">Type *</Label>
                 <Select
-                  value={formData.type || 'Standard'}
+                  value={formData.type || ''}
                   onValueChange={(value) => setFormData({ ...formData, type: value })}
                 >
                   <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                    <SelectValue />
+                    <SelectValue placeholder="Select dealer type" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-800 border-gray-600">
                     <SelectItem value="Premium">Premium</SelectItem>
                     <SelectItem value="Standard">Standard</SelectItem>
                     <SelectItem value="Basic">Basic</SelectItem>
+                    <SelectItem value="Distributor">Distributor</SelectItem>
+                    <SelectItem value="Retailer">Retailer</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
               <div>
-                <Label className="text-gray-300">Contact</Label>
+                <Label className="text-gray-300">Phone Number *</Label>
                 <Input
-                  value={formData.contact || ''}
-                  onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
-                  placeholder="Phone number"
+                  value={formData.phoneNo || ''}
+                  onChange={(e) => setFormData({ ...formData, phoneNo: e.target.value })}
+                  placeholder="+91-XXXXXXXXXX"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
                 />
               </div>
+
+              {/* Location Details */}
               <div>
-                <Label className="text-gray-300">Total Potential (₹)</Label>
+                <Label className="text-gray-300">Region *</Label>
                 <Input
-                  type="number"
-                  value={formData.totalPotential || ''}
-                  onChange={(e) => setFormData({ ...formData, totalPotential: e.target.value })}
-                  placeholder="Expected business value"
+                  value={formData.region || ''}
+                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
+                  placeholder="e.g., North, South, East, West"
                   className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label className="text-gray-300">Area *</Label>
+                <Input
+                  value={formData.area || ''}
+                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
+                  placeholder="Specific area/locality"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  required
+                />
+              </div>
+
+              <div>
+                <Label className="text-gray-300">Full Address *</Label>
+                <Textarea
+                  value={formData.address || ''}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  placeholder="Complete address with pincode"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+
+              {/* Business Potential */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-gray-300">Total Potential (₹) *</Label>
+                  <Input
+                    type="number"
+                    value={formData.totalPotential || ''}
+                    onChange={(e) => setFormData({ ...formData, totalPotential: e.target.value })}
+                    placeholder="100000"
+                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                    required
+                  />
+                </div>
+                <div>
+                  <Label className="text-gray-300">Best Potential (₹) *</Label>
+                  <Input
+                    type="number"
+                    value={formData.bestPotential || ''}
+                    onChange={(e) => setFormData({ ...formData, bestPotential: e.target.value })}
+                    placeholder="50000"
+                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Parent Dealer Feature */}
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    checked={formData.hasParent || false}
+                    onCheckedChange={(checked) => setFormData({ 
+                      ...formData, 
+                      hasParent: checked,
+                      parentDealerId: checked ? formData.parentDealerId : null
+                    })}
+                  />
+                  <Label className="text-gray-300">This dealer works under another dealer</Label>
+                </div>
+                
+                {formData.hasParent && (
+                  <div>
+                    <Label className="text-gray-300">Parent Dealer</Label>
+                    <Select
+                      value={formData.parentDealerId || ''}
+                      onValueChange={(value) => setFormData({ ...formData, parentDealerId: value })}
+                    >
+                      <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
+                        <SelectValue placeholder="Select parent dealer" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-600">
+                        {dealers.filter(d => d.id !== formData.id).map((dealer) => (
+                          <SelectItem key={dealer.id} value={dealer.id}>
+                            {dealer.name} ({dealer.region})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {/* Brand Selling with Smart Selector */}
+              <BrandSelector
+                selectedBrands={formData.brandSelling || []}
+                onChange={(brands) => setFormData({ ...formData, brandSelling: brands })}
+              />
+
+              {/* Feedback & Remarks */}
+              <div>
+                <Label className="text-gray-300">Feedback/Assessment *</Label>
+                <Textarea
+                  value={formData.feedbacks || ''}
+                  onChange={(e) => setFormData({ ...formData, feedbacks: e.target.value })}
+                  placeholder="Overall feedback about this dealer's performance and reliability"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  rows={2}
+                  required
+                />
+              </div>
+
+              <div>
+                <Label className="text-gray-300">Remarks (Optional)</Label>
+                <Textarea
+                  value={formData.remarks || ''}
+                  onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
+                  placeholder="Additional notes or special instructions"
+                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
+                  rows={2}
                 />
               </div>
             </>
