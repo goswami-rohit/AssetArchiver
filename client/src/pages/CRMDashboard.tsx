@@ -415,22 +415,28 @@ const useAPI = () => {
   };
 };
 
-// ============= BRAND SELECTOR COMPONENT =============
-const BrandSelector = ({ 
-  selectedBrands = [], 
-  onChange 
-}: { 
-  selectedBrands: string[]; 
-  onChange: (brands: string[]) => void; 
+
+// ============= UPDATED BRAND SELECTOR WITH CEMENT BRANDS =============
+const BrandSelector = ({
+  selectedBrands = [],
+  onChange
+}: {
+  selectedBrands: string[];
+  onChange: (brands: string[]) => void;
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
-  // Major brands as predefined options
+  // UPDATED: Cement company brands instead of phone brands
   const majorBrands = [
-    'Samsung', 'Apple', 'Xiaomi', 'OnePlus', 'Vivo', 'Oppo', 'Realme',
-    'Nokia', 'Motorola', 'Sony', 'Huawei', 'LG', 'Google Pixel',
-    'Nothing', 'Asus', 'Honor', 'Infinix', 'Tecno', 'Lava', 'Micromax'
+    'UltraTech Cement Ltd.',
+    'Ambuja Cements Ltd.',
+    'ACC Limited.',
+    'Shree Cement Ltd.',
+    'Dalmia Bharat Ltd.',
+    'Ramco Cements Ltd.',
+    'Grasim Industries, Inc.',
+    'Best Cement.'
   ];
 
   // Filter brands based on search query
@@ -440,7 +446,7 @@ const BrandSelector = ({
   );
 
   // Check if search query is a new brand not in the list
-  const isNewBrand = searchQuery && 
+  const isNewBrand = searchQuery &&
     !majorBrands.some(brand => brand.toLowerCase() === searchQuery.toLowerCase()) &&
     !selectedBrands.includes(searchQuery);
 
@@ -459,7 +465,7 @@ const BrandSelector = ({
   return (
     <div className="space-y-3">
       <Label className="text-gray-300">Brands Selling *</Label>
-      
+
       {/* Selected Brands Display */}
       {selectedBrands.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -487,14 +493,14 @@ const BrandSelector = ({
             setIsOpen(true);
           }}
           onFocus={() => setIsOpen(true)}
-          placeholder="Search or add new brand..."
+          placeholder="Search or add new cement brand..."
           className="bg-gray-900/50 border-gray-600 text-white"
         />
-        
+
         {/* Dropdown */}
         {isOpen && (searchQuery || filteredBrands.length > 0) && (
           <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg z-10 max-h-48 overflow-y-auto">
-            
+
             {/* Add New Brand Option */}
             {isNewBrand && (
               <button
@@ -506,7 +512,7 @@ const BrandSelector = ({
                 Add "{searchQuery}"
               </button>
             )}
-            
+
             {/* Existing Brand Options */}
             {filteredBrands.map((brand) => (
               <button
@@ -518,7 +524,7 @@ const BrandSelector = ({
                 {brand}
               </button>
             ))}
-            
+
             {/* No results */}
             {!isNewBrand && filteredBrands.length === 0 && searchQuery && (
               <div className="px-3 py-2 text-gray-500 text-sm">
@@ -531,8 +537,8 @@ const BrandSelector = ({
 
       {/* Click outside to close */}
       {isOpen && (
-        <div 
-          className="fixed inset-0 z-0" 
+        <div
+          className="fixed inset-0 z-0"
           onClick={() => setIsOpen(false)}
         />
       )}
@@ -959,6 +965,7 @@ export default function AdvancedCRM() {
           </Section>
 
           {/* UPDATED Dealers Section - REMOVED HARDCODED DATA */}
+          {/* UPDATED Dealers Section - SHOW REAL DEALERS FROM DB */}
           <Section
             title="Recent Dealers"
             icon={Building2}
@@ -998,6 +1005,16 @@ export default function AdvancedCRM() {
               <div className="text-center py-8 text-gray-400">
                 <Building2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
                 <p>No dealers registered yet</p>
+                <Button
+                  onClick={() => {
+                    setUIState('createType', 'dealer');
+                    setUIState('showCreateModal', true);
+                  }}
+                  className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add First Dealer
+                </Button>
               </div>
             )}
           </Section>
@@ -1633,6 +1650,8 @@ const CreateModal = ({
           bestPotential: formData.bestPotential,
           brandSelling: formData.brandSelling || [],
           feedbacks: formData.feedbacks,
+          latitude: formData.latitude,
+          longitude: formData.longitude,
           remarks: formData.remarks || null
         };
       }
@@ -1841,7 +1860,7 @@ const CreateModal = ({
                   required
                 />
               </div>
-              
+
               <div>
                 <Label className="text-gray-300">Type *</Label>
                 <Select
@@ -1874,14 +1893,23 @@ const CreateModal = ({
 
               {/* Location Details */}
               <div>
-                <Label className="text-gray-300">Region *</Label>
-                <Input
-                  value={formData.region || ''}
-                  onChange={(e) => setFormData({ ...formData, region: e.target.value })}
-                  placeholder="e.g., North, South, East, West"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
+                <Label className="text-gray-300">Region (Location) *</Label>
+                <LocationPicker
+                  currentLocation={formData.region}
+                  onLocationSelect={(location, coords) => {
+                    setFormData({
+                      ...formData,
+                      region: location,
+                      latitude: coords?.lat,
+                      longitude: coords?.lng
+                    });
+                  }}
                 />
+                {formData.latitude && formData.longitude && (
+                  <div className="mt-1 text-xs text-gray-400">
+                    📍 Lat: {formData.latitude.toFixed(4)}, Lng: {formData.longitude.toFixed(4)}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1934,19 +1962,20 @@ const CreateModal = ({
               </div>
 
               {/* Parent Dealer Feature */}
+              {/* Parent Dealer Feature */}
               <div className="space-y-3">
                 <div className="flex items-center space-x-2">
                   <Switch
                     checked={formData.hasParent || false}
-                    onCheckedChange={(checked) => setFormData({ 
-                      ...formData, 
+                    onCheckedChange={(checked) => setFormData({
+                      ...formData,
                       hasParent: checked,
                       parentDealerId: checked ? formData.parentDealerId : null
                     })}
                   />
                   <Label className="text-gray-300">This dealer works under another dealer</Label>
                 </div>
-                
+
                 {formData.hasParent && (
                   <div>
                     <Label className="text-gray-300">Parent Dealer</Label>
@@ -1958,11 +1987,20 @@ const CreateModal = ({
                         <SelectValue placeholder="Select parent dealer" />
                       </SelectTrigger>
                       <SelectContent className="bg-gray-800 border-gray-600">
-                        {dealers.filter(d => d.id !== formData.id).map((dealer) => (
-                          <SelectItem key={dealer.id} value={dealer.id}>
-                            {dealer.name} ({dealer.region})
+                        {/* GET DEALERS FROM ZUSTAND STORE */}
+                        {dealers.length > 0 ? (
+                          dealers
+                            .filter(d => d.id !== useAppStore.getState().selectedItem?.id) // Don't show self
+                            .map((dealer) => (
+                              <SelectItem key={dealer.id} value={dealer.id}>
+                                {dealer.name} ({dealer.region} - {dealer.area})
+                              </SelectItem>
+                            ))
+                        ) : (
+                          <SelectItem value="" disabled>
+                            No dealers available
                           </SelectItem>
-                        ))}
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
