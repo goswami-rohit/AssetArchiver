@@ -1203,6 +1203,8 @@ export function setupWebRoutes(app: Express) {
         checkInTime: now,
         appState: 'in_progress',
         locationType: 'start',
+        updatedAt: now,          // ✅ fix here
+        createdAt: now,          // optional: set explicitly too
         accuracy: meta.accuracy != null ? toStrDec(meta.accuracy, 2) : undefined,
         speed: meta.speed != null ? toStrDec(meta.speed, 2) : undefined,
         heading: meta.heading != null ? toStrDec(meta.heading, 2) : undefined,
@@ -1221,6 +1223,7 @@ export function setupWebRoutes(app: Express) {
       return res.status(500).json({ success: false, error: 'Failed to start journey' });
     }
   });
+
 
   app.post('/api/geo/leg', async (req: Request, res: Response) => {
     try {
