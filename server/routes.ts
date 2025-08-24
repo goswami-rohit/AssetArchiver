@@ -82,6 +82,79 @@ function createAutoCRUD(app: Express, config: {
   // CREATE
   app.post(`/api/${endpoint}`, async (req: Request, res: Response) => {
     try {
+      // =========================
+      // SPECIAL-CASE: dealer-reports-scores (upsert by dealerId)
+      // =========================
+      if (endpoint === 'dealer-reports-scores') {
+        const body = req.body as any;
+
+        // minimal helpers (keep it self-contained)
+        const toDec2 = (v: unknown, field: string) => {
+          const n = Number(v);
+          if (!Number.isFinite(n)) throw new Error(`${field} must be a number`);
+          return n.toFixed(2); // drizzle decimal prefers strings
+        };
+
+        // required
+        const dealerId = String(body.dealerId ?? '').trim();
+        if (!dealerId) {
+          return res.status(400).json({ success: false, error: 'dealerId is required' });
+        }
+
+        // ensure dealer exists
+        const dealer = await db.query.dealers.findFirst({
+          where: eq(dealers.id, dealerId),
+          columns: { id: true }
+        });
+        if (!dealer) {
+          return res.status(400).json({ success: false, error: 'dealerId does not exist' });
+        }
+
+        // coerce payload
+        let payload;
+        try {
+          payload = {
+            dealerId,
+            dealerScore: toDec2(body.dealerScore, 'dealerScore'),
+            trustWorthinessScore: toDec2(body.trustWorthinessScore, 'trustWorthinessScore'),
+            creditWorthinessScore: toDec2(body.creditWorthinessScore, 'creditWorthinessScore'),
+            orderHistoryScore: toDec2(body.orderHistoryScore, 'orderHistoryScore'),
+            visitFrequencyScore: toDec2(body.visitFrequencyScore, 'visitFrequencyScore'),
+            lastUpdatedDate: new Date(), // required column
+            updatedAt: new Date()        // let createdAt default
+          };
+        } catch (e) {
+          return res.status(400).json({ success: false, error: (e as Error).message });
+        }
+
+        // upsert by unique dealerId
+        const [row] = await db
+          .insert(dealerReportsAndScores)
+          .values(payload)
+          .onConflictDoUpdate({
+            target: dealerReportsAndScores.dealerId,
+            set: {
+              dealerScore: payload.dealerScore,
+              trustWorthinessScore: payload.trustWorthinessScore,
+              creditWorthinessScore: payload.creditWorthinessScore,
+              orderHistoryScore: payload.orderHistoryScore,
+              visitFrequencyScore: payload.visitFrequencyScore,
+              lastUpdatedDate: payload.lastUpdatedDate,
+              updatedAt: payload.updatedAt
+            }
+          })
+          .returning();
+
+        return res.json({
+          success: true,
+          message: 'Dealer report & scores upserted',
+          data: row
+        });
+      }
+      // =========================
+      // END SPECIAL-CASE
+      // =========================
+
       // Parse & validate strictly against the table schema
       const parseResult = schema.safeParse(req.body);
       if (!parseResult.success) {
@@ -236,6 +309,7 @@ function createAutoCRUD(app: Express, config: {
       });
     }
   });
+
   // GET ALL by User ID - with proper date field handling
   app.get(`/api/${endpoint}/user/:userId`, async (req: Request, res: Response) => {
     try {
@@ -803,16 +877,6 @@ export function setupWebRoutes(app: Express) {
     autoFields: {
       reportDate: () => new Date().toISOString().split('T')[0],
       checkInTime: () => new Date()
-    }
-  });
-   // AutoCRUD registration
-  createAutoCRUD(app, {
-    endpoint: 'dealer-reports-scores',
-    table: dealerReportsAndScores,
-    schema: insertDealerReportsAndScoresSchema,
-    tableName: 'Dealer Reports & Scores',
-    autoFields: {
-      lastUpdatedDate: () => new Date()
     }
   });
 
