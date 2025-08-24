@@ -467,6 +467,9 @@ function createAutoCRUD(app: Express, config: {
     }
   });
 }
+const asNum = (v: unknown) => Number(v);
+const toStrDec = (v: unknown, d: number) => Number(v).toFixed(d);
+const ll = (lat: number, lng: number) => `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
 
 export function setupWebRoutes(app: Express) {
   // PWA route
@@ -1178,6 +1181,162 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Punch out failed' });
     }
   });
+  // ===========================================
+  // GEO TRACKING
+  //============================================
+
+  app.post('/api/geo/start', async (req: Request, res: Response) => {
+    try {
+      const { userId, lat, lng } = req.body ?? {};
+      if (!Number.isFinite(asNum(userId)) || !Number.isFinite(asNum(lat)) || !Number.isFinite(asNum(lng))) {
+        return res.status(400).json({ success: false, error: 'userId, lat, lng are required numbers' });
+      }
+
+      const meta = req.body ?? {};
+      const now = new Date();
+
+      const [row] = await db.insert(geoTracking).values({
+        userId: asNum(userId),
+        latitude: toStrDec(lat, 7),
+        longitude: toStrDec(lng, 7),
+        recordedAt: now,
+        checkInTime: now,
+        appState: 'in_progress',
+        locationType: 'start',
+        accuracy: meta.accuracy != null ? toStrDec(meta.accuracy, 2) : undefined,
+        speed: meta.speed != null ? toStrDec(meta.speed, 2) : undefined,
+        heading: meta.heading != null ? toStrDec(meta.heading, 2) : undefined,
+        altitude: meta.altitude != null ? toStrDec(meta.altitude, 2) : undefined,
+        batteryLevel: meta.batteryLevel != null ? toStrDec(meta.batteryLevel, 2) : undefined,
+        isCharging: meta.isCharging,
+        networkStatus: meta.networkStatus,
+        ipAddress: meta.ipAddress,
+        siteName: meta.siteName
+      }).returning({ id: geoTracking.id });
+
+      // client will do the 30s Radar /route/distance calls; we don’t store those
+      return res.json({ success: true, data: { journeyId: row.id } });
+    } catch (err) {
+      console.error('[geo/start] error', err);
+      return res.status(500).json({ success: false, error: 'Failed to start journey' });
+    }
+  });
+
+  app.post('/api/geo/leg', async (req: Request, res: Response) => {
+    try {
+      const { originLat, originLng, destLat, destLng, modes = 'car', units = 'metric', avoid, geometry } = req.body ?? {};
+      const num = (v: any) => Number(v);
+      if (![originLat, originLng, destLat, destLng].every(v => Number.isFinite(num(v)))) {
+        return res.status(400).json({ success: false, error: 'originLat, originLng, destLat, destLng must be numbers' });
+      }
+      const qs = new URLSearchParams({
+        origin: `${num(originLat).toFixed(6)},${num(originLng).toFixed(6)}`,
+        destination: `${num(destLat).toFixed(6)},${num(destLng).toFixed(6)}`,
+        modes: String(modes),
+        units: String(units) === 'imperial' ? 'imperial' : 'metric'
+      });
+      if (avoid) qs.set('avoid', String(avoid));
+      if (geometry) qs.set('geometry', String(geometry));
+
+      const url = `https://api.radar.io/v1/route/distance?${qs.toString()}`;
+      const r = await fetch(url, {
+        method: 'GET',
+        headers: { Authorization: process.env.RADAR_PUBLISHABLE_KEY as string } // or RADAR_SECRET_KEY if you prefer
+      });
+      const data = await r.json();
+      if (!r.ok) return res.status(r.status).json({ success: false, error: 'Radar distance failed', detail: data });
+
+      // prefer requested modes; fallback to geodesic
+      const order = String(modes).split(',').map(s => s.trim());
+      const pick = (m: string) => data?.routes?.[m];
+      let chosen: any = null;
+      for (const m of order) { if (pick(m)) { chosen = pick(m); break; } }
+      if (!chosen) chosen = data?.routes?.geodesic || null;
+
+      let distance = chosen?.distance?.value ?? null; // meters (metric) or feet (imperial)
+      let duration = chosen?.duration?.value ?? null; // minutes
+      if (distance != null && String(units) === 'imperial') distance = distance * 0.3048; // feet -> meters
+
+      return res.json({ success: true, data: { distanceMeters: distance ?? null, durationMinutes: duration ?? null, raw: data } });
+    } catch (err) {
+      console.error('[geo/leg] error', err);
+      return res.status(500).json({ success: false, error: 'Failed to proxy Radar distance' });
+    }
+  });
+
+  app.post('/api/geo/finish', async (req: Request, res: Response) => {
+    try {
+      const { journeyId, legs, mode = 'car', units = 'metric', avoid } = req.body ?? {};
+      if (!journeyId) return res.status(400).json({ success: false, error: 'journeyId is required' });
+      if (!Array.isArray(legs) || legs.length === 0) {
+        return res.status(400).json({ success: false, error: 'legs[] is required: [{origin:{lat,lng}, destination:{lat,lng}}, ...]' });
+      }
+
+      // normalize legs -> strings
+      const ll = (lat: number, lng: number) => `${Number(lat).toFixed(6)},${Number(lng).toFixed(6)}`;
+      const originsArr: string[] = [];
+      const destsArr: string[] = [];
+      for (const leg of legs) {
+        const o = leg?.origin, d = leg?.destination;
+        if (!o || !d || !Number.isFinite(o.lat) || !Number.isFinite(o.lng) || !Number.isFinite(d.lat) || !Number.isFinite(d.lng)) {
+          return res.status(400).json({ success: false, error: 'Each leg must have origin{lat,lng} and destination{lat,lng} numbers' });
+        }
+        originsArr.push(ll(o.lat, o.lng));
+        destsArr.push(ll(d.lat, d.lng));
+      }
+
+      // Matrix cap: 625 routes per request. We send square chunks of 25 (25*25=625).
+      const CHUNK = 25;
+      let totalMeters = 0;
+      let totalMinutes = 0;
+
+      for (let i = 0; i < originsArr.length; i += CHUNK) {
+        const oBatch = originsArr.slice(i, i + CHUNK);
+        const dBatch = destsArr.slice(i, i + CHUNK);
+
+        const qs = new URLSearchParams({
+          origins: oBatch.join('|'),
+          destinations: dBatch.join('|'),
+          mode: String(mode),
+          units: String(units) === 'imperial' ? 'imperial' : 'metric'
+        });
+        if (avoid) qs.set('avoid', String(avoid));
+
+        const url = `https://api.radar.io/v1/route/matrix?${qs.toString()}`;
+        const r = await fetch(url, {
+          method: 'GET',
+          headers: { Authorization: process.env.RADAR_PUBLISHABLE_KEY as string } // or SECRET on backend
+        });
+        const data = await r.json();
+        if (!r.ok) return res.status(r.status).json({ success: false, error: 'Radar matrix failed', detail: data });
+
+        const matrix: any[][] = data?.matrix || [];
+        const n = Math.min(oBatch.length, dBatch.length);
+        for (let j = 0; j < n; j++) {
+          const cell = matrix[j]?.[j];
+          if (!cell) continue;
+          let dist = cell?.distance?.value;
+          let mins = cell?.duration?.value;
+          if (typeof dist === 'number') totalMeters += String(units) === 'imperial' ? dist * 0.3048 : dist;
+          if (typeof mins === 'number') totalMinutes += mins;
+        }
+      }
+
+      // persist final total (meters) as decimal(10,3)
+      await db.update(geoTracking).set({
+        checkOutTime: new Date(),
+        appState: 'stopped',
+        locationType: 'end',
+        totalDistanceTravelled: totalMeters.toFixed(3)
+      }).where(eq(geoTracking.id, String(journeyId)));
+
+      return res.json({ success: true, data: { journeyId, legs: originsArr.length, distanceMeters: totalMeters, durationMinutes: totalMinutes } });
+    } catch (err) {
+      console.error('[geo/finish] error', err);
+      return res.status(500).json({ success: false, error: 'Failed to finish journey' });
+    }
+  });
+
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)

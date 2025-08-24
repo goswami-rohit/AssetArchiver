@@ -1,13 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
   Square, MapPin, Clock, Navigation, Pause, Play, ArrowLeft,
-  Users, CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
-  Target, Route, Store, TrendingUp, Camera, Share, Heart,
-  Zap, Signal, Smartphone, Activity, Eye, Settings
+  CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
+  Route, TrendingUp, Zap, Signal, Activity, Settings,
+  Car, Bike, Walk, Timer, Target
 } from 'lucide-react';
 
 interface JourneyTrackerProps {
@@ -23,207 +23,295 @@ interface LocationData {
   speed?: number;
   heading?: number;
   altitude?: number;
+  timestamp: number;
 }
 
-interface JourneyData {
-  id: string;
-  startTime: string;
-  duration: string;
-  totalDistance: string;
-  trackingPoints: number;
-  activeCheckins: number;
-  status: 'active' | 'paused';
+interface JourneyLeg {
+  origin: { lat: number; lng: number };
+  destination: { lat: number; lng: number };
+  distanceMeters?: number;
+  durationMinutes?: number;
+  timestamp: number;
 }
 
-interface DealerCheckIn {
-  id: string;
-  dealerName: string;
-  checkInTime: string;
-  location: string;
-}
-
-interface GeoTrackingEntry {
-  id: string;
-  userId: number;
-  checkInTime: string;
-  checkOutTime?: string;
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-  speed: number;
-  heading: number;
-  altitude: number;
-  notes?: string;
+interface SmartWakeLockConfig {
+  isActive: boolean;
+  batteryThreshold: number;
+  speedBasedAdjustment: boolean;
+  networkAware: boolean;
 }
 
 export default function JourneyTracker({ userId, onBack, onJourneyEnd }: JourneyTrackerProps) {
-  // Core State
+  // 🚀 CORE STATE
+  const [journeyId, setJourneyId] = useState<string | null>(null);
+  const [isActive, setIsActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
-  const [activeJourney, setActiveJourney] = useState<JourneyData | null>(null);
-  const [dealerCheckins, setDealerCheckins] = useState<DealerCheckIn[]>([]);
-  const [trackingMode, setTrackingMode] = useState<'conservative' | 'balanced' | 'precise'>('balanced');
-  const [journeyWakeLock, setJourneyWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [geoTrackingHistory, setGeoTrackingHistory] = useState<GeoTrackingEntry[]>([]);
+  const [legs, setLegs] = useState<JourneyLeg[]>([]);
+  const [totalDistance, setTotalDistance] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
+  const [startTime, setStartTime] = useState<Date | null>(null);
 
-  // Battery & Network Status
+  // 🔋 SYSTEM STATE
   const [batteryLevel, setBatteryLevel] = useState<number>(100);
+  const [isCharging, setIsCharging] = useState(false);
   const [networkStatus, setNetworkStatus] = useState<'online' | 'offline'>('online');
-  const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
+  const [trackingMode, setTrackingMode] = useState<'car' | 'bike' | 'walk'>('car');
 
-  // UI State
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  // 🔐 SMART WAKE LOCK STATE
+  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
+  const [wakeLockStatus, setWakeLockStatus] = useState<'active' | 'released' | 'unavailable'>('unavailable');
+
+  // 🎯 TRACKING STATE
+  const [locationWatchId, setLocationWatchId] = useState<number | null>(null);
+  const [lastLocationRef, setLastLocationRef] = useState<LocationData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
-  // 🔋 BATTERY OPTIMIZED LOCATION OPTIONS
-  const getLocationOptions = useCallback(() => {
-    const options = {
-      conservative: {
-        enableHighAccuracy: false,
-        maximumAge: 300000, // 5 minutes
-        timeout: 30000,
-        distanceFilter: 200 // 200 meters
-      },
-      balanced: {
-        enableHighAccuracy: false,
-        maximumAge: 120000, // 2 minutes
-        timeout: 20000,
-        distanceFilter: 50 // 50 meters
-      },
-      precise: {
-        enableHighAccuracy: true,
-        maximumAge: 30000, // 30 seconds
-        timeout: 15000,
-        distanceFilter: 10 // 10 meters
-      }
-    };
-    return options[trackingMode];
-  }, [trackingMode]);
+  // 📱 REFS
+  const legCalculationQueue = useRef<Promise<void>>(Promise.resolve());
 
-  // 🚀 INITIALIZE - CHECK FOR ACTIVE JOURNEY
-  useEffect(() => {
-    initializeJourneyTracker();
-    setupBatteryMonitoring();
-    getCurrentLocation();
-    
-    return () => {
-      if (locationWatchId) {
-        navigator.geolocation.clearWatch(locationWatchId);
-      }
-      if (journeyWakeLock) {
-        journeyWakeLock.release();
-      }
-    };
-  }, [userId]);
-
-  // 📍 GET CURRENT LOCATION
-  const getCurrentLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setCurrentLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            speed: position.coords.speed || 0,
-            heading: position.coords.heading || 0,
-            altitude: position.coords.altitude || 0
-          });
-        },
-        (error) => {
-          console.error('Location error:', error);
-          setErrorMessage('Location access denied. Please enable GPS.');
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-      );
-    }
+  // 🧠 ULTRA-SMART WAKE LOCK MANAGEMENT
+  const smartWakeLockConfig: SmartWakeLockConfig = {
+    isActive,
+    batteryThreshold: 15, // Only activate if battery > 15%
+    speedBasedAdjustment: true,
+    networkAware: true
   };
 
-  // 🔍 INITIALIZE JOURNEY TRACKER - FETCH USER TRACKING DATA
-  const initializeJourneyTracker = async () => {
-    setIsLoading(true);
+  const requestSmartWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator)) {
+      setWakeLockStatus('unavailable');
+      return false;
+    }
+
+    // Smart conditions: Don't activate wake lock if battery is too low
+    if (batteryLevel <= smartWakeLockConfig.batteryThreshold) {
+      setWakeLockStatus('released');
+      return false;
+    }
+
+    // Don't activate if offline and no journey active
+    if (networkStatus === 'offline' && !isActive) {
+      return false;
+    }
+
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const response = await fetch(`/api/geo-tracking/user/${userId}?dateFrom=${today}`);
+      const lock = await (navigator as any).wakeLock.request('screen');
+      setWakeLock(lock);
+      setWakeLockStatus('active');
+      
+      lock.addEventListener('release', () => {
+        setWakeLockStatus('released');
+      });
+      
+      return true;
+    } catch (err) {
+      setWakeLockStatus('unavailable');
+      return false;
+    }
+  }, [batteryLevel, networkStatus, isActive, smartWakeLockConfig.batteryThreshold]);
+
+  const releaseSmartWakeLock = useCallback(async () => {
+    if (wakeLock) {
+      try {
+        await wakeLock.release();
+        setWakeLock(null);
+        setWakeLockStatus('released');
+      } catch (err) {
+        console.warn('Wake lock release failed:', err);
+      }
+    }
+  }, [wakeLock]);
+
+  // 🔋 BATTERY-OPTIMIZED LOCATION TRACKING
+  const getOptimalLocationOptions = useCallback(() => {
+    const speed = currentLocation?.speed || 0;
+    const speedKmh = speed * 3.6;
+
+    // Auto-adjust based on movement speed and battery
+    let accuracy = 'balanced';
+    if (speedKmh > 50) accuracy = 'high'; // Highway driving
+    else if (speedKmh < 5) accuracy = 'low'; // Stationary/walking
+    else if (batteryLevel < 30) accuracy = 'low'; // Battery saving
+
+    const options = {
+      high: { enableHighAccuracy: true, maximumAge: 10000, timeout: 8000 },
+      balanced: { enableHighAccuracy: false, maximumAge: 30000, timeout: 15000 },
+      low: { enableHighAccuracy: false, maximumAge: 60000, timeout: 20000 }
+    };
+
+    return options[accuracy as keyof typeof options];
+  }, [currentLocation?.speed, batteryLevel]);
+
+  // 🌐 API FUNCTIONS
+  const startJourney = async () => {
+    if (!currentLocation) {
+      setErrorMessage('Location required to start journey');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const batteryInfo = await getBatteryInfo();
+      
+      const response = await fetch('/api/geo/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          accuracy: currentLocation.accuracy,
+          speed: currentLocation.speed,
+          heading: currentLocation.heading,
+          altitude: currentLocation.altitude,
+          batteryLevel: batteryInfo.level,
+          isCharging: batteryInfo.charging,
+          networkStatus,
+          ipAddress: await getIPAddress(),
+          siteName: `Journey-${new Date().toISOString().split('T')[0]}`
+        })
+      });
+
       const data = await response.json();
-
-      if (data.success && data.data && data.data.length > 0) {
-        setGeoTrackingHistory(data.data);
+      
+      if (data.success) {
+        setJourneyId(data.data.journeyId);
+        setIsActive(true);
+        setStartTime(new Date());
+        setLastLocationRef(currentLocation);
+        setSuccessMessage('Journey started successfully!');
         
-        // Check if there's an active journey (no checkout time)
-        const activeGeoTracking = data.data.find((track: GeoTrackingEntry) => !track.checkOutTime);
+        // Start smart wake lock
+        await requestSmartWakeLock();
         
-        if (activeGeoTracking) {
-          const duration = calculateDuration(activeGeoTracking.checkInTime);
-          const distance = calculateTotalDistance(data.data);
-          
-          setActiveJourney({
-            id: activeGeoTracking.id,
-            startTime: activeGeoTracking.checkInTime,
-            duration,
-            totalDistance: `${distance.toFixed(3)} km`,
-            trackingPoints: data.data.length,
-            activeCheckins: data.data.filter((track: GeoTrackingEntry) => track.checkOutTime).length,
-            status: 'active'
-          });
-
-          setSuccessMessage('Resumed active journey');
-          startLocationTracking();
-        } else {
-          setSuccessMessage('Ready to start new journey');
-        }
+        // Start location tracking
+        startLocationTracking();
       } else {
-        setSuccessMessage('No previous journeys found');
+        setErrorMessage(data.error || 'Failed to start journey');
       }
     } catch (error) {
-      console.error('Error checking active journey:', error);
-      setErrorMessage('Failed to load journey data');
+      setErrorMessage('Network error: Failed to start journey');
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 📏 CALCULATE TOTAL DISTANCE FROM TRACKING POINTS
-  const calculateTotalDistance = (trackingData: GeoTrackingEntry[]): number => {
-    if (trackingData.length < 2) return 0;
-    
-    let totalDistance = 0;
-    for (let i = 1; i < trackingData.length; i++) {
-      const prev = trackingData[i - 1];
-      const curr = trackingData[i];
+  const calculateLegDistance = async (leg: JourneyLeg): Promise<JourneyLeg> => {
+    if (networkStatus === 'offline') return leg;
+
+    try {
+      const response = await fetch('/api/geo/leg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originLat: leg.origin.lat,
+          originLng: leg.origin.lng,
+          destLat: leg.destination.lat,
+          destLng: leg.destination.lng,
+          modes: trackingMode,
+          units: 'metric'
+        })
+      });
+
+      const data = await response.json();
       
-      // Haversine formula for distance calculation
-      const R = 6371; // Earth's radius in km
-      const dLat = (curr.latitude - prev.latitude) * Math.PI / 180;
-      const dLon = (curr.longitude - prev.longitude) * Math.PI / 180;
-      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                Math.cos(prev.latitude * Math.PI / 180) * Math.cos(curr.latitude * Math.PI / 180) *
-                Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      totalDistance += R * c;
+      if (data.success && data.data.distanceMeters) {
+        return {
+          ...leg,
+          distanceMeters: data.data.distanceMeters,
+          durationMinutes: data.data.durationMinutes
+        };
+      }
+    } catch (error) {
+      console.warn('Real-time distance calculation failed:', error);
     }
     
-    return totalDistance;
+    return leg;
   };
 
-  // ⏱️ CALCULATE DURATION HELPER
-  const calculateDuration = (startTime: string) => {
-    const start = new Date(startTime);
-    const now = new Date();
-    const diff = now.getTime() - start.getTime();
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+  const addLeg = useCallback(async (newLocation: LocationData) => {
+    if (!lastLocationRef || !isActive || isPaused) return;
+
+    const leg: JourneyLeg = {
+      origin: { lat: lastLocationRef.lat, lng: lastLocationRef.lng },
+      destination: { lat: newLocation.lat, lng: newLocation.lng },
+      timestamp: newLocation.timestamp
+    };
+
+    // Queue leg calculation to prevent overwhelming the API
+    legCalculationQueue.current = legCalculationQueue.current.then(async () => {
+      const calculatedLeg = await calculateLegDistance(leg);
+      
+      setLegs(prev => [...prev, calculatedLeg]);
+      
+      if (calculatedLeg.distanceMeters) {
+        setTotalDistance(prev => prev + calculatedLeg.distanceMeters!);
+      }
+      if (calculatedLeg.durationMinutes) {
+        setTotalDuration(prev => prev + calculatedLeg.durationMinutes!);
+      }
+    });
+
+    setLastLocationRef(newLocation);
+  }, [lastLocationRef, isActive, isPaused, trackingMode, networkStatus]);
+
+  const finishJourney = async () => {
+    if (!journeyId || legs.length === 0) {
+      setErrorMessage('No active journey to finish');
+      return;
+    }
+
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const response = await fetch('/api/geo/finish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          journeyId,
+          legs: legs.map(leg => ({
+            origin: leg.origin,
+            destination: leg.destination
+          })),
+          mode: trackingMode,
+          units: 'metric'
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setSuccessMessage(`Journey completed! ${data.data.distanceMeters.toFixed(0)}m traveled in ${data.data.durationMinutes.toFixed(0)} minutes`);
+        
+        // Cleanup
+        await releaseSmartWakeLock();
+        stopLocationTracking();
+        resetJourneyState();
+        
+        setTimeout(() => onJourneyEnd(), 2000);
+      } else {
+        setErrorMessage(data.error || 'Failed to finish journey');
+      }
+    } catch (error) {
+      setErrorMessage('Network error: Failed to finish journey');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  // 🌍 START LOCATION TRACKING WITH BATTERY OPTIMIZATION
+  // 🎯 LOCATION TRACKING
   const startLocationTracking = useCallback(() => {
     if (locationWatchId) {
       navigator.geolocation.clearWatch(locationWatchId);
     }
 
-    const options = getLocationOptions();
+    const options = getOptimalLocationOptions();
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -233,595 +321,482 @@ export default function JourneyTracker({ userId, onBack, onJourneyEnd }: Journey
           accuracy: position.coords.accuracy,
           speed: position.coords.speed || 0,
           heading: position.coords.heading || 0,
-          altitude: position.coords.altitude || 0
+          altitude: position.coords.altitude || 0,
+          timestamp: Date.now()
         };
 
         setCurrentLocation(newLocation);
-        setLastUpdate(new Date());
+        
+        // Add leg if journey is active
+        if (isActive) {
+          addLeg(newLocation);
+        }
 
         // Auto-adjust tracking mode based on speed
-        autoAdjustTrackingMode(newLocation.speed || 0);
-        
-        // Update active journey stats if available
-        if (activeJourney) {
-          setActiveJourney(prev => prev ? {
-            ...prev,
-            duration: calculateDuration(prev.startTime),
-            trackingPoints: prev.trackingPoints + 1
-          } : null);
-        }
+        const speedKmh = (newLocation.speed || 0) * 3.6;
+        if (speedKmh > 25 && trackingMode !== 'car') setTrackingMode('car');
+        else if (speedKmh > 8 && speedKmh <= 25 && trackingMode !== 'bike') setTrackingMode('bike');
+        else if (speedKmh <= 8 && trackingMode !== 'walk') setTrackingMode('walk');
       },
       (error) => {
-        console.error('Location tracking error:', error);
         setErrorMessage(`Location error: ${error.message}`);
       },
       options
     );
 
     setLocationWatchId(watchId);
-  }, [activeJourney, trackingMode, getLocationOptions]);
+  }, [getOptimalLocationOptions, isActive, addLeg, trackingMode]);
 
-  // 🎯 AUTO-ADJUST TRACKING MODE BASED ON SPEED
-  const autoAdjustTrackingMode = (speed: number) => {
-    const speedKmh = speed * 3.6; // Convert m/s to km/h
-
-    let newMode: 'conservative' | 'balanced' | 'precise' = 'conservative';
-    if (speedKmh > 30) newMode = 'precise'; // Fast movement
-    else if (speedKmh > 5) newMode = 'balanced'; // Walking/slow driving
-
-    if (newMode !== trackingMode) {
-      setTrackingMode(newMode);
+  const stopLocationTracking = () => {
+    if (locationWatchId) {
+      navigator.geolocation.clearWatch(locationWatchId);
+      setLocationWatchId(null);
     }
   };
 
-  // 🏁 START NEW JOURNEY - GEO-TRACKING CHECK-IN
-  const handleStartJourney = async () => {
-    if (!currentLocation) {
-      setErrorMessage('Please enable location services');
-      return;
-    }
-
-    setIsLoading(true);
-    setErrorMessage('');
-
-    // Request wake lock
-    let wakeLock = null;
-    try {
-      if ('wakeLock' in navigator) {
-        wakeLock = await (navigator as any).wakeLock.request('screen');
-        setJourneyWakeLock(wakeLock);
-      }
-    } catch (wakeLockError) {
-      console.log('Wake lock not available, continuing without it');
-    }
-
-    try {
-      const checkInData = {
-        userId,
-        latitude: currentLocation.lat,
-        longitude: currentLocation.lng,
-        accuracy: currentLocation.accuracy || 10,
-        speed: currentLocation.speed || 0,
-        heading: currentLocation.heading || 0,
-        altitude: currentLocation.altitude || 0,
-        notes: `Journey started via PWA tracker at ${new Date().toLocaleTimeString()}`
-      };
-
-      const response = await fetch('/api/geo-tracking/checkin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkInData)
-      });
-
-      const data = await response.json();
-      
-      if (data.success && data.data) {
-        setActiveJourney({
-          id: data.data.id,
-          startTime: data.data.checkInTime,
-          duration: '0m',
-          totalDistance: '0.000 km',
-          trackingPoints: 1,
-          activeCheckins: 1,
-          status: 'active'
-        });
-
-        // Add to tracking history
-        setGeoTrackingHistory(prev => [...prev, data.data]);
-
-        startLocationTracking();
-        setSuccessMessage('🚀 Journey started successfully!');
-        setErrorMessage('');
-      } else {
-        if (wakeLock) {
-          wakeLock.release();
-          setJourneyWakeLock(null);
-        }
-        setErrorMessage(data.error || 'Failed to start journey');
-      }
-    } catch (error) {
-      if (wakeLock) {
-        wakeLock.release();
-        setJourneyWakeLock(null);
-      }
-      console.error('Error starting journey:', error);
-      setErrorMessage('Network error: Failed to start journey');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 🔚 END JOURNEY - GEO-TRACKING CHECK-OUT
-  const handleEndJourney = async () => {
-    if (!activeJourney) return;
-
-    setIsLoading(true);
-    setErrorMessage('');
-
-    try {
-      const checkOutData = {
-        userId,
-        trackingId: activeJourney.id,
-        latitude: currentLocation?.lat || 0,
-        longitude: currentLocation?.lng || 0,
-        notes: `Journey completed via PWA tracker. Duration: ${activeJourney.duration}, Check-ins: ${dealerCheckins.length}`
-      };
-
-      const response = await fetch('/api/geo-tracking/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(checkOutData)
-      });
-
-      const data = await response.json();
-      
-      if (data.success) {
-        // Release wake lock
-        if (journeyWakeLock) {
-          try {
-            journeyWakeLock.release();
-            setJourneyWakeLock(null);
-          } catch (wakeLockError) {
-            console.log('Wake lock release failed, continuing normally');
-          }
-        }
-
-        // Stop location tracking
-        if (locationWatchId) {
-          navigator.geolocation.clearWatch(locationWatchId);
-          setLocationWatchId(null);
-        }
-
-        // Show success message
-        const duration = activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m';
-        setSuccessMessage(`🎉 Journey Complete! Duration: ${duration}, Check-ins: ${dealerCheckins.length}`);
-
-        // Reset state
-        setActiveJourney(null);
-        setDealerCheckins([]);
-        setErrorMessage('');
-
-        // Refresh journey data
-        setTimeout(() => {
-          initializeJourneyTracker();
-          onJourneyEnd();
-        }, 2000);
-
-      } else {
-        setErrorMessage(data.error || 'Failed to end journey');
-      }
-    } catch (error) {
-      console.error('Error ending journey:', error);
-      setErrorMessage('Network error: Failed to end journey');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // 🔋 SETUP BATTERY MONITORING
-  const setupBatteryMonitoring = () => {
+  // 🛠 UTILITY FUNCTIONS
+  const getBatteryInfo = async () => {
     if ('getBattery' in navigator) {
-      (navigator as any).getBattery().then((battery: any) => {
+      const battery = await (navigator as any).getBattery();
+      return {
+        level: Math.round(battery.level * 100),
+        charging: battery.charging
+      };
+    }
+    return { level: batteryLevel, charging: isCharging };
+  };
+
+  const getIPAddress = async () => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      return data.ip;
+    } catch {
+      return null;
+    }
+  };
+
+  const resetJourneyState = () => {
+    setJourneyId(null);
+    setIsActive(false);
+    setIsPaused(false);
+    setLegs([]);
+    setTotalDistance(0);
+    setTotalDuration(0);
+    setStartTime(null);
+    setLastLocationRef(null);
+  };
+
+  const formatDistance = (meters: number) => {
+    if (meters < 1000) return `${meters.toFixed(0)}m`;
+    return `${(meters / 1000).toFixed(2)}km`;
+  };
+
+  const formatDuration = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const mins = Math.floor(minutes % 60);
+    return hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  };
+
+  // 🚀 EFFECTS
+  useEffect(() => {
+    const initializeTracker = async () => {
+      // Setup battery monitoring
+      if ('getBattery' in navigator) {
+        const battery = await (navigator as any).getBattery();
         setBatteryLevel(Math.round(battery.level * 100));
+        setIsCharging(battery.charging);
+        
         battery.addEventListener('levelchange', () => {
           setBatteryLevel(Math.round(battery.level * 100));
         });
-      });
+        battery.addEventListener('chargingchange', () => {
+          setIsCharging(battery.charging);
+        });
+      }
+
+      // Setup network monitoring
+      window.addEventListener('online', () => setNetworkStatus('online'));
+      window.addEventListener('offline', () => setNetworkStatus('offline'));
+
+      // Get initial location
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            setCurrentLocation({
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+              speed: position.coords.speed || 0,
+              heading: position.coords.heading || 0,
+              altitude: position.coords.altitude || 0,
+              timestamp: Date.now()
+            });
+          },
+          (error) => setErrorMessage('Location access denied'),
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+      }
+    };
+
+    initializeTracker();
+
+    return () => {
+      stopLocationTracking();
+      releaseSmartWakeLock();
+    };
+  }, []);
+
+  // Smart wake lock management based on conditions
+  useEffect(() => {
+    if (isActive && batteryLevel > smartWakeLockConfig.batteryThreshold) {
+      requestSmartWakeLock();
+    } else if (batteryLevel <= smartWakeLockConfig.batteryThreshold) {
+      releaseSmartWakeLock();
     }
-
-    window.addEventListener('online', () => setNetworkStatus('online'));
-    window.addEventListener('offline', () => setNetworkStatus('offline'));
-  };
-
-  // 📱 QUICK DEALER CHECK-IN
-  const handleQuickCheckIn = async () => {
-    if (!activeJourney || !currentLocation) {
-      setErrorMessage('No active journey or location unavailable');
-      return;
-    }
-
-    try {
-      // This would integrate with your dealer check-in endpoints
-      // For now, we'll add a mock check-in
-      const newCheckIn: DealerCheckIn = {
-        id: Date.now().toString(),
-        dealerName: `Dealer ${dealerCheckins.length + 1}`,
-        checkInTime: new Date().toLocaleTimeString(),
-        location: `${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`
-      };
-
-      setDealerCheckins(prev => [...prev, newCheckIn]);
-      setActiveJourney(prev => prev ? { ...prev, activeCheckins: prev.activeCheckins + 1 } : null);
-      setSuccessMessage('✅ Quick check-in recorded');
-    } catch (error) {
-      setErrorMessage('Failed to record check-in');
-    }
-  };
+  }, [isActive, batteryLevel, requestSmartWakeLock, releaseSmartWakeLock, smartWakeLockConfig.batteryThreshold]);
 
   // Loading state
-  if (isLoading && !activeJourney) {
+  if (isLoading && !isActive) {
     return (
-      <div className="h-full bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
+      <div className="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-16 h-16 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-            <Navigation className="w-8 h-8 text-white" />
+          <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
+            <Navigation className="w-10 h-10 text-white" />
           </div>
-          <p className="text-gray-600 font-medium">Loading journey tracker...</p>
+          <p className="text-white/80 font-medium text-lg">Initializing Journey Tracker...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="h-full bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 flex flex-col">
-      {/* 🎨 INSTAGRAM-STYLE HEADER */}
-      <div className="bg-white/80 backdrop-blur-md border-b border-gray-200/50 sticky top-0 z-10">
-        <div className="px-4 py-3">
+    <div className="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex flex-col">
+      {/* 🎯 PREMIUM HEADER */}
+      <div className="bg-black/30 backdrop-blur-xl border-b border-white/10 sticky top-0 z-10">
+        <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-4">
               {onBack && (
                 <Button 
                   variant="ghost" 
                   size="sm" 
                   onClick={onBack}
-                  className="p-1 hover:bg-gray-100 rounded-full"
+                  className="p-2 hover:bg-white/10 rounded-full text-white"
+                  data-testid="button-back"
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </Button>
               )}
-              <Avatar className="h-10 w-10">
-                <AvatarFallback className="bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 text-white">
-                  <Navigation className="w-5 h-5" />
+              <Avatar className="h-12 w-12 border-2 border-white/20">
+                <AvatarFallback className="bg-gradient-to-br from-blue-500 to-purple-600 text-white">
+                  <Navigation className="w-6 h-6" />
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h1 className="font-semibold text-lg">Journey Tracker</h1>
-                <div className="flex items-center space-x-2 text-sm text-gray-500">
-                  <div className={`w-2 h-2 rounded-full ${networkStatus === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
-                  <span>GPS Tracking • {batteryLevel}%</span>
+                <h1 className="font-bold text-xl text-white">Smart Journey</h1>
+                <div className="flex items-center space-x-3 text-sm text-white/60">
+                  <div className={`w-2 h-2 rounded-full ${networkStatus === 'online' ? 'bg-green-400' : 'bg-red-400'} animate-pulse`} />
+                  <span>{trackingMode.toUpperCase()} Mode</span>
+                  <Battery className={`w-4 h-4 ${batteryLevel > 20 ? 'text-green-400' : 'text-red-400'}`} />
+                  <span>{batteryLevel}%</span>
+                  {wakeLockStatus === 'active' && <Zap className="w-4 h-4 text-yellow-400" />}
                 </div>
               </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <Button variant="ghost" size="sm" className="p-2 rounded-full">
-                <Settings className="w-5 h-5" />
-              </Button>
-              <Button variant="ghost" size="sm" className="p-2 rounded-full">
-                <MoreHorizontal className="w-5 h-5" />
-              </Button>
-            </div>
+            <Button variant="ghost" size="sm" className="p-2 rounded-full text-white/60 hover:text-white hover:bg-white/10" data-testid="button-settings">
+              <Settings className="w-5 h-5" />
+            </Button>
           </div>
         </div>
       </div>
 
       {/* 🚀 MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto pb-6">
+      <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
         {/* Success/Error Messages */}
         {successMessage && (
-          <div className="mx-4 mt-4 p-3 bg-green-100 border border-green-300 rounded-xl">
-            <p className="text-green-700 text-sm text-center">{successMessage}</p>
+          <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-2xl backdrop-blur-sm" data-testid="message-success">
+            <p className="text-green-100 text-sm text-center font-medium">{successMessage}</p>
           </div>
         )}
         
         {errorMessage && (
-          <div className="mx-4 mt-4 p-3 bg-red-100 border border-red-300 rounded-xl">
-            <p className="text-red-700 text-sm text-center">{errorMessage}</p>
+          <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-2xl backdrop-blur-sm" data-testid="message-error">
+            <p className="text-red-100 text-sm text-center font-medium">{errorMessage}</p>
           </div>
         )}
 
-        {!activeJourney ? (
-          // 🌟 START JOURNEY SCREEN
-          <div className="p-6">
-            <div className="text-center mb-8">
-              <div className="w-24 h-24 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full mx-auto mb-6 flex items-center justify-center shadow-2xl">
-                <Route className="w-12 h-12 text-white" />
+        {!isActive ? (
+          /* 🌟 START JOURNEY SCREEN */
+          <>
+            {/* Hero Section */}
+            <div className="text-center">
+              <div className="w-32 h-32 bg-gradient-to-br from-blue-500 via-purple-600 to-pink-600 rounded-full mx-auto mb-8 flex items-center justify-center shadow-2xl shadow-purple-500/25">
+                <Route className="w-16 h-16 text-white" />
               </div>
-              <h2 className="text-3xl font-bold mb-2 bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                Ready to Journey?
+              <h2 className="text-4xl font-bold mb-3 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                Ready to Track?
               </h2>
-              <p className="text-gray-600 text-lg">Start tracking your field visits</p>
+              <p className="text-white/60 text-lg">Ultra-smart journey tracking with real-time optimization</p>
             </div>
 
             {/* Location Status */}
-            {currentLocation ? (
-              <Card className="mb-6 bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-lg">
-                <CardContent className="p-6">
+            <Card className="bg-white/5 backdrop-blur-xl border border-white/10 shadow-2xl">
+              <CardContent className="p-6">
+                {currentLocation ? (
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                        <MapPin className="w-6 h-6 text-green-600" />
+                    <div className="flex items-center space-x-4">
+                      <div className="w-14 h-14 bg-green-500/20 rounded-full flex items-center justify-center">
+                        <MapPin className="w-7 h-7 text-green-400" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">Location Ready</h3>
-                        <p className="text-sm text-gray-600">
+                        <h3 className="font-bold text-white text-lg">Location Locked</h3>
+                        <p className="text-white/60 text-sm">
                           {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
+                        </p>
+                        <p className="text-white/40 text-xs">
+                          Accuracy: {currentLocation.accuracy?.toFixed(0)}m
                         </p>
                       </div>
                     </div>
-                    <Badge className="bg-green-100 text-green-800 border-green-300">
+                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30 px-3 py-1">
                       <Signal className="w-3 h-3 mr-1" />
-                      {currentLocation.accuracy?.toFixed(0)}m
+                      Ready
                     </Badge>
                   </div>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card className="mb-6 bg-orange-50/60 backdrop-blur-sm border border-orange-200/50 shadow-lg">
-                <CardContent className="p-6">
+                ) : (
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                        <AlertCircle className="w-6 h-6 text-orange-600" />
+                    <div className="flex items-center space-x-4">
+                      <div className="w-14 h-14 bg-orange-500/20 rounded-full flex items-center justify-center animate-pulse">
+                        <AlertCircle className="w-7 h-7 text-orange-400" />
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">Getting Location...</h3>
-                        <p className="text-sm text-gray-600">Please enable GPS access</p>
+                        <h3 className="font-bold text-white text-lg">Acquiring Location...</h3>
+                        <p className="text-white/60 text-sm">Please enable GPS access</p>
                       </div>
                     </div>
                     <Button 
-                      onClick={getCurrentLocation}
+                      onClick={() => window.location.reload()}
                       size="sm"
-                      variant="outline"
-                      className="border-orange-300"
+                      className="bg-orange-500/20 text-orange-400 border-orange-500/30 hover:bg-orange-500/30"
+                      data-testid="button-retry-location"
                     >
                       Retry
                     </Button>
                   </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Transport Mode Selection */}
+            <Card className="bg-white/5 backdrop-blur-xl border border-white/10">
+              <CardContent className="p-6">
+                <h3 className="font-bold text-white mb-4">Transport Mode</h3>
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    { mode: 'car', icon: Car, label: 'Car' },
+                    { mode: 'bike', icon: Bike, label: 'Bike' },
+                    { mode: 'walk', icon: Walk, label: 'Walk' }
+                  ].map(({ mode, icon: Icon, label }) => (
+                    <Button
+                      key={mode}
+                      onClick={() => setTrackingMode(mode as 'car' | 'bike' | 'walk')}
+                      className={`h-16 rounded-2xl transition-all ${
+                        trackingMode === mode
+                          ? 'bg-purple-500/30 text-purple-300 border-purple-500/50'
+                          : 'bg-white/5 text-white/60 border-white/10 hover:bg-white/10'
+                      }`}
+                      data-testid={`button-mode-${mode}`}
+                    >
+                      <div className="flex flex-col items-center space-y-1">
+                        <Icon className="w-6 h-6" />
+                        <span className="text-sm font-medium">{label}</span>
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* System Health */}
+            <div className="grid grid-cols-2 gap-4">
+              <Card className="bg-white/5 backdrop-blur-xl border border-white/10">
+                <CardContent className="p-4 text-center">
+                  <Battery className={`w-8 h-8 mx-auto mb-2 ${batteryLevel > 20 ? 'text-green-400' : 'text-red-400'}`} />
+                  <p className="text-white font-bold">{batteryLevel}%</p>
+                  <p className="text-white/40 text-xs">{isCharging ? 'Charging' : 'Battery'}</p>
                 </CardContent>
               </Card>
-            )}
-
-            {/* Journey History Summary */}
-            {geoTrackingHistory.length > 0 && (
-              <Card className="mb-6 bg-white/60 backdrop-blur-sm border border-gray-200/50 shadow-lg">
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-2">Today's Activity</h3>
-                  <div className="grid grid-cols-3 gap-4 text-center">
-                    <div>
-                      <div className="text-xl font-bold text-blue-600">{geoTrackingHistory.length}</div>
-                      <div className="text-xs text-gray-600">Tracking Points</div>
-                    </div>
-                    <div>
-                      <div className="text-xl font-bold text-purple-600">
-                        {calculateTotalDistance(geoTrackingHistory).toFixed(1)}km
-                      </div>
-                      <div className="text-xs text-gray-600">Distance</div>
-                    </div>
-                    <div>
-                      <div className="text-xl font-bold text-pink-600">
-                        {geoTrackingHistory.filter(h => h.checkOutTime).length}
-                      </div>
-                      <div className="text-xs text-gray-600">Completed</div>
-                    </div>
+              <Card className="bg-white/5 backdrop-blur-xl border border-white/10">
+                <CardContent className="p-4 text-center">
+                  <div className={`w-8 h-8 mx-auto mb-2 flex items-center justify-center rounded-full ${
+                    wakeLockStatus === 'active' ? 'bg-yellow-500/20' : 'bg-gray-500/20'
+                  }`}>
+                    <Zap className={`w-5 h-5 ${wakeLockStatus === 'active' ? 'text-yellow-400' : 'text-gray-400'}`} />
                   </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* System Status */}
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
-                <CardContent className="p-4 text-center">
-                  <Battery className={`w-6 h-6 mx-auto mb-2 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
-                  <p className="text-sm font-medium">{batteryLevel}% Battery</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-white/60 backdrop-blur-sm border border-gray-200/50">
-                <CardContent className="p-4 text-center">
-                  <Wifi className={`w-6 h-6 mx-auto mb-2 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
-                  <p className="text-sm font-medium">{networkStatus === 'online' ? 'Online' : 'Offline'}</p>
+                  <p className="text-white font-bold text-sm">Wake Lock</p>
+                  <p className="text-white/40 text-xs capitalize">{wakeLockStatus}</p>
                 </CardContent>
               </Card>
             </div>
 
             {/* Start Button */}
             <Button
-              onClick={handleStartJourney}
-              disabled={!currentLocation || isLoading}
-              className="w-full h-16 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white text-lg font-semibold rounded-3xl shadow-2xl transform transition-all duration-200 hover:scale-105"
+              onClick={startJourney}
+              disabled={!currentLocation || isLoading || batteryLevel < 10}
+              className="w-full h-20 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 text-white text-xl font-bold rounded-3xl shadow-2xl shadow-purple-500/25 transform transition-all duration-300 hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+              data-testid="button-start-journey"
             >
               {isLoading ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
+                <div className="flex items-center space-x-3">
+                  <div className="w-7 h-7 border-3 border-white border-t-transparent rounded-full animate-spin" />
                   <span>Starting Journey...</span>
                 </div>
               ) : (
                 <div className="flex items-center space-x-3">
-                  <Play className="w-6 h-6" />
-                  <span>Start Journey</span>
+                  <Play className="w-7 h-7" />
+                  <span>Start Smart Journey</span>
                 </div>
               )}
             </Button>
-          </div>
+          </>
         ) : (
-          // 🎯 ACTIVE JOURNEY SCREEN
-          <div className="p-6 space-y-6">
-            {/* Journey Status Story */}
-            <Card className="bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 text-white shadow-2xl">
+          /* 🎯 ACTIVE JOURNEY SCREEN */
+          <>
+            {/* Journey Status Hero */}
+            <Card className="bg-gradient-to-r from-green-400/20 via-blue-500/20 to-purple-600/20 border border-white/20 backdrop-blur-xl shadow-2xl">
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                      <Navigation className="w-6 h-6" />
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center">
+                      <Navigation className="w-8 h-8 text-white animate-pulse" />
                     </div>
                     <div>
-                      <h3 className="text-xl font-bold">Journey Active</h3>
-                      <p className="text-white/80">Live GPS Tracking</p>
+                      <h3 className="text-2xl font-bold text-white">Journey Active</h3>
+                      <p className="text-white/60">Ultra-smart tracking enabled</p>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    {activeJourney.status === 'active' && (
-                      <div className="w-3 h-3 bg-white rounded-full animate-pulse" />
-                    )}
-                    <Badge className="bg-white/20 text-white border-white/30">
-                      {trackingMode}
+                  <div className="flex items-center space-x-3">
+                    {!isPaused && <div className="w-4 h-4 bg-green-400 rounded-full animate-pulse" />}
+                    <Badge className="bg-white/10 text-white border-white/20 px-3 py-1">
+                      {isPaused ? 'Paused' : 'Active'}
                     </Badge>
                   </div>
                 </div>
 
-                {/* Live Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                {/* Live Stats Grid */}
+                <div className="grid grid-cols-3 gap-6">
                   <div className="text-center">
-                    <div className="text-2xl font-bold">
-                      ⏱️ {activeJourney.startTime ? calculateDuration(activeJourney.startTime) : '0m'}
+                    <div className="text-3xl font-bold text-white mb-1">
+                      {startTime ? formatDuration((Date.now() - startTime.getTime()) / 60000) : '0m'}
                     </div>
-                    <div className="text-white/80 text-sm">Duration</div>
+                    <div className="text-white/60 text-sm flex items-center justify-center">
+                      <Timer className="w-4 h-4 mr-1" />
+                      Duration
+                    </div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">📍 {activeJourney.totalDistance}</div>
-                    <div className="text-white/80 text-sm">Distance</div>
+                    <div className="text-3xl font-bold text-white mb-1">
+                      {formatDistance(totalDistance)}
+                    </div>
+                    <div className="text-white/60 text-sm flex items-center justify-center">
+                      <Route className="w-4 h-4 mr-1" />
+                      Distance
+                    </div>
                   </div>
                   <div className="text-center">
-                    <div className="text-2xl font-bold">🏪 {dealerCheckins.length}</div>
-                    <div className="text-white/80 text-sm">Check-ins</div>
+                    <div className="text-3xl font-bold text-white mb-1">{legs.length}</div>
+                    <div className="text-white/60 text-sm flex items-center justify-center">
+                      <Target className="w-4 h-4 mr-1" />
+                      Segments
+                    </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
 
-            {/* Current Location */}
+            {/* Current Location & Speed */}
             {currentLocation && (
-              <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
+              <Card className="bg-white/5 backdrop-blur-xl border border-white/10">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      <MapPin className="w-5 h-5 text-blue-600" />
+                      <MapPin className="w-6 h-6 text-blue-400" />
                       <div>
-                        <p className="font-medium">Current Location</p>
-                        <p className="text-sm text-gray-600">
-                          {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+                        <p className="font-bold text-white">Live Position</p>
+                        <p className="text-white/60 text-sm">
+                          {currentLocation.lat.toFixed(6)}, {currentLocation.lng.toFixed(6)}
                         </p>
                         {currentLocation.speed && currentLocation.speed > 0 && (
-                          <p className="text-xs text-gray-500">
+                          <p className="text-white/40 text-xs">
                             Speed: {(currentLocation.speed * 3.6).toFixed(1)} km/h
                           </p>
                         )}
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-medium">{currentLocation.accuracy?.toFixed(0)}m</p>
-                      <p className="text-xs text-gray-500">accuracy</p>
+                      <Badge className="bg-blue-500/20 text-blue-400 border-blue-500/30">
+                        {currentLocation.accuracy?.toFixed(0)}m
+                      </Badge>
                     </div>
                   </div>
                 </CardContent>
               </Card>
             )}
 
-            {/* Quick Actions */}
+            {/* Journey Controls */}
             <div className="grid grid-cols-2 gap-4">
               <Button
-                onClick={() => {
-                  // Handle pause/resume logic here
-                  setActiveJourney(prev => prev ? {
-                    ...prev,
-                    status: prev.status === 'active' ? 'paused' : 'active'
-                  } : null);
-                }}
-                className="h-16 bg-orange-500 hover:bg-orange-600 text-white rounded-2xl shadow-lg"
+                onClick={() => setIsPaused(!isPaused)}
+                className="h-20 bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/30 rounded-2xl shadow-lg"
+                data-testid="button-pause-resume"
               >
-                <div className="flex flex-col items-center space-y-1">
-                  {activeJourney.status === 'active' ? <Pause className="w-6 h-6" /> : <Play className="w-6 h-6" />}
-                  <span className="text-sm">{activeJourney.status === 'active' ? 'Pause' : 'Resume'}</span>
+                <div className="flex flex-col items-center space-y-2">
+                  {isPaused ? <Play className="w-8 h-8" /> : <Pause className="w-8 h-8" />}
+                  <span className="font-bold">{isPaused ? 'Resume' : 'Pause'}</span>
                 </div>
               </Button>
 
               <Button
-                onClick={handleQuickCheckIn}
-                className="h-16 bg-purple-500 hover:bg-purple-600 text-white rounded-2xl shadow-lg"
+                onClick={finishJourney}
+                disabled={isLoading}
+                className="h-20 bg-gradient-to-r from-red-500/20 to-red-600/20 hover:from-red-500/30 hover:to-red-600/30 text-red-300 border border-red-500/30 rounded-2xl shadow-lg"
+                data-testid="button-finish-journey"
               >
-                <div className="flex flex-col items-center space-y-1">
-                  <Store className="w-6 h-6" />
-                  <span className="text-sm">Check-in</span>
+                <div className="flex flex-col items-center space-y-2">
+                  <Square className="w-8 h-8" />
+                  <span className="font-bold">Finish</span>
                 </div>
               </Button>
             </div>
 
-            {/* Recent Check-ins */}
-            {dealerCheckins.length > 0 && (
-              <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
-                <CardContent className="p-4">
-                  <h3 className="font-semibold mb-3">Recent Check-ins</h3>
-                  <div className="space-y-2">
-                    {dealerCheckins.slice(-3).map((checkin) => (
-                      <div key={checkin.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg">
-                        <div className="flex items-center space-x-2">
-                          <CheckCircle className="w-4 h-4 text-green-600" />
-                          <span className="text-sm font-medium">{checkin.dealerName}</span>
-                        </div>
-                        <span className="text-xs text-gray-500">{checkin.checkInTime}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* System Status */}
-            <Card className="bg-white/80 backdrop-blur-sm border border-gray-200/50">
+            {/* Real-time System Status */}
+            <Card className="bg-white/5 backdrop-blur-xl border border-white/10">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
+                  <div className="flex items-center space-x-6">
                     <div className="flex items-center space-x-2">
-                      <Battery className={`w-4 h-4 ${batteryLevel > 20 ? 'text-green-600' : 'text-red-600'}`} />
-                      <span className="text-sm">{batteryLevel}%</span>
+                      <Battery className={`w-5 h-5 ${batteryLevel > 20 ? 'text-green-400' : 'text-red-400'}`} />
+                      <span className="text-white font-medium">{batteryLevel}%</span>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Wifi className={`w-4 h-4 ${networkStatus === 'online' ? 'text-green-600' : 'text-red-600'}`} />
-                      <span className="text-sm">{networkStatus}</span>
+                      <Wifi className={`w-5 h-5 ${networkStatus === 'online' ? 'text-green-400' : 'text-red-400'}`} />
+                      <span className="text-white font-medium">{networkStatus}</span>
                     </div>
                     <div className="flex items-center space-x-2">
-                      <Activity className="w-4 h-4 text-blue-600" />
-                      <span className="text-sm">{activeJourney.trackingPoints} points</span>
+                      <Activity className="w-5 h-5 text-blue-400" />
+                      <span className="text-white font-medium">{legs.length} legs</span>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="text-xs text-gray-500">
-                      Updated {Math.round((new Date().getTime() - lastUpdate.getTime()) / 1000)}s ago
+                    <p className="text-white/40 text-xs">
+                      Mode: {trackingMode.toUpperCase()}
                     </p>
                   </div>
                 </div>
               </CardContent>
             </Card>
-
-            {/* End Journey */}
-            <Button
-              onClick={handleEndJourney}
-              disabled={isLoading}
-              className="w-full h-16 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white text-lg font-semibold rounded-3xl shadow-2xl transform transition-all duration-200 hover:scale-105"
-            >
-              {isLoading ? (
-                <div className="flex items-center space-x-2">
-                  <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
-                  <span>Ending Journey...</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-3">
-                  <Square className="w-6 h-6" />
-                  <span>🏁 End Journey</span>
-                </div>
-              )}
-            </Button>
-          </div>
+          </>
         )}
       </div>
     </div>
