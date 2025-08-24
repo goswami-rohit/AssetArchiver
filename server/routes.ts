@@ -197,7 +197,7 @@ function createAutoCRUD(app: Express, config: {
           if (table.radarGeofenceId || table.radarTag || table.radarExternalId) {
             const patch: any = {};
             if (table.radarGeofenceId) patch.radarGeofenceId = upJson.geofence._id;
-            if (table.radarTag)        patch.radarTag        = upJson.geofence.tag;
+            if (table.radarTag) patch.radarTag = upJson.geofence.tag;
             if (table.radarExternalId) patch.radarExternalId = upJson.geofence.externalId;
             if (Object.keys(patch).length) {
               await db.update(table).set(patch).where(eq(table.id, dealer.id));
@@ -805,6 +805,16 @@ export function setupWebRoutes(app: Express) {
       checkInTime: () => new Date()
     }
   });
+   // AutoCRUD registration
+  createAutoCRUD(app, {
+    endpoint: 'dealer-reports-scores',
+    table: dealerReportsAndScores,
+    schema: insertDealerReportsAndScoresSchema,
+    tableName: 'Dealer Reports & Scores',
+    autoFields: {
+      lastUpdatedDate: () => new Date()
+    }
+  });
 
   // 3. Permanent Journey Plans - date field, auto planDate and status
   createAutoCRUD(app, {
@@ -1111,58 +1121,96 @@ export function setupWebRoutes(app: Express) {
   app.get('/api/dashboard/stats/:userId', async (req: Request, res: Response) => {
     try {
       const userId = Number(req.params.userId);
+      console.log("[DEBUG] Incoming userId param:", req.params.userId, "→ parsed:", userId);
+
       if (!Number.isFinite(userId)) {
+        console.warn("[DEBUG] Invalid userId detected:", req.params.userId);
         return res.status(400).json({ success: false, error: 'Invalid userId - must be a number' });
       }
 
-      // Use server-side dates, not JS strings
-      const monthStart = sql`date_trunc('month', current_date)::date`;
-      const nextMonthStart = sql`(date_trunc('month', current_date) + interval '1 month')::date`;
-      const today = sql`current_date`;
+      const monthStartTs = sql`date_trunc('month', now())`;
+      const nextMonthStartTs = sql`date_trunc('month', now()) + interval '1 month'`;
+      const todayDate = sql`current_date`;
 
-      const [
-        todayAttendance,
-        monthlyReports,
-        pendingTasks,
-        totalDealers,
-        pendingLeaves
-      ] = await Promise.all([
-        // attendanceDate = today (DATE vs DATE)
-        db.select().from(salesmanAttendance)
+      console.log("[DEBUG] Query boundaries:",
+        {
+          monthStartTs: "date_trunc('month', now())",
+          nextMonthStartTs: "date_trunc('month', now()) + interval '1 month'",
+          todayDate: "current_date"
+        }
+      );
+
+      // wrap each query in try/catch to isolate
+      let todayAttendance, monthlyReports, pendingTasks, totalDealers, pendingLeaves;
+
+      try {
+        console.log("[DEBUG] Running attendance query for user:", userId);
+        todayAttendance = await db.select().from(salesmanAttendance)
           .where(and(
             eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, today)
+            eq(salesmanAttendance.attendanceDate, todayDate)
           ))
           .orderBy(desc(salesmanAttendance.inTimeTimestamp))
-          .limit(1),
+          .limit(1);
+        console.log("[DEBUG] Attendance result:", todayAttendance);
+      } catch (err) {
+        console.error("[ERROR] Attendance query failed:", err);
+        throw err;
+      }
 
-        // reportDate in [monthStart, nextMonthStart)
-        db.select({ count: sql<number>`cast(count(*) as int)` })
+      try {
+        console.log("[DEBUG] Running monthly reports query");
+        monthlyReports = await db.select({ count: sql<number>`cast(count(*) as int)`.as('count') })
           .from(dailyVisitReports)
           .where(and(
             eq(dailyVisitReports.userId, userId),
-            gte(dailyVisitReports.reportDate, monthStart),
-            lt(dailyVisitReports.reportDate, nextMonthStart)
-          )),
+            gte(dailyVisitReports.reportDate, monthStartTs),
+            lt(dailyVisitReports.reportDate, nextMonthStartTs)
+          ));
+        console.log("[DEBUG] Monthly reports result:", monthlyReports);
+      } catch (err) {
+        console.error("[ERROR] Monthly reports query failed:", err);
+        throw err;
+      }
 
-        db.select({ count: sql<number>`cast(count(*) as int)` })
+      try {
+        console.log("[DEBUG] Running pending tasks query");
+        pendingTasks = await db.select({ count: sql<number>`cast(count(*) as int)`.as('count') })
           .from(dailyTasks)
           .where(and(
             eq(dailyTasks.userId, userId),
             eq(dailyTasks.status, 'Assigned')
-          )),
+          ));
+        console.log("[DEBUG] Pending tasks result:", pendingTasks);
+      } catch (err) {
+        console.error("[ERROR] Pending tasks query failed:", err);
+        throw err;
+      }
 
-        db.select({ count: sql<number>`cast(count(*) as int)` })
+      try {
+        console.log("[DEBUG] Running dealers query");
+        totalDealers = await db.select({ count: sql<number>`cast(count(*) as int)`.as('count') })
           .from(dealers)
-          .where(eq(dealers.userId, userId)),
+          .where(eq(dealers.userId, userId));
+        console.log("[DEBUG] Dealers result:", totalDealers);
+      } catch (err) {
+        console.error("[ERROR] Dealers query failed:", err);
+        throw err;
+      }
 
-        db.select({ count: sql<number>`cast(count(*) as int)` })
+      try {
+        console.log("[DEBUG] Running pending leaves query");
+        pendingLeaves = await db.select({ count: sql<number>`cast(count(*) as int)`.as('count') })
           .from(salesmanLeaveApplications)
           .where(and(
             eq(salesmanLeaveApplications.userId, userId),
             eq(salesmanLeaveApplications.status, 'Pending')
-          ))
-      ]);
+          ));
+        console.log("[DEBUG] Pending leaves result:", pendingLeaves);
+      } catch (err) {
+        console.error("[ERROR] Pending leaves query failed:", err);
+        throw err;
+      }
 
       res.json({
         success: true,
@@ -1181,8 +1229,9 @@ export function setupWebRoutes(app: Express) {
         }
       });
     } catch (error) {
-      console.error('Dashboard stats error:', error);
+      console.error('Dashboard stats master error:', error);
       res.status(500).json({ success: false, error: 'Failed to fetch dashboard stats' });
     }
   });
+
 }
