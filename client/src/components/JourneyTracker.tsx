@@ -7,8 +7,10 @@ import {
   Square, MapPin, Clock, Navigation, Pause, Play, ArrowLeft,
   CheckCircle, AlertCircle, Battery, Wifi, MoreHorizontal,
   Route, TrendingUp, Zap, Signal, Activity, Settings,
-  Car, Bike, Walk, Timer, Target
+  Car, Bike, Timer, Target,
+  User as Walk
 } from 'lucide-react';
+
 
 interface JourneyTrackerProps {
   userId: number;
