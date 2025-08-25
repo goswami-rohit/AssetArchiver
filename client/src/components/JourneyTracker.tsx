@@ -12,7 +12,9 @@ import {
   X, 
   MapPin,
   Clock,
-  Trophy
+  Trophy,
+  Calculator,
+  RefreshCw
 } from 'lucide-react';
 
 interface JourneyTrackerProps {
@@ -136,7 +138,9 @@ export default function SimpleJourneyTracker({ userId }: JourneyTrackerProps) {
     }
   };
 
-  // CRUD functions
+  // CRUD functions for /api/geo/list
+  
+  // READ - Get journey list
   const fetchJourneys = async () => {
     try {
       const response = await fetch(`/api/geo/list?userId=${userId}`);
@@ -149,23 +153,35 @@ export default function SimpleJourneyTracker({ userId }: JourneyTrackerProps) {
     }
   };
 
-  const deleteJourney = async (journeyId: string) => {
+  // CREATE - Calculate and update journey distance
+  const calculateJourneyDistance = async (journeyId: string) => {
+    setIsLoading(true);
     try {
       const response = await fetch('/api/geo/list', {
-        method: 'DELETE',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ journeyId })
+        body: JSON.stringify({
+          userId,
+          journeyId,
+          limit: 500
+        })
       });
       
-      if (response.ok) {
-        setSuccess('Journey deleted');
-        fetchJourneys();
+      const data = await response.json();
+      if (data.success) {
+        setSuccess(`Distance calculated: ${data.data.totalKm}km from ${data.data.tripsCount} trips`);
+        fetchJourneys(); // Refresh to show updated distance
+      } else {
+        setError(data.error || 'Failed to calculate distance');
       }
     } catch (err) {
-      setError('Failed to delete journey');
+      setError('Failed to calculate journey distance');
+    } finally {
+      setIsLoading(false);
     }
   };
 
+  // UPDATE - Edit journey fields
   const updateJourney = async (journeyId: string, newDistance: number) => {
     try {
       const response = await fetch('/api/geo/list', {
@@ -181,9 +197,31 @@ export default function SimpleJourneyTracker({ userId }: JourneyTrackerProps) {
         setSuccess('Journey updated');
         setEditingJourney(null);
         fetchJourneys();
+      } else {
+        setError('Failed to update journey');
       }
     } catch (err) {
       setError('Failed to update journey');
+    }
+  };
+
+  // DELETE - Remove journey
+  const deleteJourney = async (journeyId: string) => {
+    try {
+      const response = await fetch('/api/geo/list', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ journeyId })
+      });
+      
+      if (response.ok) {
+        setSuccess('Journey deleted');
+        fetchJourneys();
+      } else {
+        setError('Failed to delete journey');
+      }
+    } catch (err) {
+      setError('Failed to delete journey');
     }
   };
 
@@ -312,13 +350,25 @@ export default function SimpleJourneyTracker({ userId }: JourneyTrackerProps) {
         </Card>
       )}
 
-      {/* Journey List */}
+      {/* Journey List with Full CRUD */}
       <Card className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
         <CardContent className="p-6">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-4 flex items-center">
-            <Clock className="w-5 h-5 mr-2" />
-            Completed Journeys ({journeys.length})
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center">
+              <Clock className="w-5 h-5 mr-2" />
+              Completed Journeys ({journeys.length})
+            </h2>
+            <Button
+              onClick={fetchJourneys}
+              size="sm"
+              variant="outline"
+              className="flex items-center space-x-1"
+              data-testid="button-refresh-journeys"
+            >
+              <RefreshCw className="w-4 h-4" />
+              <span>Refresh</span>
+            </Button>
+          </div>
           
           {journeys.length === 0 ? (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -383,6 +433,16 @@ export default function SimpleJourneyTracker({ userId }: JourneyTrackerProps) {
                   <div className="flex items-center space-x-2">
                     {editingJourney !== journey.externalId && (
                       <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => calculateJourneyDistance(journey.externalId!)}
+                          className="bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:hover:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                          data-testid={`button-calculate-${index}`}
+                          title="Calculate distance from Radar trips"
+                        >
+                          <Calculator className="w-4 h-4" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="outline"
