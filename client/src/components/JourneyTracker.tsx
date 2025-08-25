@@ -3,13 +3,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { 
-  Play, 
-  Square, 
-  Trash2, 
-  Edit3, 
-  Check, 
-  X, 
+import {
+  Play,
+  Square,
+  Trash2,
+  Edit3,
+  Check,
+  X,
   ArrowLeft,
   Calculator,
   MapPin,
@@ -80,7 +80,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
     if (isActive) {
       // End journey
       if (!currentJourneyId) return;
-      
+
       setIsLoading(true);
       try {
         const response = await fetch('/api/geo/finish', {
@@ -91,19 +91,25 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
             journeyId: currentJourneyId
           })
         });
-        
+
         const data = await response.json();
         if (data.success) {
           setIsActive(false);
           setCurrentJourneyId(null);
           setSuccess('Journey completed! 🎉');
           await releaseWakeLock();
-          
+
+          // Stop location updates
+          if ((window as any)._journeyInterval) {
+            clearInterval((window as any)._journeyInterval);
+            (window as any)._journeyInterval = null;
+          }
+
           // Auto-calculate distance after completion
           setTimeout(() => {
             calculateJourneyDistance(data.data.journeyId);
           }, 1000);
-          
+
           fetchJourneys();
         } else {
           setError(data.error || 'Failed to end journey');
@@ -117,7 +123,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
       // Start journey
       setIsLoading(true);
       setError('');
-      
+
       navigator.geolocation.getCurrentPosition(
         async (position) => {
           try {
@@ -131,13 +137,38 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
                 mode: 'car'
               })
             });
-            
+
             const data = await response.json();
             if (data.success) {
               setCurrentJourneyId(data.data.journeyId);
               setIsActive(true);
               setSuccess('Journey started! 🚀');
               await requestWakeLock();
+
+              // Kick off location updates every 30s
+              (window as any)._journeyInterval = setInterval(() => {
+                navigator.geolocation.getCurrentPosition(
+                  async (pos) => {
+                    try {
+                      await fetch('/api/geo/start', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          userId,
+                          journeyId: data.data.journeyId,
+                          lat: pos.coords.latitude,
+                          lng: pos.coords.longitude,
+                          mode: 'car'
+                        })
+                      });
+                    } catch (err) {
+                      console.error('Failed to send periodic coords', err);
+                    }
+                  },
+                  (err) => console.warn('Geolocation error', err),
+                  { enableHighAccuracy: true, timeout: 10000 }
+                );
+              }, 30_000);
             } else {
               setError(data.error || 'Failed to start journey');
             }
@@ -156,6 +187,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
     }
   };
 
+
   // CRUD functions
   const fetchJourneys = async () => {
     try {
@@ -165,9 +197,9 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
         const newJourneys = data.data.breakdown || [];
         const oldCount = journeys.length;
         const newCount = newJourneys.length;
-        
+
         setJourneys(newJourneys);
-        
+
         // Show achievement if milestone reached
         if (newCount > oldCount && [5, 10, 15, 25, 50].includes(newCount)) {
           setShowAchievement(true);
@@ -190,7 +222,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
           limit: 500
         })
       });
-      
+
       const data = await response.json();
       if (data.success) {
         setSuccess(`Distance calculated: ${data.data.totalKm}km`);
@@ -213,7 +245,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
           totalDistanceTravelled: newDistance
         })
       });
-      
+
       if (response.ok) {
         setSuccess('Journey updated');
         setEditingJourney(null);
@@ -234,7 +266,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ journeyId })
       });
-      
+
       if (response.ok) {
         setSuccess('Journey deleted');
         fetchJourneys();
@@ -246,10 +278,10 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
     }
   };
 
-  const formatDistance = (meters: number) => {
-    const km = meters / 1000;
-    return km < 1 ? `${meters.toFixed(0)}m` : `${km.toFixed(2)}km`;
+  const formatDistance = (km: number) => {
+    return km < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(2)}km`;
   };
+
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'Unknown';
@@ -316,7 +348,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
               <p className="text-green-800 dark:text-green-200 text-sm font-medium">{success}</p>
             </div>
           )}
-          
+
           {error && (
             <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3" data-testid="message-error">
               <p className="text-red-800 dark:text-red-200 text-sm font-medium">{error}</p>
@@ -329,11 +361,10 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
               <div className="text-center space-y-6">
                 {/* Status Indicator */}
                 <div className="relative">
-                  <div className={`w-24 h-24 mx-auto rounded-full flex items-center justify-center transition-all duration-300 ${
-                    isActive 
-                      ? 'bg-green-100 dark:bg-green-900/30 ring-4 ring-green-500/20' 
-                      : 'bg-blue-100 dark:bg-blue-900/30'
-                  }`}>
+                  <div className={`w-24 h-24 mx-auto rounded-full flex items-center justify-center transition-all duration-300 ${isActive
+                    ? 'bg-green-100 dark:bg-green-900/30 ring-4 ring-green-500/20'
+                    : 'bg-blue-100 dark:bg-blue-900/30'
+                    }`}>
                     {isActive ? (
                       <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse" />
                     ) : (
@@ -361,11 +392,10 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
                 <Button
                   onClick={toggleJourney}
                   disabled={isLoading}
-                  className={`w-full h-14 text-lg font-semibold rounded-xl transition-all duration-300 ${
-                    isActive
-                      ? 'bg-red-600 hover:bg-red-700 text-white'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                  }`}
+                  className={`w-full h-14 text-lg font-semibold rounded-xl transition-all duration-300 ${isActive
+                    ? 'bg-red-600 hover:bg-red-700 text-white'
+                    : 'bg-blue-600 hover:bg-blue-700 text-white'
+                    }`}
                   data-testid={isActive ? "button-end-journey" : "button-start-journey"}
                 >
                   {isLoading ? (
@@ -401,11 +431,11 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
                   <h3 className="font-medium text-gray-900 dark:text-white">{journeys.length} Journeys Completed</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400">
                     {journeys.length >= 50 ? 'You\'re a legend!' :
-                     journeys.length >= 25 ? `${50 - journeys.length} more to become a legend` :
-                     journeys.length >= 15 ? `${25 - journeys.length} more to become an expert` :
-                     journeys.length >= 10 ? `${15 - journeys.length} more to become a pro` :
-                     journeys.length >= 5 ? `${10 - journeys.length} more to become a hero` :
-                     `${5 - journeys.length} more to become a rising star`}
+                      journeys.length >= 25 ? `${50 - journeys.length} more to become a legend` :
+                        journeys.length >= 15 ? `${25 - journeys.length} more to become an expert` :
+                          journeys.length >= 10 ? `${15 - journeys.length} more to become a pro` :
+                            journeys.length >= 5 ? `${10 - journeys.length} more to become a hero` :
+                              `${5 - journeys.length} more to become a rising star`}
                   </p>
                 </div>
                 <AchievementIcon className={`w-8 h-8 text-white p-1.5 ${achievement.color} rounded-full`} />
@@ -443,8 +473,8 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
             ) : (
               <div className="space-y-2">
                 {journeys.map((journey, index) => (
-                  <Card 
-                    key={journey.externalId || index} 
+                  <Card
+                    key={journey.externalId || index}
                     className="bg-white dark:bg-gray-800 border-0 shadow-sm"
                     data-testid={`journey-item-${index}`}
                   >
@@ -496,7 +526,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
                               </p>
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center space-x-1">
                             <Button
                               size="sm"
