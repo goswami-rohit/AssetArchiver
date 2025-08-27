@@ -1,90 +1,108 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { create } from 'zustand';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
+import React, { useEffect, useMemo, useCallback, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { create } from "zustand";
 import {
-  Home, MessageCircle, MapPin, User, Plus, CheckCircle, Calendar,
-  Building2, Target, Send, Mic, Search, Filter, MoreHorizontal,
-  Clock, Zap, FileText, TrendingUp, LogIn, LogOut, Navigation,
-  Settings, Bell, Edit, Trash2, ChevronRight, ArrowLeft,
-  RotateCcw, Download, Upload, Eye, Briefcase, Users,
-  Activity, BarChart3, PieChart, Smartphone, Laptop,
-  Wifi, WifiOff, RefreshCw, X, Check, AlertCircle, Award,
-  Calendar as CalendarIcon, DollarSign, TrendingDown, Star,
-  Map, Locate, Globe, TrendingDown as Score
-} from 'lucide-react';
+  Button,
+} from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
 
-// Import your custom components
-import ChatInterface from '@/components/ChatInterface';
-import JourneyTracker from '@/components/JourneyTracker';
+import {
+  Home,
+  MessageCircle,
+  MapPin,
+  User,
+  Plus,
+  CheckCircle,
+  Calendar,
+  Building2,
+  FileText,
+  BarChart3,
+  LogIn,
+  LogOut,
+  Bell,
+  Edit,
+  Trash2,
+  Eye,
+  Navigation,
+  Locate,
+  RefreshCw,
+  X,
+  Award,
+  Target,
+  Star,
+} from "lucide-react";
 
-// ============= STATE MANAGEMENT =============
-interface User {
-  id: number;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role: string;
-  company: { companyName: string };
+// External widgets
+import ChatInterface from "@/components/ChatInterface";
+import JourneyTracker from "@/components/JourneyTracker";
+
+// --------------------
+// Store
+// --------------------
+interface Company { companyName?: string }
+interface UserShape {
+  id: number
+  firstName?: string
+  lastName?: string
+  email?: string
+  role?: string
+  company?: Company
+  companyId?: number | null
 }
 
 interface AppState {
-  user: User | null;
-  currentPage: string;
-  attendanceStatus: 'in' | 'out';
-  isLoading: boolean;
-  isOnline: boolean;
-  lastSync: Date | null;
+  user: UserShape | null
+  currentPage: "home" | "ai" | "journey" | "profile"
+  attendanceStatus: "in" | "out"
+  isLoading: boolean
+  isOnline: boolean
+  lastSync: Date | null
 
-  // Data
-  dailyTasks: any[];
-  pjps: any[];
-  dealers: any[];
-  reports: any[];
-  attendance: any[];
-  leaveApplications: any[];
-  clientReports: any[];
-  competitionReports: any[];
-  dashboardStats: any;
-  userTargets: any[];
-  dealerScores: any[];
+  dailyTasks: any[]
+  pjps: any[]
+  dealers: any[]
+  reports: any[]
+  userTargets: any[]
+  dealerScores: any[]
 
-  // UI State
-  showCreateModal: boolean;
-  createType: 'task' | 'pjp' | 'dealer' | 'dvr' | 'tvr' | 'leave' | 'client-report' | 'competition-report' | 'dealer-score';
-  selectedItem: any;
-  showDetailModal: boolean;
-  searchQuery: string;
-  filterType: string;
+  showCreateModal: boolean
+  createType: "task" | "pjp" | "dealer" | "dvr" | "tvr" | "dealer-score"
+  selectedItem: any
+  showDetailModal: boolean
 
-  // Actions
-  setUser: (user: User | null) => void;
-  setCurrentPage: (page: string) => void;
-  setAttendanceStatus: (status: 'in' | 'out') => void;
-  setLoading: (loading: boolean) => void;
-  setOnlineStatus: (online: boolean) => void;
-  updateLastSync: () => void;
-  setData: (key: string, data: any) => void;
-  setUIState: (key: string, value: any) => void;
-  resetModals: () => void;
+  setUser: (u: UserShape | null) => void
+  setCurrentPage: (p: AppState["currentPage"]) => void
+  setAttendanceStatus: (s: AppState["attendanceStatus"]) => void
+  setLoading: (b: boolean) => void
+  setOnlineStatus: (b: boolean) => void
+  updateLastSync: () => void
+  setData: (k: keyof Pick<AppState,
+    | "dailyTasks" | "pjps" | "dealers" | "reports" | "userTargets" | "dealerScores"
+  >, data: any) => void
+  setUIState: (k: keyof Pick<AppState,
+    | "showCreateModal" | "createType" | "selectedItem" | "showDetailModal"
+  >, v: any) => void
+  resetModals: () => void
 }
 
-const useAppStore = create<AppState>((set, get) => ({
+export const useAppStore = create<AppState>((set) => ({
   user: null,
-  currentPage: 'home',
-  attendanceStatus: 'out',
+  currentPage: "home",
+  attendanceStatus: "out",
   isLoading: false,
   isOnline: true,
   lastSync: null,
@@ -93,622 +111,221 @@ const useAppStore = create<AppState>((set, get) => ({
   pjps: [],
   dealers: [],
   reports: [],
-  attendance: [],
-  leaveApplications: [],
-  clientReports: [],
-  competitionReports: [],
-  dashboardStats: {},
   userTargets: [],
   dealerScores: [],
 
   showCreateModal: false,
-  createType: 'task',
+  createType: "task",
   selectedItem: null,
   showDetailModal: false,
-  searchQuery: '',
-  filterType: 'all',
 
   setUser: (user) => set({ user }),
-  setCurrentPage: (page) => set({ currentPage: page }),
-  setAttendanceStatus: (status) => set({ attendanceStatus: status }),
-  setLoading: (loading) => set({ isLoading: loading }),
-  setOnlineStatus: (online) => set({ isOnline: online }),
+  setCurrentPage: (currentPage) => set({ currentPage }),
+  setAttendanceStatus: (attendanceStatus) => set({ attendanceStatus }),
+  setLoading: (isLoading) => set({ isLoading }),
+  setOnlineStatus: (isOnline) => set({ isOnline }),
   updateLastSync: () => set({ lastSync: new Date() }),
-  setData: (key, data) => set({ [key]: data }),
-  setUIState: (key, value) => set({ [key]: value }),
-  resetModals: () => set({
-    showCreateModal: false,
-    showDetailModal: false,
-    selectedItem: null
-  })
-}));
+  setData: (key, data) => set({ [key]: data } as any),
+  setUIState: (key, value) => set({ [key]: value } as any),
+  resetModals: () => set({ showCreateModal: false, showDetailModal: false, selectedItem: null }),
+}))
 
-// ============= API HOOKS =============
+// --------------------
+// API Hook
+// --------------------
 const useAPI = () => {
-  const { user, setLoading, setData, updateLastSync } = useAppStore();
+  const { user, setLoading, setData, updateLastSync } = useAppStore.getState()
 
   const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
     try {
-      const response = await fetch(endpoint, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
+      const res = await fetch(endpoint, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        signal: controller.signal,
         ...options,
-      });
-
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      updateLastSync();
-      return data;
-    } catch (error) {
-      console.error('API call failed:', error);
-      throw error;
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      updateLastSync()
+      return data
+    } finally {
+      clearTimeout(timeout)
     }
-  }, [updateLastSync]);
+  }, [updateLastSync])
 
   const fetchDashboardStats = useCallback(async () => {
-    if (!user) return;
+    if (!user) return
     try {
-      const data = await apiCall(`/api/dashboard/stats/${user.id}`);
-      setData('dashboardStats', data.data);
-    } catch (error) {
-      console.error('Failed to fetch dashboard stats:', error);
-    }
-  }, [user, apiCall, setData]);
-
-  const fetchUserTargets = useCallback(async () => {
-    if (!user) return;
-    try {
-      // Fetch real data from PJPs completed, etc.
-      const [pjpData, reportData] = await Promise.allSettled([
-        apiCall(`/api/pjp/user/${user.id}/completed`),
-        apiCall(`/api/dvr/user/${user.id}?completed=true`)
-      ]);
-
-      const completedPJPs = pjpData.status === 'fulfilled' ? pjpData.value.data?.length || 0 : 0;
-      const completedReports = reportData.status === 'fulfilled' ? reportData.value.data?.length || 0 : 0;
-
-      // Calculate real targets based on actual data
-      const realTargets = [
-        { label: 'PJPs Completed', current: completedPJPs, target: 25, icon: Navigation, color: 'text-purple-400' },
-        { label: 'Reports Submitted', current: completedReports, target: 30, icon: FileText, color: 'text-blue-400' },
-        { label: 'Dealers Visited', current: Math.floor(completedReports * 0.8), target: 20, icon: Building2, color: 'text-orange-400' }
-      ];
-
-      setData('userTargets', realTargets);
-    } catch (error) {
-      console.error('Failed to fetch user targets:', error);
-    }
-  }, [user, apiCall, setData]);
+      const data = await apiCall(`/api/dashboard/stats/${user.id}`)
+      setData("userTargets" as any, data?.data?.targets || [])
+    } catch {}
+  }, [user, apiCall, setData])
 
   const fetchAllData = useCallback(async () => {
-    if (!user) return;
-
-    setLoading(true);
+    if (!user) return
+    setLoading(true)
     try {
-      const [
-        tasksRes,
-        pjpsRes,
-        dealersRes,
-        dvrRes,
-        tvrRes,
-        attendanceRes,
-        leaveRes,
-        clientRes,
-        competitionRes,
-        dealerScoresRes
-      ] = await Promise.allSettled([
+      const [tasks, pjps, dealers, dvr] = await Promise.all([
         apiCall(`/api/daily-tasks/user/${user.id}`),
         apiCall(`/api/pjp/user/${user.id}`),
-        apiCall(`/api/dealers/user/${user.id}`), // This will fetch real dealers from API
+        apiCall(`/api/dealers/user/${user.id}`),
         apiCall(`/api/dvr/user/${user.id}?limit=20`),
-        apiCall(`/api/tvr/user/${user.id}`),
-        apiCall(`/api/attendance/user/${user.id}`),
-        apiCall(`/api/leave-applications/user/${user.id}`),
-        apiCall(`/api/client-reports/user/${user.id}`),
-        apiCall(`/api/competition-reports/user/${user.id}`),
-        apiCall(`/api/dealer-reports-scores/user/${user.id}`)
-      ]);
-
-      if (tasksRes.status === 'fulfilled') setData('dailyTasks', tasksRes.value.data || []);
-      if (pjpsRes.status === 'fulfilled') setData('pjps', pjpsRes.value.data || []);
-      if (dealersRes.status === 'fulfilled') setData('dealers', dealersRes.value.data || []);
-      if (dvrRes.status === 'fulfilled') setData('reports', dvrRes.value.data || []);
-      if (attendanceRes.status === 'fulfilled') setData('attendance', attendanceRes.value.data || []);
-      if (leaveRes.status === 'fulfilled') setData('leaveApplications', leaveRes.value.data || []);
-      if (clientRes.status === 'fulfilled') setData('clientReports', clientRes.value.data || []);
-      if (competitionRes.status === 'fulfilled') setData('competitionReports', competitionRes.value.data || []);
-      if (dealerScoresRes.status === 'fulfilled') setData('dealerScores', dealerScoresRes.value.data || []);
-
-      await Promise.all([fetchDashboardStats(), fetchUserTargets()]);
-    } catch (error) {
-      console.error('Failed to fetch data:', error);
+      ])
+      setData("dailyTasks", tasks?.data ?? [])
+      setData("pjps", pjps?.data ?? [])
+      setData("dealers", dealers?.data ?? [])
+      setData("reports", dvr?.data ?? [])
+      await fetchDashboardStats()
+    } catch (e) {
+      console.error(e)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [user, apiCall, setData, setLoading, fetchDashboardStats, fetchUserTargets]);
+  }, [user, apiCall, setData, setLoading, fetchDashboardStats])
 
-  const handleAttendancePunch = useCallback(async () => {
-    if (!user) return;
+  const handleAttendance = useCallback(async () => {
+    if (!user) return
+    const status = useAppStore.getState().attendanceStatus
+    const endpoint = status === "out" ? "/api/attendance/punch-in" : "/api/attendance/punch-out"
 
-    // 1) Ensure companyId for punch-in flows
-    const status = useAppStore.getState().attendanceStatus; // 'out' -> punch-in
-    const endpoint = status === 'out' ? '/api/attendance/punch-in' : '/api/attendance/punch-out';
-    if (endpoint.endsWith('punch-in') && (user as any).companyId == null) {
-      console.error('Missing companyId on user; cannot punch in.');
-      return;
+    if (endpoint.endsWith("punch-in") && !user.companyId) {
+      console.error("Missing companyId on user; cannot punch in.")
+      return
     }
 
     try {
-      setLoading(true);
-
-      // 2) High-accuracy geolocation with a sane timeout
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0
-        });
-      });
-
-      // 3) Normalize numbers (avoid NaN/undefined leaking)
-      const n = (v: any) => Number.isFinite(Number(v)) ? Number(v) : undefined;
-      const { latitude, longitude, accuracy, speed, heading, altitude } = position.coords;
-
+      setLoading(true)
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 })
+      })
+      const { latitude, longitude, accuracy, speed, heading, altitude } = pos.coords
+      const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : undefined)
       const body: any = {
-        userId: (user as any).id,
+        userId: user.id,
+        companyId: endpoint.endsWith("punch-in") ? user.companyId : undefined,
         latitude: n(latitude),
         longitude: n(longitude),
         accuracy: n(accuracy),
         speed: n(speed),
         heading: n(heading),
         altitude: n(altitude),
-        locationName: 'Mobile App'
-      };
-
-      if (endpoint.endsWith('punch-in')) {
-        body.companyId = (user as any).companyId;   // required by backend
-        // body.selfieUrl = selfieUrlRef.current ?? undefined; // include if you have it
-      } else {
-        // body.selfieUrl = selfieUrlRef.current ?? undefined;
+        locationName: "Mobile App",
       }
-
-      // 4) Network timeout so UI doesn't hang forever
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 15000);
-
-      const resp = await apiCall(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },   // <- important
-        body: JSON.stringify(body),
-        signal: (controller as any).signal
-      }).finally(() => clearTimeout(t));
-
-      // 5) Show proper server error
+      const resp = await apiCall(endpoint, { method: "POST", body: JSON.stringify(body) })
       if (resp?.success) {
-        useAppStore.getState().setAttendanceStatus(status === 'out' ? 'in' : 'out');
-        await fetchDashboardStats();
-      } else {
-        console.error('Attendance punch failed:', resp?.error || resp?.message || 'Unknown error');
+        useAppStore.getState().setAttendanceStatus(status === "out" ? "in" : "out")
+        await fetchDashboardStats()
       }
-    } catch (error) {
-      console.error('Attendance punch failed:', (error as any)?.message || error);
+    } catch (e) {
+      console.error("Attendance failed", e)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [user, apiCall, setLoading, fetchDashboardStats]);
+  }, [user, apiCall, setLoading, fetchDashboardStats])
 
-  const createRecord = useCallback(async (type: string, data: any) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: '/api/daily-tasks',
-      pjp: '/api/pjp',
-      dealer: '/api/dealers',
-      dvr: '/api/dvr',
-      tvr: '/api/tvr',
-      leave: '/api/leave-applications',
-      'client-report': '/api/client-reports',
-      'competition-report': '/api/competition-reports',
-      'dealer-score': '/api/dealer-reports-scores'
-    };
-
-    try {
-      setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
-        method: 'POST',
-        body: JSON.stringify({ ...data, userId: user.id })
-      });
-
-      if (response.success) {
-        useAppStore.getState().resetModals();
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to create ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
+  const createRecord = useCallback(async (type: string, payload: any) => {
+    if (!user) return
+    const endpoints: Record<string, string> = {
+      task: "/api/daily-tasks",
+      pjp: "/api/pjp",
+      dealer: "/api/dealers",
+      dvr: "/api/dvr",
+      tvr: "/api/tvr",
+      "dealer-score": "/api/dealer-reports-scores",
     }
-  }, [user, apiCall, setLoading, fetchAllData]);
+    const resp = await apiCall(endpoints[type], { method: "POST", body: JSON.stringify({ ...payload, userId: user.id }) })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [user, apiCall, fetchAllData])
 
-  const updateRecord = useCallback(async (type: string, id: string, data: any) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
-      dealer: `/api/dealers/${id}`,
-      dvr: `/api/dvr/${id}`,
-      tvr: `/api/tvr/${id}`,
-      leave: `/api/leave-applications/${id}`,
-      'client-report': `/api/client-reports/${id}`,
-      'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`
-    };
-
-    try {
-      setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      });
-
-      if (response.success) {
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to update ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
+  const updateRecord = useCallback(async (type: string, id: string, payload: any) => {
+    const endpoints: Record<string, (id: string) => string> = {
+      task: (id) => `/api/daily-tasks/${id}`,
+      pjp: (id) => `/api/pjp/${id}`,
+      dealer: (id) => `/api/dealers/${id}`,
+      dvr: (id) => `/api/dvr/${id}`,
+      tvr: (id) => `/api/tvr/${id}`,
+      "dealer-score": (id) => `/api/dealer-reports-scores/${id}`,
     }
-  }, [user, apiCall, setLoading, fetchAllData]);
+    const resp = await apiCall(endpoints[type](id), { method: "PUT", body: JSON.stringify(payload) })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [apiCall, fetchAllData])
 
   const deleteRecord = useCallback(async (type: string, id: string) => {
-    if (!user) return;
-
-    const endpoints = {
-      task: `/api/daily-tasks/${id}`,
-      pjp: `/api/pjp/${id}`,
-      dealer: `/api/dealers/${id}`,
-      dvr: `/api/dvr/${id}`,
-      tvr: `/api/tvr/${id}`,
-      leave: `/api/leave-applications/${id}`,
-      'client-report': `/api/client-reports/${id}`,
-      'competition-report': `/api/competition-reports/${id}`,
-      'dealer-score': `/api/dealer-reports-scores/${id}`
-    };
-
-    try {
-      setLoading(true);
-      const response = await apiCall(endpoints[type as keyof typeof endpoints], {
-        method: 'DELETE'
-      });
-
-      if (response.success) {
-        await fetchAllData();
-        return response;
-      }
-    } catch (error) {
-      console.error(`Failed to delete ${type}:`, error);
-      throw error;
-    } finally {
-      setLoading(false);
+    const endpoints: Record<string, (id: string) => string> = {
+      task: (id) => `/api/daily-tasks/${id}`,
+      pjp: (id) => `/api/pjp/${id}`,
+      dealer: (id) => `/api/dealers/${id}`,
+      dvr: (id) => `/api/dvr/${id}`,
+      tvr: (id) => `/api/tvr/${id}`,
+      "dealer-score": (id) => `/api/dealer-reports-scores/${id}`,
     }
-  }, [user, apiCall, setLoading, fetchAllData]);
+    const resp = await apiCall(endpoints[type](id), { method: "DELETE" })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [apiCall, fetchAllData])
 
-  return {
-    fetchAllData,
-    fetchDashboardStats,
-    fetchUserTargets,
-    handleAttendancePunch,
-    createRecord,
-    updateRecord,
-    deleteRecord
-  };
-};
+  return { fetchAllData, fetchDashboardStats, handleAttendance, createRecord, updateRecord, deleteRecord }
+}
 
-
-// ============= UPDATED BRAND SELECTOR WITH CEMENT BRANDS =============
-const BrandSelector = ({
-  selectedBrands = [],
-  onChange
-}: {
-  selectedBrands: string[];
-  onChange: (brands: string[]) => void;
-}) => {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
-
-  // UPDATED: Cement company brands instead of phone brands
-  const majorBrands = [
-    'UltraTech Cement Ltd.',
-    'Ambuja Cements Ltd.',
-    'ACC Limited.',
-    'Shree Cement Ltd.',
-    'Dalmia Bharat Ltd.',
-    'Ramco Cements Ltd.',
-    'Grasim Industries, Inc.',
-    'Best Cement.'
-  ];
-
-  // Filter brands based on search query
-  const filteredBrands = majorBrands.filter(brand =>
-    brand.toLowerCase().includes(searchQuery.toLowerCase()) &&
-    !selectedBrands.includes(brand)
-  );
-
-  // Check if search query is a new brand not in the list
-  const isNewBrand = searchQuery &&
-    !majorBrands.some(brand => brand.toLowerCase() === searchQuery.toLowerCase()) &&
-    !selectedBrands.includes(searchQuery);
-
-  const addBrand = (brand: string) => {
-    if (!selectedBrands.includes(brand)) {
-      onChange([...selectedBrands, brand]);
-      setSearchQuery('');
-      setIsOpen(false);
-    }
-  };
-
-  const removeBrand = (brandToRemove: string) => {
-    onChange(selectedBrands.filter(brand => brand !== brandToRemove));
-  };
-
-  return (
-    <div className="space-y-3">
-      <Label className="text-gray-300">Brands Selling *</Label>
-
-      {/* Selected Brands Display */}
-      {selectedBrands.length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {selectedBrands.map((brand) => (
-            <Badge key={brand} variant="outline" className="text-blue-400 border-blue-400 py-1">
-              {brand}
-              <button
-                type="button"
-                onClick={() => removeBrand(brand)}
-                className="ml-2 text-red-400 hover:text-red-300"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      {/* Search Input */}
-      <div className="relative">
-        <Input
-          value={searchQuery}
-          onChange={(e) => {
-            setSearchQuery(e.target.value);
-            setIsOpen(true);
-          }}
-          onFocus={() => setIsOpen(true)}
-          placeholder="Search or add new cement brand..."
-          className="bg-gray-900/50 border-gray-600 text-white"
-        />
-
-        {/* Dropdown */}
-        {isOpen && (searchQuery || filteredBrands.length > 0) && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-gray-800 border border-gray-600 rounded-md shadow-lg z-10 max-h-48 overflow-y-auto">
-
-            {/* Add New Brand Option */}
-            {isNewBrand && (
-              <button
-                type="button"
-                onClick={() => addBrand(searchQuery)}
-                className="w-full px-3 py-2 text-left hover:bg-gray-700 flex items-center text-green-400"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                Add "{searchQuery}"
-              </button>
-            )}
-
-            {/* Existing Brand Options */}
-            {filteredBrands.map((brand) => (
-              <button
-                key={brand}
-                type="button"
-                onClick={() => addBrand(brand)}
-                className="w-full px-3 py-2 text-left hover:bg-gray-700 text-gray-200"
-              >
-                {brand}
-              </button>
-            ))}
-
-            {/* No results */}
-            {!isNewBrand && filteredBrands.length === 0 && searchQuery && (
-              <div className="px-3 py-2 text-gray-500 text-sm">
-                No brands found
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Click outside to close */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-0"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
-    </div>
-  );
-};
-
-// ============= LOCATION PICKER COMPONENT =============
-const LocationPicker = ({
-  onLocationSelect,
-  currentLocation
-}: {
-  onLocationSelect: (location: string, coords?: { lat: number; lng: number }) => void;
-  currentLocation?: string;
-}) => {
-  const [searchQuery, setSearchQuery] = useState(currentLocation || '');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const getCurrentLocation = async () => {
-    setIsLoading(true);
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
-      });
-
-      const { latitude, longitude } = position.coords;
-
-      // Reverse geocoding (in real app, use Google Maps API)
-      const locationName = `Lat: ${latitude.toFixed(4)}, Lng: ${longitude.toFixed(4)}`;
-      onLocationSelect(locationName, { lat: latitude, lng: longitude });
-      setSearchQuery(locationName);
-    } catch (error) {
-      console.error('Failed to get current location:', error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-      <div className="flex space-x-2">
-        <Input
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search location or area..."
-          className="bg-gray-900/50 border-gray-600 text-white flex-1"
-        />
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          onClick={getCurrentLocation}
-          disabled={isLoading}
-          className="border-gray-600 text-gray-300 hover:bg-gray-700"
-        >
-          {isLoading ? (
-            <RefreshCw className="w-4 h-4 animate-spin" />
-          ) : (
-            <Locate className="w-4 h-4" />
-          )}
-        </Button>
-      </div>
-
-      <div className="flex space-x-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            onLocationSelect(searchQuery);
-          }}
-          className="text-blue-400 hover:bg-blue-400/10"
-        >
-          <Map className="w-4 h-4 mr-1" />
-          Use This Location
-        </Button>
-      </div>
-    </div>
-  );
-};
-
-// ============= COMPONENTS =============
+// --------------------
+// Reusable UI
+// --------------------
 const StatusBar = () => {
-  const { isOnline, lastSync } = useAppStore();
-
+  const { isOnline, lastSync } = useAppStore()
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex items-center justify-between px-4 py-2 bg-gray-900/50 backdrop-blur-lg border-b border-gray-800"
-    >
-      <div className="flex items-center space-x-2">
-        <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-red-400'}`} />
-        <span className="text-xs text-gray-400">
-          {isOnline ? 'Online' : 'Offline'}
-        </span>
+    <div className="flex items-center justify-between px-4 py-2 bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2 w-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+        <span className="text-xs text-muted-foreground">{isOnline ? "Online" : "Offline"}</span>
       </div>
-
       {lastSync && (
-        <span className="text-xs text-gray-500">
-          Last sync: {lastSync.toLocaleTimeString()}
-        </span>
+        <span className="text-xs text-muted-foreground">Last sync: {lastSync.toLocaleTimeString()}</span>
       )}
-    </motion.div>
-  );
-};
+    </div>
+  )
+}
 
-const LoadingSkeleton = ({ rows = 3 }: { rows?: number }) => (
+const LoadingList = ({ rows = 3 }: { rows?: number }) => (
   <div className="space-y-3">
     {Array.from({ length: rows }).map((_, i) => (
-      <Card key={i} className="bg-gray-900/30 border-gray-800">
+      <Card key={i} className="bg-card/50">
         <CardContent className="p-4">
-          <div className="flex items-center space-x-3">
-            <Skeleton className="h-12 w-12 rounded-full bg-gray-700" />
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-4 w-3/4 bg-gray-700" />
-              <Skeleton className="h-3 w-1/2 bg-gray-700" />
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-3 w-1/2" />
             </div>
           </div>
         </CardContent>
       </Card>
     ))}
   </div>
-);
+)
 
-const ActionButton = ({
-  icon: Icon,
-  label,
-  variant = 'default',
-  onClick,
-  loading = false
-}: {
-  icon: any;
-  label: string;
-  variant?: 'default' | 'primary' | 'success' | 'danger';
-  onClick: () => void;
-  loading?: boolean;
-}) => {
-  const variants = {
-    default: 'bg-gray-800 hover:bg-gray-700 text-gray-200',
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white',
-    success: 'bg-green-600 hover:bg-green-700 text-white',
-    danger: 'bg-red-600 hover:bg-red-700 text-white'
-  };
+const StatCard = ({ label, value, Icon, gradient }: { label: string; value: number; Icon: any; gradient: string }) => (
+  <Card className="bg-card/60 hover:bg-card transition-colors">
+    <CardContent className="p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold tracking-tight">{value}</p>
+        </div>
+        <div className={`p-3 rounded-xl ${gradient}`}>
+          <Icon className="h-5 w-5 text-white" />
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+)
 
-  return (
-    <motion.button
-      whileTap={{ scale: 0.95 }}
-      whileHover={{ scale: 1.02 }}
-      onClick={onClick}
-      disabled={loading}
-      className={`
-        flex items-center space-x-2 px-4 py-2 rounded-xl font-medium
-        transition-all duration-200 shadow-lg
-        ${variants[variant]}
-        ${loading ? 'opacity-50 cursor-not-allowed' : ''}
-      `}
-    >
-      {loading ? (
-        <RefreshCw className="w-4 h-4 animate-spin" />
-      ) : (
-        <Icon className="w-4 h-4" />
-      )}
-      <span>{label}</span>
-    </motion.button>
-  );
-};
-
-// ============= MAIN DASHBOARD COMPONENT =============
-export default function AdvancedCRM() {
+// --------------------
+// Main
+// --------------------
+export default function CRMDashboard() {
   const {
     user,
     currentPage,
@@ -718,1159 +335,519 @@ export default function AdvancedCRM() {
     pjps,
     dealers,
     reports,
-    dashboardStats,
     userTargets,
-    dealerScores,
     showCreateModal,
     createType,
     setUser,
     setCurrentPage,
     setUIState,
-    resetModals
-  } = useAppStore();
+    resetModals,
+  } = useAppStore()
 
-  const {
-    fetchAllData,
-    handleAttendancePunch,
-    createRecord,
-    updateRecord,
-    deleteRecord
-  } = useAPI();
+  const { fetchAllData, handleAttendance, createRecord, updateRecord, deleteRecord } = useAPI()
 
-  // Initialize app
+  // boot
   useEffect(() => {
-    const initializeApp = async () => {
-      const userData = localStorage.getItem('user');
-      if (userData) {
-        const parsedUser = JSON.parse(userData);
-        setUser(parsedUser);
-      }
-    };
+    const s = localStorage.getItem("user")
+    if (s) setUser(JSON.parse(s))
+  }, [setUser])
 
-    initializeApp();
-  }, [setUser]);
-
-  // Fetch data when user changes
   useEffect(() => {
-    if (user) {
-      fetchAllData();
-    }
-  }, [user, fetchAllData]);
+    if (user) fetchAllData()
+  }, [user, fetchAllData])
 
-  // Network status monitoring
-  useEffect(() => {
-    const handleOnline = () => useAppStore.getState().setOnlineStatus(true);
-    const handleOffline = () => useAppStore.getState().setOnlineStatus(false);
+  // memo slices
+  const filteredTasks = useMemo(() => (dailyTasks || []).filter((t) => t.status !== "Completed").slice(0, 5), [dailyTasks])
+  const activePJPs = useMemo(() => (pjps || []).filter((p: any) => ["active", "planned"].includes(String(p.status))).slice(0, 5), [pjps])
+  const recentReports = useMemo(() => (reports || []).slice(0, 3), [reports])
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+  return (
+    <div className="h-screen max-w-md mx-auto flex flex-col bg-background text-foreground">
+      <div className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {currentPage === "home" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col">
+              <StatusBar />
 
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+              <div className="flex-1 overflow-y-auto">
+                {/* Header */}
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600/15 to-purple-600/15" />
+                  <div className="relative px-6 py-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-12 w-12 ring-2 ring-blue-500/40">
+                          <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold">
+                            {user?.firstName?.[0]}
+                            {user?.lastName?.[0]}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <h1 className="text-xl font-semibold leading-tight">
+                            {user?.firstName} {user?.lastName}
+                          </h1>
+                          <p className="text-xs text-muted-foreground">{user?.company?.companyName}</p>
+                        </div>
+                      </div>
 
-  // Memoized filtered data
-  const filteredTasks = useMemo(() =>
-    dailyTasks.filter(task => task.status !== 'Completed').slice(0, 5),
-    [dailyTasks]
-  );
+                      <div className="flex items-center gap-2">
+                        <Button variant={attendanceStatus === "in" ? "destructive" : "default"} onClick={handleAttendance} className="rounded-xl">
+                          {attendanceStatus === "in" ? (
+                            <><LogOut className="h-4 w-4 mr-2" /> Punch Out</>
+                          ) : (
+                            <><LogIn className="h-4 w-4 mr-2" /> Punch In</>
+                          )}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="rounded-xl">
+                          <Bell className="h-5 w-5" />
+                        </Button>
+                      </div>
+                    </div>
 
-  const activePJPs = useMemo(() =>
-    pjps.filter(pjp => pjp.status === 'active' || pjp.status === 'planned').slice(0, 5),
-    [pjps]
-  );
+                    {/* Stats */}
+                    <div className="grid grid-cols-2 gap-3 mt-5">
+                      <StatCard label="Today's Tasks" value={filteredTasks.length} Icon={CheckCircle} gradient="bg-blue-600" />
+                      <StatCard label="Active PJPs" value={activePJPs.length} Icon={Calendar} gradient="bg-purple-600" />
+                      <StatCard label="Total Dealers" value={(dealers || []).length} Icon={Building2} gradient="bg-orange-600" />
+                      <StatCard label="This Month" value={(reports || []).length} Icon={BarChart3} gradient="bg-emerald-600" />
+                    </div>
+                  </div>
+                </div>
 
-  const recentReports = useMemo(() =>
-    reports.slice(0, 3),
-    [reports]
-  );
+                {/* Sections */}
+                <div className="px-6 pb-28 space-y-8">
+                  <Section title="Today's Tasks" Icon={CheckCircle} onAdd={() => { setUIState("createType", "task"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : filteredTasks.length ? (
+                      <AnimatePresence>
+                        {filteredTasks.map((task: any, i: number) => (
+                          <TaskCard key={task.id ?? i} task={task} onEdit={(t) => { setUIState("selectedItem", t); setUIState("createType", "task"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("task", id)} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={CheckCircle} label="No tasks for today" />
+                    )}
+                  </Section>
 
-  // ============= HOME PAGE - PROPERLY SCROLLABLE =============
-  const HomePage = () => (
-    <div className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col">
-      <StatusBar />
+                  <Section title="Journey Plans" Icon={Navigation} onAdd={() => { setUIState("createType", "pjp"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : activePJPs.length ? (
+                      <AnimatePresence>
+                        {activePJPs.map((pjp: any, i: number) => (
+                          <PJPCard key={pjp.id ?? i} pjp={pjp} onView={(p) => { setUIState("selectedItem", p); setUIState("showDetailModal", true) }} onEdit={(p) => { setUIState("selectedItem", p); setUIState("createType", "pjp"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("pjp", id)} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={Navigation} label="No active journey plans" />
+                    )}
+                  </Section>
 
-      {/* SCROLLABLE CONTENT CONTAINER */}
-      <div className="flex-1 overflow-y-auto">
-        {/* Header Section */}
-        <div className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-600/20 to-purple-600/20" />
-          <div className="relative px-6 py-8">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center space-x-4">
-                <Avatar className="h-14 w-14 ring-2 ring-blue-500/50">
-                  <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-lg font-bold">
-                    {user?.firstName?.[0]}{user?.lastName?.[0]}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <motion.h1
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="text-2xl font-bold text-white"
-                  >
-                    {user?.firstName} {user?.lastName}
-                  </motion.h1>
-                  <p className="text-blue-200">{user?.company?.companyName}</p>
+                  <Section title="Recent Dealers" Icon={Building2} onAdd={() => { setUIState("createType", "dealer"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : (dealers || []).length ? (
+                      <AnimatePresence>
+                        {(dealers || []).slice(0, 5).map((dealer: any, i: number) => (
+                          <DealerCard key={dealer.id ?? i} dealer={dealer} onView={(d) => { setUIState("selectedItem", d); setUIState("showDetailModal", true) }} onEdit={(d) => { setUIState("selectedItem", d); setUIState("createType", "dealer"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("dealer", id)} onScore={(d) => { setUIState("selectedItem", d); setUIState("createType", "dealer-score"); setUIState("showCreateModal", true) }} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <div className="text-center py-6">
+                        <Empty icon={Building2} label="No dealers yet" />
+                        <Button className="mt-3" onClick={() => { setUIState("createType", "dealer"); setUIState("showCreateModal", true) }}>
+                          <Plus className="h-4 w-4 mr-2" /> Add First Dealer
+                        </Button>
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Recent Reports" Icon={FileText} onAdd={() => { setUIState("createType", "dvr"); setUIState("showCreateModal", true) }}>
+                    <div className="flex gap-2 mb-3">
+                      <Button variant="outline" size="sm" onClick={() => { setUIState("createType", "dvr"); setUIState("showCreateModal", true) }}>
+                        <FileText className="h-4 w-4 mr-2" /> Create DVR
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => { setUIState("createType", "tvr"); setUIState("showCreateModal", true) }}>
+                        <BarChart3 className="h-4 w-4 mr-2" /> Create TVR
+                      </Button>
+                    </div>
+
+                    {recentReports.length ? (
+                      <AnimatePresence>
+                        {recentReports.map((r: any, i: number) => (
+                          <ReportCard key={r.id ?? i} report={r} onView={(rr) => { setUIState("selectedItem", rr); setUIState("showDetailModal", true) }} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={FileText} label="No reports yet" />
+                    )}
+                  </Section>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-3">
-                <ActionButton
-                  icon={attendanceStatus === 'in' ? LogOut : LogIn}
-                  label={attendanceStatus === 'in' ? 'Punch Out' : 'Punch In'}
-                  variant={attendanceStatus === 'in' ? 'danger' : 'success'}
-                  onClick={handleAttendancePunch}
-                  loading={isLoading}
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-white hover:bg-white/10"
-                >
-                  <Bell className="w-5 h-5" />
+              {/* Bottom nav */}
+              <BottomNav current={currentPage} onChange={(k) => useAppStore.getState().setCurrentPage(k as any)} />
+            </motion.div>
+          )}
+
+          {currentPage === "profile" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col">
+              <StatusBar />
+              <div className="flex-1 overflow-y-auto px-6 py-6 pb-28">
+                <div className="text-center mb-6">
+                  <Avatar className="h-24 w-24 mx-auto ring-4 ring-blue-500/25">
+                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-2xl font-bold">
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <h2 className="text-2xl font-semibold mt-3">{user?.firstName} {user?.lastName}</h2>
+                  <p className="text-sm text-muted-foreground">{user?.email}</p>
+                  <Badge className="mt-2">{user?.role ?? "User"}</Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <StatTile icon={FileText} value={(reports || []).length} label="Total Reports" tint="text-blue-500" />
+                  <StatTile icon={Building2} value={(dealers || []).length} label="Dealers Managed" tint="text-orange-500" />
+                </div>
+
+                <Card className="bg-card/60 mb-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5 text-yellow-500" /> Performance</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(userTargets || []).map((t: any, idx: number) => {
+                        const progress = Math.min(100, Math.round(((t.current ?? 0) / (t.target || 1)) * 100))
+                        const bar = progress >= 80 ? "bg-emerald-500" : progress >= 60 ? "bg-yellow-500" : "bg-red-500"
+                        const Icon = t.icon || Target
+                        return (
+                          <div key={`${t.label}-${idx}`} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <div className="flex items-center gap-2"><Icon className={`h-4 w-4 ${t.color || "text-muted-foreground"}`} /><span>{t.label}</span></div>
+                              <span className="tabular-nums">{t.current} / {t.target}</span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.8, delay: idx * 0.1 }} className={`h-full ${bar}`} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Button variant="destructive" className="w-full" onClick={() => { localStorage.removeItem("user"); useAppStore.getState().setUser(null) }}>
+                  <LogOut className="h-4 w-4 mr-2" /> Logout
                 </Button>
               </div>
-            </div>
+              <BottomNav current={currentPage} onChange={(k) => useAppStore.getState().setCurrentPage(k as any)} />
+            </motion.div>
+          )}
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {[
-                {
-                  label: "Today's Tasks",
-                  value: filteredTasks.length,
-                  icon: CheckCircle,
-                  color: "from-blue-500 to-blue-600"
-                },
-                {
-                  label: "Active PJPs",
-                  value: activePJPs.length,
-                  icon: Calendar,
-                  color: "from-purple-500 to-purple-600"
-                },
-                {
-                  label: "Total Dealers",
-                  value: dealers.length,
-                  icon: Building2,
-                  color: "from-orange-500 to-orange-600"
-                },
-                {
-                  label: "This Month",
-                  value: reports.length,
-                  icon: BarChart3,
-                  color: "from-green-500 to-green-600"
-                }
-              ].map((stat, index) => (
-                <motion.div
-                  key={stat.label}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: index * 0.1 }}
-                >
-                  <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-gray-400 text-sm">{stat.label}</p>
-                          <p className="text-2xl font-bold text-white">{stat.value}</p>
-                        </div>
-                        <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color}`}>
-                          <stat.icon className="w-6 h-6 text-white" />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        </div>
+          {currentPage === "ai" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <ChatInterface onBack={() => useAppStore.getState().setCurrentPage("home") } />
+            </motion.div>
+          )}
 
-        {/* SCROLLABLE Content Sections */}
-        <div className="px-6 pb-32 space-y-8">
-          {/* Tasks Section */}
-          <Section
-            title="Today's Tasks"
-            icon={CheckCircle}
-            onAdd={() => {
-              setUIState('createType', 'task');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : filteredTasks.length > 0 ? (
-              <AnimatePresence>
-                {filteredTasks.map((task, index) => (
-                  <TaskCard
-                    key={task.id}
-                    task={task}
-                    index={index}
-                    onEdit={(task) => {
-                      setUIState('selectedItem', task);
-                      setUIState('createType', 'task');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(taskId) => deleteRecord('task', taskId)}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <CheckCircle className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No tasks for today</p>
-              </div>
-            )}
-          </Section>
-
-          {/* ENHANCED PJP Section - NOW WITH PROPER CRUD */}
-          <Section
-            title="Journey Plans"
-            icon={Navigation}
-            onAdd={() => {
-              setUIState('createType', 'pjp');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : activePJPs.length > 0 ? (
-              <AnimatePresence>
-                {activePJPs.map((pjp, index) => (
-                  <PJPCard
-                    key={pjp.id}
-                    pjp={pjp}
-                    index={index}
-                    onEdit={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('createType', 'pjp');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(pjpId) => deleteRecord('pjp', pjpId)}
-                    onView={(pjp) => {
-                      setUIState('selectedItem', pjp);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <Navigation className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No active journey plans</p>
-              </div>
-            )}
-          </Section>
-
-          {/* UPDATED Dealers Section - REMOVED HARDCODED DATA */}
-          {/* UPDATED Dealers Section - SHOW REAL DEALERS FROM DB */}
-          <Section
-            title="Recent Dealers"
-            icon={Building2}
-            onAdd={() => {
-              setUIState('createType', 'dealer');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            {isLoading ? (
-              <LoadingSkeleton rows={3} />
-            ) : dealers.length > 0 ? (
-              <AnimatePresence>
-                {dealers.slice(0, 5).map((dealer, index) => (
-                  <DealerCard
-                    key={dealer.id}
-                    dealer={dealer}
-                    index={index}
-                    onEdit={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer');
-                      setUIState('showCreateModal', true);
-                    }}
-                    onDelete={(dealerId) => deleteRecord('dealer', dealerId)}
-                    onView={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('showDetailModal', true);
-                    }}
-                    onScore={(dealer) => {
-                      setUIState('selectedItem', dealer);
-                      setUIState('createType', 'dealer-score');
-                      setUIState('showCreateModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <Building2 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No dealers registered yet</p>
-                <Button
-                  onClick={() => {
-                    setUIState('createType', 'dealer');
-                    setUIState('showCreateModal', true);
-                  }}
-                  className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add First Dealer
-                </Button>
-              </div>
-            )}
-          </Section>
-
-          {/* ENHANCED Reports Section with DVR/TVR options */}
-          <Section
-            title="Recent Reports"
-            icon={FileText}
-            onAdd={() => {
-              // Show options for DVR or TVR
-              setUIState('createType', 'dvr');
-              setUIState('showCreateModal', true);
-            }}
-          >
-            <div className="flex space-x-2 mb-4">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'dvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-blue-600 text-blue-400 hover:bg-blue-400/10"
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Create DVR
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setUIState('createType', 'tvr');
-                  setUIState('showCreateModal', true);
-                }}
-                className="border-purple-600 text-purple-400 hover:bg-purple-400/10"
-              >
-                <BarChart3 className="w-4 h-4 mr-2" />
-                Create TVR
-              </Button>
-            </div>
-
-            {recentReports.length > 0 ? (
-              <AnimatePresence>
-                {recentReports.map((report, index) => (
-                  <ReportCard
-                    key={report.id}
-                    report={report}
-                    index={index}
-                    onView={(report) => {
-                      setUIState('selectedItem', report);
-                      setUIState('showDetailModal', true);
-                    }}
-                  />
-                ))}
-              </AnimatePresence>
-            ) : (
-              <div className="text-center py-8 text-gray-400">
-                <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No reports yet</p>
-              </div>
-            )}
-          </Section>
-        </div>
-      </div>
-    </div>
-  );
-
-  // ============= PROFILE PAGE with REAL DATA =============
-  const ProfilePage = () => (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex flex-col"
-    >
-      <StatusBar />
-
-      <div className="flex-1 overflow-y-auto px-6 py-8 pb-32">
-        {/* Profile Header */}
-        <div className="text-center mb-8">
-          <Avatar className="h-24 w-24 mx-auto mb-4 ring-4 ring-blue-500/30">
-            <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-2xl font-bold">
-              {user?.firstName?.[0]}{user?.lastName?.[0]}
-            </AvatarFallback>
-          </Avatar>
-          <h2 className="text-2xl font-bold text-white mb-1">
-            {user?.firstName} {user?.lastName}
-          </h2>
-          <p className="text-gray-400">{user?.email}</p>
-          <Badge className="mt-2 bg-blue-600 text-white">{user?.role}</Badge>
-        </div>
-
-        {/* Achievement Stats - REAL DATA */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4 text-center">
-              <div className="flex items-center justify-center mb-2">
-                <Target className="w-5 h-5 text-blue-400 mr-2" />
-                <p className="text-2xl font-bold text-white">{reports.length}</p>
-              </div>
-              <p className="text-sm text-gray-400">Total Reports</p>
-            </CardContent>
-          </Card>
-          <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700">
-            <CardContent className="p-4 text-center">
-              <div className="flex items-center justify-center mb-2">
-                <Building2 className="w-5 h-5 text-orange-400 mr-2" />
-                <p className="text-2xl font-bold text-white">{dealers.length}</p>
-              </div>
-              <p className="text-sm text-gray-400">Dealers Managed</p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* REAL Monthly Targets from API */}
-        <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 mb-6">
-          <CardHeader>
-            <CardTitle className="flex items-center text-white">
-              <Award className="w-5 h-5 mr-2 text-yellow-400" />
-              Performance Metrics
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {userTargets.map((item, index) => {
-                const progress = (item.current / item.target) * 100;
-                return (
-                  <div key={item.label} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <item.icon className={`w-4 h-4 ${item.color}`} />
-                        <span className="text-sm text-gray-300">{item.label}</span>
-                      </div>
-                      <span className="text-sm text-white">
-                        {item.current} / {item.target}
-                      </span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-2">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progress}%` }}
-                        transition={{ duration: 1, delay: index * 0.2 }}
-                        className={`h-2 rounded-full ${progress >= 80 ? 'bg-green-500' : progress >= 60 ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Profile Actions */}
-        <div className="space-y-4">
-          <Button
-            onClick={() => {
-              localStorage.removeItem('user');
-              setUser(null);
-            }}
-            className="w-full bg-red-600 hover:bg-red-700 text-white py-3"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </div>
-    </motion.div>
-  );
-
-  // ============= ENHANCED SECTION COMPONENT =============
-  const Section = ({
-    title,
-    icon: Icon,
-    children,
-    onAdd
-  }: {
-    title: string;
-    icon: any;
-    children: React.ReactNode;
-    onAdd: () => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="mb-8"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center space-x-3">
-          <Icon className="w-6 h-6 text-blue-400" />
-          <h2 className="text-xl font-bold text-white">{title}</h2>
-        </div>
-        <Button
-          onClick={onAdd}
-          className="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-2"
-        >
-          <Plus className="w-4 h-4" />
-        </Button>
-      </div>
-      <div className="space-y-3">
-        {children}
-      </div>
-    </motion.div>
-  );
-
-  // ============= ENHANCED CARD COMPONENTS =============
-  const TaskCard = ({
-    task,
-    index,
-    onEdit,
-    onDelete
-  }: {
-    task: any;
-    index: number;
-    onEdit: (task: any) => void;
-    onDelete: (taskId: string) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1">
-              <h3 className="font-semibold text-white">{task.visitType || task.title}</h3>
-              <p className="text-sm text-gray-400 mt-1">{task.description}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant={task.priority === 'high' ? 'destructive' : 'default'}>
-                  {task.priority || 'Normal'}
-                </Badge>
-                <span className="text-xs text-gray-500">{task.taskDate}</span>
-                {task.pjpId && (
-                  <Badge variant="outline" className="text-purple-400 border-purple-400">
-                    PJP Task
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(task)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(task.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-green-400"
-              >
-                <CheckCircle className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const PJPCard = ({
-    pjp,
-    index,
-    onEdit,
-    onDelete,
-    onView
-  }: {
-    pjp: any;
-    index: number;
-    onEdit: (pjp: any) => void;
-    onDelete: (pjpId: string) => void;
-    onView: (pjp: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(pjp)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{pjp.objective}</h3>
-              <p className="text-sm text-gray-400 mt-1">{pjp.siteName || pjp.location}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge
-                  variant="outline"
-                  className={
-                    pjp.status === 'active' ? 'text-green-400 border-green-400' :
-                      pjp.status === 'planned' ? 'text-blue-400 border-blue-400' :
-                        'text-yellow-400 border-yellow-400'
-                  }
-                >
-                  {pjp.status}
-                </Badge>
-                <span className="text-xs text-gray-500">{pjp.planDate}</span>
-                {pjp.areaToBeVisited && (
-                  <span className="text-xs text-gray-500">📍 {pjp.areaToBeVisited}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(pjp)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(pjp)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(pjp.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-              <Navigation className="w-5 h-5 text-purple-400" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const DealerCard = ({
-    dealer,
-    index,
-    onEdit,
-    onDelete,
-    onView,
-    onScore
-  }: {
-    dealer: any;
-    index: number;
-    onEdit: (dealer: any) => void;
-    onDelete: (dealerId: string) => void;
-    onView: (dealer: any) => void;
-    onScore: (dealer: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(dealer)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{dealer.name}</h3>
-              <p className="text-sm text-gray-400 mt-1">{dealer.region} - {dealer.area}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{dealer.type}</Badge>
-                <span className="text-xs text-gray-500">₹{dealer.totalPotential}</span>
-                {dealer.phoneNo && (
-                  <span className="text-xs text-gray-500">{dealer.phoneNo}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-yellow-400"
-                onClick={() => onScore(dealer)}
-              >
-                <Star className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(dealer)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onEdit(dealer)}
-              >
-                <Edit className="w-4 h-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-red-400"
-                onClick={() => onDelete(dealer.id)}
-              >
-                <Trash2 className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  const ReportCard = ({
-    report,
-    index,
-    onView
-  }: {
-    report: any;
-    index: number;
-    onView: (report: any) => void;
-  }) => (
-    <motion.div
-      initial={{ opacity: 0, x: -20 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.1 }}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-gray-800/50 backdrop-blur-lg border-gray-700 hover:bg-gray-800/70 transition-all duration-300">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex-1" onClick={() => onView(report)} style={{ cursor: 'pointer' }}>
-              <h3 className="font-semibold text-white">{report.title || 'Daily Report'}</h3>
-              <p className="text-sm text-gray-400 mt-1">{report.location || 'Field Visit'}</p>
-              <div className="flex items-center space-x-2 mt-3">
-                <Badge variant="outline">{report.type || 'DVR'}</Badge>
-                <span className="text-xs text-gray-500">{report.date}</span>
-                {report.amount && (
-                  <span className="text-xs text-green-400">₹{report.amount}</span>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 ml-4">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-gray-400 hover:text-blue-400"
-                onClick={() => onView(report)}
-              >
-                <Eye className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-
-  // AI, Journey, and other pages remain the same
-  const AIPage = () => (
-    <div className="h-full">
-      <ChatInterface
-        onBack={() => setCurrentPage('home')}
-      />
-    </div>
-  );
-
-  const JourneyPage = () => (
-    <div className="h-full">
-      <JourneyTracker
-        userId={user?.id || 1}
-        onBack={() => setCurrentPage('home')}
-        onJourneyEnd={() => {
-          fetchAllData();
-          setCurrentPage('home');
-        }}
-      />
-    </div>
-  );
-
-  // ============= RENDER PAGE =============
-  const renderPage = () => {
-    switch (currentPage) {
-      case 'home': return <HomePage />;
-      case 'ai': return <AIPage />;
-      case 'journey': return <JourneyPage />;
-      case 'profile': return <ProfilePage />;
-      default: return <HomePage />;
-    }
-  };
-
-  // ============= MAIN RENDER =============
-  return (
-    <div className="h-screen flex flex-col bg-gray-900 max-w-md mx-auto relative overflow-hidden">
-      {/* Main Content */}
-      <div className="flex-1 overflow-hidden">
-        <AnimatePresence mode="wait">
-          {renderPage()}
+          {currentPage === "journey" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <JourneyTracker userId={user?.id || 1} onBack={() => useAppStore.getState().setCurrentPage("home")} onJourneyEnd={() => { useAPI().fetchAllData(); useAppStore.getState().setCurrentPage("home") }} />
+            </motion.div>
+          )}
         </AnimatePresence>
       </div>
 
-      {/* BOTTOM NAVIGATION */}
-      {(currentPage !== 'ai' && currentPage !== 'journey') && (
-        <motion.div
-          initial={{ y: 100 }}
-          animate={{ y: 0 }}
-          className="absolute bottom-0 left-0 right-0 bg-gray-900/95 backdrop-blur-xl border-t border-gray-700/50 shadow-2xl safe-area-pb"
-        >
-          <div className="flex items-center justify-around py-3 px-4">
-            {[
-              { key: 'home', icon: Home, label: 'Home' },
-              { key: 'ai', icon: MessageCircle, label: 'AI' },
-              { key: 'journey', icon: MapPin, label: 'Journey' },
-              { key: 'profile', icon: User, label: 'Profile' }
-            ].map((nav) => (
-              <motion.button
-                key={nav.key}
-                whileTap={{ scale: 0.85 }}
-                whileHover={{ scale: 1.05 }}
-                onClick={() => setCurrentPage(nav.key)}
-                className={`
-                  flex flex-col items-center justify-center space-y-1 px-4 py-2 rounded-2xl 
-                  transition-all duration-300 min-w-[60px] relative overflow-hidden
-                  ${currentPage === nav.key
-                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg shadow-blue-500/25'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800/60'
-                  }
-                `}
-              >
-                {currentPage === nav.key && (
-                  <motion.div
-                    layoutId="activeTab"
-                    className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl"
-                    initial={false}
-                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                  />
-                )}
-                <nav.icon className={`w-5 h-5 relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`} />
-                <span className={`text-xs font-medium relative z-10 ${currentPage === nav.key ? 'text-white' : ''}`}>
-                  {nav.label}
-                </span>
-              </motion.button>
-            ))}
-          </div>
-        </motion.div>
+      {showCreateModal && (
+        <CreateModal type={createType} onClose={resetModals} onCreate={createRecord} />
       )}
-
-      {/* Enhanced Create Modal */}
-      <AnimatePresence>
-        {showCreateModal && (
-          <CreateModal
-            type={createType}
-            onClose={resetModals}
-            onCreate={createRecord}
-          />
-        )}
-      </AnimatePresence>
     </div>
-  );
+  )
 }
 
-// ============= ENHANCED CREATE MODAL =============
-const CreateModal = ({
-  type,
-  onClose,
-  onCreate
-}: {
-  type: string;
-  onClose: () => void;
-  onCreate: (type: string, data: any) => Promise<any>;
-}) => {
-  const [formData, setFormData] = useState<any>({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const { user, dealers } = useAppStore();
+// --------------------
+// Sections & Cards
+// --------------------
+function Section({ title, Icon, children, onAdd }: { title: string; Icon: any; children: React.ReactNode; onAdd: () => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">{title}</h2>
+        </div>
+        <Button size="icon" className="rounded-full" onClick={onAdd}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSubmitting(true);
+function Empty({ icon: Icon, label }: { icon: any; label: string }) {
+  return (
+    <div className="text-center py-6 text-muted-foreground">
+      <Icon className="h-10 w-10 mx-auto opacity-50 mb-2" />
+      <p className="text-sm">{label}</p>
+    </div>
+  )
+}
 
+function TaskCard({ task, onEdit, onDelete }: { task: any; onEdit: (t: any) => void; onDelete: (id: string) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <h3 className="font-medium">{task.visitType || task.title}</h3>
+            {task.description && <p className="text-sm text-muted-foreground mt-1">{task.description}</p>}
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant={task.priority === "high" ? "destructive" : "outline"}>{task.priority || "Normal"}</Badge>
+              {task.taskDate && <span className="text-xs text-muted-foreground">{task.taskDate}</span>}
+              {task.pjpId && <Badge variant="outline">PJP</Badge>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onEdit(task)} Icon={Edit} tooltip="Edit" />
+            <IconBtn onClick={() => onDelete(String(task.id))} Icon={Trash2} tooltip="Delete" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PJPCard({ pjp, onView, onEdit, onDelete }: { pjp: any; onView: (p: any) => void; onEdit: (p: any) => void; onDelete: (id: string) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(pjp)}>
+            <h3 className="font-medium">{pjp.objective}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{pjp.siteName || pjp.location}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant="outline">{pjp.status}</Badge>
+              {pjp.planDate && <span className="text-xs text-muted-foreground">{pjp.planDate}</span>}
+              {pjp.areaToBeVisited && <span className="text-xs text-muted-foreground">📍 {pjp.areaToBeVisited}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onView(pjp)} Icon={Eye} />
+            <IconBtn onClick={() => onEdit(pjp)} Icon={Edit} />
+            <IconBtn onClick={() => onDelete(String(pjp.id))} Icon={Trash2} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DealerCard({ dealer, onView, onEdit, onDelete, onScore }: { dealer: any; onView: (d: any) => void; onEdit: (d: any) => void; onDelete: (id: string) => void; onScore: (d: any) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(dealer)}>
+            <h3 className="font-medium">{dealer.name}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{dealer.region} {dealer.area ? `- ${dealer.area}` : ""}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              {dealer.type && <Badge variant="outline">{dealer.type}</Badge>}
+              {dealer.totalPotential && <span className="text-xs text-muted-foreground">₹{dealer.totalPotential}</span>}
+              {dealer.phoneNo && <span className="text-xs text-muted-foreground">{dealer.phoneNo}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onScore(dealer)} Icon={Star} />
+            <IconBtn onClick={() => onView(dealer)} Icon={Eye} />
+            <IconBtn onClick={() => onEdit(dealer)} Icon={Edit} />
+            <IconBtn onClick={() => onDelete(String(dealer.id))} Icon={Trash2} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReportCard({ report, onView }: { report: any; onView: (r: any) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(report)}>
+            <h3 className="font-medium">{report.title || "Daily Report"}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{report.location || "Field Visit"}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant="outline">{report.type || "DVR"}</Badge>
+              {report.date && <span className="text-xs text-muted-foreground">{report.date}</span>}
+              {report.amount && <span className="text-xs text-green-600">₹{report.amount}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1"><IconBtn onClick={() => onView(report)} Icon={Eye} /></div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function IconBtn({ onClick, Icon, tooltip }: { onClick: () => void; Icon: any; tooltip?: string }) {
+  return (
+    <Button type="button" variant="ghost" size="icon" className="rounded-xl" onClick={onClick} title={tooltip}>
+      <Icon className="h-4 w-4" />
+    </Button>
+  )
+}
+
+function BottomNav({ current, onChange }: { current: string; onChange: (k: string) => void }) {
+  const items = [
+    { key: "home", icon: Home, label: "Home" },
+    { key: "ai", icon: MessageCircle, label: "AI" },
+    { key: "journey", icon: MapPin, label: "Journey" },
+    { key: "profile", icon: User, label: "Profile" },
+  ]
+  return (
+    <div className="sticky bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t">
+      <div className="flex items-center justify-around py-3 px-4">
+        {items.map((it) => (
+          <Button key={it.key} variant={current === it.key ? "default" : "ghost"} className="flex flex-col gap-1 rounded-2xl min-w-[64px]" onClick={() => onChange(it.key)}>
+            <it.icon className="h-5 w-5" />
+            <span className="text-xs">{it.label}</span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// --------------------
+// Create Modal (Task/PJP/Dealer/DVR/TVR minimal, shadcn-styled)
+// --------------------
+function CreateModal({ type, onClose, onCreate }: { type: string; onClose: () => void; onCreate: (type: string, data: any) => Promise<any> }) {
+  const [form, setForm] = useState<any>({})
+  const [submitting, setSubmitting] = useState(false)
+  const { pjps, selectedItem } = useAppStore()
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
     try {
-      // ENHANCED DATA MAPPING FOR ALL TYPES
-      let transformedData = { ...formData };
-
-      if (type === 'task') {
-        transformedData = {
-          userId: user?.id || 1,
-          assignedByUserId: user?.id || 1,
-          taskDate: formData.taskDate || new Date().toISOString().split('T')[0],
-          visitType: formData.title || formData.visitType || 'General Task',
-          relatedDealerId: formData.relatedDealerId || null,
-          siteName: formData.siteName || formData.title || '',
-          description: formData.description || '',
-          pjpId: formData.isPjp ? formData.pjpId : null // PJP OPTION
-        };
+      let payload = { ...form }
+      if (type === "task") {
+        payload = {
+          taskDate: form.taskDate || new Date().toISOString().slice(0, 10),
+          visitType: form.title || form.visitType || "General Task",
+          siteName: form.siteName || "",
+          description: form.description || "",
+          pjpId: form.isPjp ? form.pjpId : null,
+        }
       }
-
-      if (type === 'pjp') {
-        transformedData = {
-          userId: user?.id || 1,
-          planDate: formData.plannedDate || formData.planDate,
-          visitType: formData.visitType || 'Field Visit',
-          siteName: formData.location || formData.siteName,
-          areaToBeVisited: formData.area || formData.areaToBeVisited || formData.location,
-          objective: formData.objective || '',
-          expectedOutcome: formData.expectedOutcome || '',
-          status: 'planned'
-        };
+      if (type === "pjp") {
+        payload = {
+          planDate: form.plannedDate,
+          visitType: form.visitType || "Field Visit",
+          siteName: form.location,
+          areaToBeVisited: form.area || form.location,
+          objective: form.objective || "",
+          expectedOutcome: form.expectedOutcome || "",
+          status: "planned",
+        }
       }
-
-      if (type === 'dealer') {
-        transformedData = {
-          userId: user?.id || 1,
-          name: formData.name,
-          type: formData.type,
-          parentDealerId: formData.parentDealerId || null,
-          region: formData.region,
-          area: formData.area,
-          phoneNo: formData.phoneNo,
-          address: formData.address,
-          totalPotential: formData.totalPotential,
-          bestPotential: formData.bestPotential,
-          brandSelling: formData.brandSelling || [],
-          feedbacks: formData.feedbacks,
-          latitude: formData.latitude,
-          longitude: formData.longitude,
-          remarks: formData.remarks || null
-        };
+      if (type === "dealer") {
+        payload = {
+          name: form.name,
+          type: form.type,
+          region: form.region,
+          area: form.area,
+          phoneNo: form.phoneNo,
+          address: form.address,
+          totalPotential: Number(form.totalPotential || 0),
+          bestPotential: Number(form.bestPotential || 0),
+          brandSelling: form.brandSelling || [],
+          remarks: form.remarks || null,
+        }
       }
-
-      if (type === 'dealer-score') {
-        transformedData = {
-          dealerId: formData.dealerId || useAppStore.getState().selectedItem?.id,
-          dealerScore: formData.dealerScore || 0,
-          trustWorthinessScore: formData.trustWorthinessScore || 0,
-          creditWorthinessScore: formData.creditWorthinessScore || 0,
-          orderHistoryScore: formData.orderHistoryScore || 0,
-          visitFrequencyScore: formData.visitFrequencyScore || 0
-        };
-      }
-
-      if (type === 'dvr' || type === 'tvr') {
-        transformedData = {
-          userId: user?.id || 1,
+      if (type === "dvr" || type === "tvr") {
+        payload = {
           type: type.toUpperCase(),
-          title: formData.title || `${type.toUpperCase()} Report`,
-          location: formData.location || '',
-          amount: formData.amount || 0,
-          description: formData.description || '',
-          date: formData.date || new Date().toISOString().split('T')[0]
-        };
+          title: form.title || `${type.toUpperCase()} Report`,
+          location: form.location || "",
+          amount: Number(form.amount || 0),
+          description: form.description || "",
+          date: form.date || new Date().toISOString().slice(0, 10),
+        }
       }
-
-      await onCreate(type, transformedData);
-      onClose();
-    } catch (error) {
-      console.error('Failed to create record:', error);
+      await onCreate(type, payload)
+      onClose()
     } finally {
-      setIsSubmitting(false);
+      setSubmitting(false)
     }
-  };
+  }
 
-  const titles = {
-    task: 'Create New Task',
-    pjp: 'Create New PJP',
-    dealer: 'Create New Dealer',
-    dvr: 'Create DVR Report',
-    tvr: 'Create TVR Report',
-    leave: 'Apply for Leave',
-    'client-report': 'Create Client Report',
-    'competition-report': 'Create Competition Report',
-    'dealer-score': 'Score Dealer Performance'
-  };
+  const TitleMap: Record<string, string> = {
+    task: "Create Task",
+    pjp: "Create PJP",
+    dealer: "Create Dealer",
+    dvr: "Create DVR",
+    tvr: "Create TVR",
+    "dealer-score": "Score Dealer",
+  }
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-    >
-      <motion.div
-        initial={{ scale: 0.9, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        exit={{ scale: 0.9, opacity: 0 }}
-        className="bg-gray-800/90 backdrop-blur-xl rounded-2xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto border border-gray-700/50"
-      >
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-white">
-            {titles[type as keyof typeof titles]}
-          </h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="text-gray-400 hover:text-white"
-          >
-            <X className="w-5 h-5" />
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/50">
+      <div className="w-full max-w-md rounded-2xl border bg-card/95 backdrop-blur p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">{TitleMap[type] || "Create"}</h3>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-5 w-5" />
           </Button>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* ENHANCED TASK FORM with PJP option */}
-          {type === 'task' && (
+        <form onSubmit={submit} className="space-y-4">
+          {type === "task" && (
             <>
-              <div>
-                <Label className="text-gray-300">Task Title</Label>
-                <Input
-                  value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder="Enter task title"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
+              <Field label="Task Title">
+                <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+              </Field>
+              <Field label="Description"><Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+              <Field label="Task Date"><Input type="date" value={form.taskDate || ""} onChange={(e) => setForm({ ...form, taskDate: e.target.value })} /></Field>
+              <Field label="Site/Location"><Input value={form.siteName || ""} onChange={(e) => setForm({ ...form, siteName: e.target.value })} placeholder="e.g. Ahmedabad" /></Field>
+              <div className="flex items-center gap-2">
+                <Switch checked={!!form.isPjp} onCheckedChange={(v) => setForm({ ...form, isPjp: v })} />
+                <Label>This is a PJP task</Label>
               </div>
-              <div>
-                <Label className="text-gray-300">Description</Label>
-                <Textarea
-                  value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Task description"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Task Date</Label>
-                <Input
-                  type="date"
-                  value={formData.taskDate || ''}
-                  onChange={(e) => setFormData({ ...formData, taskDate: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Site/Location</Label>
-                <LocationPicker
-                  currentLocation={formData.siteName}
-                  onLocationSelect={(location) => setFormData({ ...formData, siteName: location })}
-                />
-              </div>
-              {/* PJP OPTION */}
-              <div className="flex items-center space-x-2">
-                <Switch
-                  checked={formData.isPjp || false}
-                  onCheckedChange={(checked) => setFormData({ ...formData, isPjp: checked })}
-                />
-                <Label className="text-gray-300">This is a PJP task</Label>
-              </div>
-              {formData.isPjp && (
-                <div>
-                  <Label className="text-gray-300">Related PJP</Label>
-                  <Select
-                    value={formData.pjpId || ''}
-                    onValueChange={(value) => setFormData({ ...formData, pjpId: value })}
-                  >
-                    <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                      <SelectValue placeholder="Select PJP" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-600">
-                      {useAppStore.getState().pjps.map((pjp) => (
-                        <SelectItem key={pjp.id} value={pjp.id}>{pjp.objective}</SelectItem>
+              {form.isPjp && (
+                <Field label="Related PJP">
+                  <Select value={String(form.pjpId || "")} onValueChange={(v) => setForm({ ...form, pjpId: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select PJP" /></SelectTrigger>
+                    <SelectContent>
+                      {(pjps || []).map((p: any) => (
+                        <SelectItem key={p.id} value={String(p.id)}>{p.objective}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </Field>
               )}
             </>
           )}
 
-          {/* ENHANCED PJP FORM with location picker */}
-          {type === 'pjp' && (
+          {type === "pjp" && (
             <>
-              <div>
-                <Label className="text-gray-300">Objective</Label>
-                <Input
-                  value={formData.objective || ''}
-                  onChange={(e) => setFormData({ ...formData, objective: e.target.value })}
-                  placeholder="Journey objective"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Area to Visit</Label>
-                <Input
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                  placeholder="Specific area"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Planned Date</Label>
-                <Input
-                  type="date"
-                  value={formData.plannedDate || ''}
-                  onChange={(e) => setFormData({ ...formData, plannedDate: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Expected Outcome</Label>
-                <Textarea
-                  value={formData.expectedOutcome || ''}
-                  onChange={(e) => setFormData({ ...formData, expectedOutcome: e.target.value })}
-                  placeholder="What do you expect to achieve?"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
+              <Field label="Objective"><Input value={form.objective || ""} onChange={(e) => setForm({ ...form, objective: e.target.value })} required /></Field>
+              <Field label="Location"><Input value={form.location || ""} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="City / Site" /></Field>
+              <Field label="Area to Visit"><Input value={form.area || ""} onChange={(e) => setForm({ ...form, area: e.target.value })} /></Field>
+              <Field label="Planned Date"><Input type="date" value={form.plannedDate || ""} onChange={(e) => setForm({ ...form, plannedDate: e.target.value })} required /></Field>
+              <Field label="Expected Outcome"><Textarea value={form.expectedOutcome || ""} onChange={(e) => setForm({ ...form, expectedOutcome: e.target.value })} /></Field>
             </>
           )}
 
-          {/* UPDATED DEALER FORM - WITH ALL SCHEMA FIELDS */}
-          {type === 'dealer' && (
+          {type === "dealer" && (
             <>
-              {/* Basic Info */}
-              <div>
-                <Label className="text-gray-300">Dealer Name *</Label>
-                <Input
-                  value={formData.name || ''}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="Enter dealer name"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label className="text-gray-300">Type *</Label>
-                <Select
-                  value={formData.type || ''}
-                  onValueChange={(value) => setFormData({ ...formData, type: value })}
-                >
-                  <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                    <SelectValue placeholder="Select dealer type" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-gray-800 border-gray-600">
+              <Field label="Dealer Name"><Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+              <Field label="Type">
+                <Select value={form.type || ""} onValueChange={(v) => setForm({ ...form, type: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
                     <SelectItem value="Premium">Premium</SelectItem>
                     <SelectItem value="Standard">Standard</SelectItem>
                     <SelectItem value="Basic">Basic</SelectItem>
@@ -1878,319 +855,45 @@ const CreateModal = ({
                     <SelectItem value="Retailer">Retailer</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-
-              <div>
-                <Label className="text-gray-300">Phone Number *</Label>
-                <Input
-                  value={formData.phoneNo || ''}
-                  onChange={(e) => setFormData({ ...formData, phoneNo: e.target.value })}
-                  placeholder="+91-XXXXXXXXXX"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-
-              {/* Location Details */}
-              <div>
-                <Label className="text-gray-300">Region (Location) *</Label>
-                <LocationPicker
-                  currentLocation={formData.region}
-                  onLocationSelect={(location, coords) => {
-                    setFormData({
-                      ...formData,
-                      region: location,
-                      latitude: coords?.lat,
-                      longitude: coords?.lng
-                    });
-                  }}
-                />
-                {formData.latitude && formData.longitude && (
-                  <div className="mt-1 text-xs text-gray-400">
-                    📍 Lat: {formData.latitude.toFixed(4)}, Lng: {formData.longitude.toFixed(4)}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <Label className="text-gray-300">Area *</Label>
-                <Input
-                  value={formData.area || ''}
-                  onChange={(e) => setFormData({ ...formData, area: e.target.value })}
-                  placeholder="Specific area/locality"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-
-              <div>
-                <Label className="text-gray-300">Full Address *</Label>
-                <Textarea
-                  value={formData.address || ''}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Complete address with pincode"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  rows={2}
-                  required
-                />
-              </div>
-
-              {/* Business Potential */}
+              </Field>
+              <Field label="Phone Number"><Input value={form.phoneNo || ""} onChange={(e) => setForm({ ...form, phoneNo: e.target.value })} required /></Field>
+              <Field label="Region"><Input value={form.region || ""} onChange={(e) => setForm({ ...form, region: e.target.value })} required /></Field>
+              <Field label="Area"><Input value={form.area || ""} onChange={(e) => setForm({ ...form, area: e.target.value })} required /></Field>
+              <Field label="Full Address"><Textarea value={form.address || ""} onChange={(e) => setForm({ ...form, address: e.target.value })} required rows={2} /></Field>
               <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-gray-300">Total Potential (₹) *</Label>
-                  <Input
-                    type="number"
-                    value={formData.totalPotential || ''}
-                    onChange={(e) => setFormData({ ...formData, totalPotential: e.target.value })}
-                    placeholder="100000"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label className="text-gray-300">Best Potential (₹) *</Label>
-                  <Input
-                    type="number"
-                    value={formData.bestPotential || ''}
-                    onChange={(e) => setFormData({ ...formData, bestPotential: e.target.value })}
-                    placeholder="50000"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Parent Dealer Feature */}
-              {/* Parent Dealer Feature */}
-              <div className="space-y-3">
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    checked={formData.hasParent || false}
-                    onCheckedChange={(checked) => setFormData({
-                      ...formData,
-                      hasParent: checked,
-                      parentDealerId: checked ? formData.parentDealerId : null
-                    })}
-                  />
-                  <Label className="text-gray-300">This dealer works under another dealer</Label>
-                </div>
-
-                {formData.hasParent && (
-                  <div>
-                    <Label className="text-gray-300">Parent Dealer</Label>
-                    <Select
-                      value={formData.parentDealerId || ''}
-                      onValueChange={(value) => setFormData({ ...formData, parentDealerId: value })}
-                    >
-                      <SelectTrigger className="bg-gray-900/50 border-gray-600 text-white mt-1">
-                        <SelectValue placeholder="Select parent dealer" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-gray-800 border-gray-600">
-                        {/* GET DEALERS FROM ZUSTAND STORE */}
-                        {dealers.length > 0 ? (
-                          dealers
-                            .filter(d => d.id !== useAppStore.getState().selectedItem?.id) // Don't show self
-                            .map((dealer) => (
-                              <SelectItem key={dealer.id} value={dealer.id}>
-                                {dealer.name} ({dealer.region} - {dealer.area})
-                              </SelectItem>
-                            ))
-                        ) : (
-                          <SelectItem value="" disabled>
-                            No dealers available
-                          </SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-
-              {/* Brand Selling with Smart Selector */}
-              <BrandSelector
-                selectedBrands={formData.brandSelling || []}
-                onChange={(brands) => setFormData({ ...formData, brandSelling: brands })}
-              />
-
-              {/* Feedback & Remarks */}
-              <div>
-                <Label className="text-gray-300">Feedback/Assessment *</Label>
-                <Textarea
-                  value={formData.feedbacks || ''}
-                  onChange={(e) => setFormData({ ...formData, feedbacks: e.target.value })}
-                  placeholder="Overall feedback about this dealer's performance and reliability"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  rows={2}
-                  required
-                />
-              </div>
-
-              <div>
-                <Label className="text-gray-300">Remarks (Optional)</Label>
-                <Textarea
-                  value={formData.remarks || ''}
-                  onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-                  placeholder="Additional notes or special instructions"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  rows={2}
-                />
+                <Field label="Total Potential (₹)"><Input type="number" value={form.totalPotential || ""} onChange={(e) => setForm({ ...form, totalPotential: e.target.value })} /></Field>
+                <Field label="Best Potential (₹)"><Input type="number" value={form.bestPotential || ""} onChange={(e) => setForm({ ...form, bestPotential: e.target.value })} /></Field>
               </div>
             </>
           )}
 
-          {/* DEALER SCORING FORM */}
-          {type === 'dealer-score' && (
+          {(type === "dvr" || type === "tvr") && (
             <>
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-white mb-2">
-                  Score: {useAppStore.getState().selectedItem?.name}
-                </h3>
+              <Field label="Title"><Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+              <Field label="Location"><Input value={form.location || ""} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Amount (₹)"><Input type="number" value={form.amount || ""} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
+                <Field label="Date"><Input type="date" value={form.date || ""} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
               </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Overall Dealer Score</span>
-                  <span>{formData.dealerScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.dealerScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, dealerScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Trustworthiness</span>
-                  <span>{formData.trustWorthinessScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.trustWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, trustWorthinessScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Credit Worthiness</span>
-                  <span>{formData.creditWorthinessScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.creditWorthinessScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, creditWorthinessScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Order History</span>
-                  <span>{formData.orderHistoryScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.orderHistoryScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, orderHistoryScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300 flex justify-between">
-                  <span>Visit Frequency</span>
-                  <span>{formData.visitFrequencyScore || 0}/10</span>
-                </Label>
-                <Slider
-                  value={[formData.visitFrequencyScore || 0]}
-                  onValueChange={(value) => setFormData({ ...formData, visitFrequencyScore: value[0] })}
-                  max={10}
-                  step={0.1}
-                  className="mt-2"
-                />
-              </div>
+              <Field label="Description"><Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
             </>
           )}
 
-          {/* DVR/TVR FORMS */}
-          {(type === 'dvr' || type === 'tvr') && (
-            <>
-              <div>
-                <Label className="text-gray-300">Report Title</Label>
-                <Input
-                  value={formData.title || ''}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  placeholder={`${type.toUpperCase()} Report`}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  required
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Location</Label>
-                <LocationPicker
-                  currentLocation={formData.location}
-                  onLocationSelect={(location) => setFormData({ ...formData, location })}
-                />
-              </div>
-              <div>
-                <Label className="text-gray-300">Description</Label>
-                <Textarea
-                  value={formData.description || ''}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Report details"
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  rows={3}
-                />
-              </div>
-              {type === 'dvr' && (
-                <div>
-                  <Label className="text-gray-300">Amount Collected (₹)</Label>
-                  <Input
-                    type="number"
-                    value={formData.amount || ''}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                    placeholder="0"
-                    className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                  />
-                </div>
-              )}
-              <div>
-                <Label className="text-gray-300">Date</Label>
-                <Input
-                  type="date"
-                  value={formData.date || ''}
-                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  className="bg-gray-900/50 border-gray-600 text-white mt-1"
-                />
-              </div>
-            </>
-          )}
-
-          <div className="flex space-x-3 pt-4">
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
-            >
-              {isSubmitting ? (
-                <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-              ) : null}
-              {isSubmitting ? 'Creating...' : 'Create'}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="border-gray-600 text-gray-300 hover:bg-gray-700"
-            >
-              Cancel
-            </Button>
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Saving</> : "Save"}</Button>
           </div>
         </form>
-      </motion.div>
-    </motion.div>
-  );
-};
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  )
+}
