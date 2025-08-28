@@ -37,6 +37,7 @@ import DVRForm from "@/pages/forms/DVRForm";
 import TVRForm from "@/pages/forms/TVRForm";
 import AttendanceInForm from "@/pages/forms/AttendanceInForm";
 import AttendanceOutForm from "@/pages/forms/AttendanceOutForm";
+import AddDealerForm from "@/pages/forms/AddDealerForm";
 
 // shared bits you said you exported
 import { useAppStore, StatusBar, LoadingList, StatCard } from "@/components/ReusableUI";
@@ -403,6 +404,8 @@ export default function HomePage() {
   );
   const [openDvr, setOpenDvr] = useState(false);
   const [openTvr, setOpenTvr] = useState(false);
+  const [openDealer, setOpenDealer] = useState(false);
+
 
   return (
     <div className="min-h-full flex flex-col">
@@ -508,8 +511,9 @@ export default function HomePage() {
 
       {/* Main Content (AppShell provides the scroll; just add bottom padding) */}
       <div className="px-6 py-6 space-y-8 pb-32">
+
         {/* Quick Actions */}
-        <div>
+        <section>
           <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <Plus className="h-5 w-5 text-primary" />
             Quick Actions
@@ -582,7 +586,7 @@ export default function HomePage() {
             </Dialog>
           </div>
 
-        </div>
+        </section>
 
         {/* Tasks */}
         <Section
@@ -726,10 +730,7 @@ export default function HomePage() {
         <Section
           title="Recent Dealers"
           Icon={Building2}
-          onAdd={() => {
-            setUIState("createType", "dealer");
-            setUIState("showCreateModal", true);
-          }}
+          onAdd={() => setOpenDealer(true)}   // the "+" in the section header
         >
           {isLoading ? (
             <LoadingList rows={3} />
@@ -744,6 +745,7 @@ export default function HomePage() {
                     setUIState("showDetailModal", true);
                   }}
                   onEdit={(d) => {
+                    // if you want edit to reuse the same form later, call setOpenDealer(true) and preload state
                     setUIState("selectedItem", d);
                     setUIState("createType", "dealer");
                     setUIState("showCreateModal", true);
@@ -760,18 +762,34 @@ export default function HomePage() {
           ) : (
             <div className="text-center py-6">
               <Empty icon={Building2} label="No dealers yet" />
-              <Button
-                className="mt-3"
-                onClick={() => {
-                  setUIState("createType", "dealer");
-                  setUIState("showCreateModal", true);
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" /> Add First Dealer
+              <Button className="mt-3" onClick={() => setOpenDealer(true)}>
+                <Plus className="h-4 w-4 mr-2" /> Add Dealer/Sub-Dealer
               </Button>
             </div>
           )}
         </Section>
+
+        {/* One dialog to rule them all */}
+        <Dialog open={openDealer} onOpenChange={setOpenDealer}>
+          <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
+            <DialogHeader className="px-4 pt-4 pb-2">
+              <DialogTitle>Add Dealer / Sub-Dealer</DialogTitle>
+            </DialogHeader>
+            <div className="h-full sm:h-auto overflow-y-auto px-4 pb-4">
+              <AddDealerForm
+                userId={user?.id}
+                onSubmitted={async (payload) => {
+                  // TODO: POST to your API: /api/dealers (insert into Neon via Drizzle)
+                  // await createRecord("dealer", payload);
+                  // await fetchAllData(); // refresh lists
+                  setOpenDealer(false);
+                }}
+                onCancel={() => setOpenDealer(false)}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+
       </div>
     </div>
   );
