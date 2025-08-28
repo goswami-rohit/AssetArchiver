@@ -1,7 +1,10 @@
+// src/pages/ChatInterface.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Mic, Paperclip, Sparkles, Bot, User, AlertCircle, CheckCircle, 
-         Building2, MapPin, Phone, FileText, Calendar, Users, Plus, 
-         ThumbsUp, ThumbsDown, Star, Clock, Save } from 'lucide-react';
+import {
+  Send, Mic, Paperclip, Sparkles, Bot, User, AlertCircle, CheckCircle,
+  Building2, MapPin, Phone, FileText, Calendar, Users, Plus,
+  ThumbsUp, ThumbsDown, Star, Clock, Save
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -31,9 +34,10 @@ interface FormData {
 
 interface ChatInterfaceProps {
   userId?: number;
+  onBack?: () => void;
 }
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +46,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
   const [formData, setFormData] = useState<FormData>({});
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [showQuickActions, setShowQuickActions] = useState(true);
-  
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,13 +60,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
     }
   })();
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
 
   // Fetch dealers on component mount
   useEffect(() => {
@@ -100,7 +97,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
     }
 
     const data = await response.json();
-    
+
     if (!data.success) {
       throw new Error(data.error || 'Vector RAG failed');
     }
@@ -170,7 +167,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
   const submitFormData = useCallback(async (endpoint: string, data: any) => {
     try {
       setIsLoading(true);
-      
+
       const response = await fetch('/api/rag/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -182,7 +179,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
       });
 
       const result = await response.json();
-      
+
       if (result.success) {
         const successMessage: Message = {
           id: Date.now().toString(),
@@ -193,12 +190,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
           metadata: { recordId: result.data?.id, endpoint }
         };
         setMessages(prev => [...prev, successMessage]);
-        
+
         // Reset flow
         setCurrentFlow(null);
         setFormData({});
         setShowQuickActions(true);
-        
+
         // Refresh dealers if dealer was created
         if (endpoint === '/api/dealers') {
           await fetchDealers();
@@ -234,7 +231,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
 
     try {
       const result = await callVectorRAGChat(userInput);
-      
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: result.message,
@@ -276,8 +273,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
         <div>
           <label className="text-sm font-medium mb-2 block">Select Dealer</label>
           {dealers.length > 0 ? (
-            <Select 
-              value={formData.dealerName || ''} 
+            <Select
+              value={formData.dealerName || ''}
               onValueChange={(value) => {
                 const dealer = dealers.find(d => d.dealerName === value);
                 setFormData(prev => ({
@@ -608,44 +605,44 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
 
   // Enhanced Quick Actions
   const quickActions = [
-    { 
-      icon: FileText, 
-      text: "Create DVR", 
+    {
+      icon: FileText,
+      text: "Create DVR",
       description: "Daily Visit Report",
       color: "from-blue-500 to-blue-600",
       action: startDVRFlow
     },
-    { 
-      icon: FileText, 
-      text: "Create TVR", 
+    {
+      icon: FileText,
+      text: "Create TVR",
       description: "Technical Visit Report",
       color: "from-green-500 to-green-600",
       action: startTVRFlow
     },
-    { 
-      icon: Building2, 
-      text: "New Dealer", 
+    {
+      icon: Building2,
+      text: "New Dealer",
       description: "Add dealer to system",
       color: "from-purple-500 to-purple-600",
       action: startDealerFlow
     },
-    { 
-      icon: Calendar, 
-      text: "Create PJP", 
+    {
+      icon: Calendar,
+      text: "Create PJP",
       description: "Journey Plan",
       color: "from-orange-500 to-orange-600",
       action: () => setInput("I want to create a new permanent journey plan")
     },
-    { 
-      icon: Clock, 
-      text: "Punch In", 
+    {
+      icon: Clock,
+      text: "Punch In",
       description: "Mark attendance",
       color: "from-emerald-500 to-emerald-600",
       action: () => setInput("Help me punch in my attendance")
     },
-    { 
-      icon: Users, 
-      text: "View Tasks", 
+    {
+      icon: Users,
+      text: "View Tasks",
       description: "Today's tasks",
       color: "from-indigo-500 to-indigo-600",
       action: () => setInput("Show me my pending tasks for today")
@@ -658,7 +655,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
 
     const currentInput = input.trim();
     setInput('');
-    
+
     await handleRegularChat(currentInput);
     inputRef.current?.focus();
   }, [input, isLoading, currentFlow, handleRegularChat]);
@@ -692,6 +689,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
       <div className="flex-shrink-0 p-6 border-b border-white/20 backdrop-blur-xl bg-white/10 dark:bg-black/10">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
+            {onBack && (
+              <button
+                onClick={onBack}
+                className="rounded-2xl p-2 hover:bg-black/10 dark:hover:bg-white/10"
+                aria-label="Back"
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  fill="none"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M15 18l-6-6 6-6" />
+                </svg>
+              </button>
+            )}
             <div className="relative">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
                 <Bot className="w-6 h-6 text-white" />
@@ -705,7 +722,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
               <p className="text-sm text-slate-500 dark:text-slate-400">{statusIndicator.text}</p>
             </div>
           </div>
-          
+
           {currentUserId && (
             <div className="text-xs text-slate-500 dark:text-slate-400">
               User ID: {currentUserId} | Dealers: {dealers.length}
@@ -741,15 +758,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
             className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             <div className={`flex max-w-[80%] ${message.sender === 'user' ? 'flex-row-reverse' : 'flex-row'} items-end space-x-3`}>
-              <div className={`w-8 h-8 rounded-2xl flex items-center justify-center shadow-lg ${
-                message.sender === 'user' 
-                  ? 'bg-gradient-to-r from-blue-500 to-purple-600' 
+              <div className={`w-8 h-8 rounded-2xl flex items-center justify-center shadow-lg ${message.sender === 'user'
+                  ? 'bg-gradient-to-r from-blue-500 to-purple-600'
                   : message.type === 'error'
-                  ? 'bg-gradient-to-r from-red-500 to-red-600'
-                  : message.type === 'success'
-                  ? 'bg-gradient-to-r from-green-500 to-emerald-600'
-                  : 'bg-gradient-to-r from-emerald-500 to-teal-600'
-              }`}>
+                    ? 'bg-gradient-to-r from-red-500 to-red-600'
+                    : message.type === 'success'
+                      ? 'bg-gradient-to-r from-green-500 to-emerald-600'
+                      : 'bg-gradient-to-r from-emerald-500 to-teal-600'
+                }`}>
                 {message.sender === 'user' ? (
                   <User className="w-4 h-4 text-white" />
                 ) : message.type === 'error' ? (
@@ -760,15 +776,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
                   <Bot className="w-4 h-4 text-white" />
                 )}
               </div>
-              <div className={`backdrop-blur-xl shadow-xl rounded-3xl px-6 py-4 ${
-                message.sender === 'user'
+              <div className={`backdrop-blur-xl shadow-xl rounded-3xl px-6 py-4 ${message.sender === 'user'
                   ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white'
                   : message.type === 'error'
-                  ? 'bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
-                  : message.type === 'success'
-                  ? 'bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800'
-                  : 'bg-white/70 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 border border-white/20'
-              }`}>
+                    ? 'bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
+                    : message.type === 'success'
+                      ? 'bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800'
+                      : 'bg-white/70 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 border border-white/20'
+                }`}>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                 {message.metadata?.endpoint && (
                   <div className="mt-2 text-xs opacity-70">
@@ -782,11 +797,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
                     )}
                   </div>
                 )}
-                <p className={`text-xs mt-2 ${
-                  message.sender === 'user' 
-                    ? 'text-blue-100' 
+                <p className={`text-xs mt-2 ${message.sender === 'user'
+                    ? 'text-blue-100'
                     : 'text-slate-500 dark:text-slate-400'
-                }`}>
+                  }`}>
                   {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
@@ -850,13 +864,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId }) => {
                 className="w-full px-6 py-4 pr-20 bg-white/70 dark:bg-slate-800/70 backdrop-blur-xl border border-white/20 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-slate-800 dark:text-slate-200 placeholder-slate-500 dark:placeholder-slate-400 shadow-xl transition-all duration-200 disabled:opacity-50"
               />
               <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center space-x-2">
-                <button 
+                <button
                   className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors"
                   disabled={!currentUserId}
                 >
                   <Paperclip className="w-4 h-4 text-slate-500 dark:text-slate-400" />
                 </button>
-                <button 
+                <button
                   className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-2xl transition-colors"
                   disabled={!currentUserId}
                 >

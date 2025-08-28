@@ -82,10 +82,10 @@ export default function Login() {
           <div className="mx-auto w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mb-4">
             <Building2 className="w-8 h-8 text-white" />
           </div>
-          <CardTitle className="text-2xl font-bold text-gray-900">
+          <CardTitle className="text-2xl font-bold text-white">
             Sales CRM
           </CardTitle>
-          <CardDescription className="text-gray-600">
+          <CardDescription className="text-gray-200">
             Enter your credentials to access the system
           </CardDescription>
         </CardHeader>

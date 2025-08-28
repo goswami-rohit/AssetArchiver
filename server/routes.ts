@@ -2,6 +2,7 @@
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
 import {
+  companies,
   dailyVisitReports,
   technicalVisitReports,
   permanentJourneyPlans,
@@ -492,51 +493,49 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== AUTH ====================
-  app.post('/api/auth/login', async (req: Request, res: Response) => {
+  //JSON normalizer
+  function toJsonSafe<T>(obj: T): T {
+    return JSON.parse(
+      JSON.stringify(obj, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
+    );
+  }
+
+  app.post("/api/auth/login", async (req, res) => {
     try {
-      const { loginId, password } = req.body;
+      const loginId = String(req.body?.loginId ?? "").trim();
+      const password = String(req.body?.password ?? "");
 
-      if (!loginId || !password) {
-        return res.status(400).json({ error: 'Login ID and password are required' });
-      }
+      if (!loginId || !password)
+        return res.status(400).json({ error: "Login ID and password are required" });
 
-      // Find user by salesmanLoginId or email
-      const user = await db.query.users.findFirst({
-        where: or(
-          eq(users.salesmanLoginId, loginId),
-          eq(users.email, loginId)
-        ),
-        with: {
-          company: true
-        }
-      });
+      // Pull exactly what you need
+      const [row] = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          status: users.status,
+          hashedPassword: users.hashedPassword,
+          salesmanLoginId: users.salesmanLoginId,
+          companyId: users.companyId,
+          companyName: companies.companyName, // optional
+        })
+        .from(users)
+        .leftJoin(companies, eq(users.companyId, companies.id))
+        .where(or(eq(users.salesmanLoginId, loginId), eq(users.email, loginId)))
+        .limit(1);
 
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
+      if (!row) return res.status(401).json({ error: "Invalid credentials" });
+      if (row.status !== "active") return res.status(401).json({ error: "Account is not active" });
 
-      // Check if user is active
-      if (user.status !== 'active') {
-        return res.status(401).json({ error: 'Account is not active' });
-      }
+      // If you actually store bcrypt hashes, use bcrypt.compare here.
+      if (!row.hashedPassword || row.hashedPassword !== password)
+        return res.status(401).json({ error: "Invalid credentials" });
 
-      // For now, simple password check (you should use bcrypt in production)
-      if (user.hashedPassword !== password) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-
-      // Success - return user data (without password)
-      const { hashedPassword, ...userWithoutPassword } = user;
-
-      res.json({
-        success: true,
-        user: userWithoutPassword,
-        message: 'Login successful'
-      });
-
-    } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({ error: 'Login failed' });
+      const { hashedPassword, ...safe } = row;
+      return res.json({ success: true, user: toJsonSafe(safe), message: "Login successful" });
+    } catch (err) {
+      console.error("Login error:", err);
+      return res.status(500).json({ error: "Login failed" });
     }
   });
 
