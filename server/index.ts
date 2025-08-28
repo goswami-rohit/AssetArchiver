@@ -15,7 +15,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { telegramBot } from './bot/telegram';
 import cors from 'cors';
 import { QdrantClient } from "@qdrant/js-client-rest"
-import { testQdrant } from "./qdrant";
+//import { testQdrant } from "./qdrant";
 
   // Since it's in the same folder
 export const qdrantClient = new QdrantClient({

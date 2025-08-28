@@ -1,5 +1,5 @@
 import { 
-  users, 
+  users,
   companies,
   dailyVisitReports,
   technicalVisitReports,
@@ -12,45 +12,67 @@ import {
   geoTracking,
   dailyTasks,
   dealerReportsAndScores,
-  type User, 
-  type InsertUser,
-  type Company,
-  type InsertCompany,
-  type DailyVisitReport,
-  type InsertDailyVisitReport,
-  type TechnicalVisitReport,
-  type InsertTechnicalVisitReport,
-  type PermanentJourneyPlan,
-  type InsertPermanentJourneyPlan,
-  type Dealer,
-  type InsertDealer,
-  type SalesmanAttendance,
-  type InsertSalesmanAttendance,
-  type SalesmanLeaveApplication,
-  type InsertSalesmanLeaveApplication,
-  type ClientReport,
-  type InsertClientReport,
-  type CompetitionReport,
-  type InsertCompetitionReport,
-  type GeoTracking,
-  type InsertGeoTracking,
-  type DailyTask,
-  type InsertDailyTask,
-  type DealerReportsAndScores,
-  type InsertDealerReportsAndScores
+  salesReport,
+  collectionReports,
+  ddp,
+  ratings,
+  brands,
+  dealerBrandMapping,
+  masterConnectedTable
 } from "../shared/schema";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, isNull } from "drizzle-orm";
 
+// Local Drizzle type aliases inferred from schema (to avoid importing types)
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = typeof companies.$inferInsert;
+export type DailyVisitReport = typeof dailyVisitReports.$inferSelect;
+export type InsertDailyVisitReport = typeof dailyVisitReports.$inferInsert;
+export type TechnicalVisitReport = typeof technicalVisitReports.$inferSelect;
+export type InsertTechnicalVisitReport = typeof technicalVisitReports.$inferInsert;
+export type PermanentJourneyPlan = typeof permanentJourneyPlans.$inferSelect;
+export type InsertPermanentJourneyPlan = typeof permanentJourneyPlans.$inferInsert;
+export type Dealer = typeof dealers.$inferSelect;
+export type InsertDealer = typeof dealers.$inferInsert;
+export type SalesmanAttendance = typeof salesmanAttendance.$inferSelect;
+export type InsertSalesmanAttendance = typeof salesmanAttendance.$inferInsert;
+export type SalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferSelect;
+export type InsertSalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferInsert;
+export type ClientReport = typeof clientReports.$inferSelect;
+export type InsertClientReport = typeof clientReports.$inferInsert;
+export type CompetitionReport = typeof competitionReports.$inferSelect;
+export type InsertCompetitionReport = typeof competitionReports.$inferInsert;
+export type GeoTracking = typeof geoTracking.$inferSelect;
+export type InsertGeoTracking = typeof geoTracking.$inferInsert;
+export type DailyTask = typeof dailyTasks.$inferSelect;
+export type InsertDailyTask = typeof dailyTasks.$inferInsert;
+export type DealerReportsAndScores = typeof dealerReportsAndScores.$inferSelect;
+export type InsertDealerReportsAndScores = typeof dealerReportsAndScores.$inferInsert;
+
+export type SalesReport = typeof salesReport.$inferSelect;
+export type InsertSalesReport = typeof salesReport.$inferInsert;
+export type CollectionReport = typeof collectionReports.$inferSelect;
+export type InsertCollectionReport = typeof collectionReports.$inferInsert;
+export type Ddp = typeof ddp.$inferSelect;
+export type InsertDdp = typeof ddp.$inferInsert;
+export type Rating = typeof ratings.$inferSelect;
+export type InsertRating = typeof ratings.$inferInsert;
+export type Brand = typeof brands.$inferSelect;
+export type InsertBrand = typeof brands.$inferInsert;
+export type DealerBrandMap = typeof dealerBrandMapping.$inferSelect;
+export type InsertDealerBrandMap = typeof dealerBrandMapping.$inferInsert;
+export type MasterConnected = typeof masterConnectedTable.$inferSelect;
+export type InsertMasterConnected = typeof masterConnectedTable.$inferInsert;
+
 export interface IStorage {
-  // Company operations
   getCompany(id: number): Promise<Company | undefined>;
   getCompanyByAdminUserId(adminUserId: string): Promise<Company | undefined>;
   getCompaniesByRegion(region: string): Promise<Company[]>;
   createCompany(insertCompany: InsertCompany): Promise<Company>;
   updateCompany(id: number, updates: Partial<InsertCompany>): Promise<Company>;
 
-  // User operations
   getUser(id: number): Promise<User | undefined>;
   getUserByWorkosUserId(workosUserId: string): Promise<User | undefined>;
   getUserBySalesmanLoginId(salesmanLoginId: string): Promise<User | undefined>;
@@ -62,7 +84,6 @@ export interface IStorage {
   createUser(insertUser: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User>;
 
-  // Daily Visit Report operations
   getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined>;
   getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]>;
   getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]>;
@@ -70,84 +91,108 @@ export interface IStorage {
   createDailyVisitReport(insertReport: InsertDailyVisitReport): Promise<DailyVisitReport>;
   updateDailyVisitReport(id: string, updates: Partial<InsertDailyVisitReport>): Promise<DailyVisitReport>;
 
-  // Technical Visit Report operations
   getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined>;
   getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]>;
   getTechnicalVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<TechnicalVisitReport[]>;
   createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport>;
   updateTechnicalVisitReport(id: string, updates: Partial<InsertTechnicalVisitReport>): Promise<TechnicalVisitReport>;
 
-  // Permanent Journey Plan operations
   getPermanentJourneyPlan(id: string): Promise<PermanentJourneyPlan | undefined>;
   getPermanentJourneyPlansByUserId(userId: number): Promise<PermanentJourneyPlan[]>;
+  getPermanentJourneyPlansAssignedToUser(userId: number): Promise<PermanentJourneyPlan[]>;
   createPermanentJourneyPlan(insertPlan: InsertPermanentJourneyPlan): Promise<PermanentJourneyPlan>;
   updatePermanentJourneyPlan(id: string, updates: Partial<InsertPermanentJourneyPlan>): Promise<PermanentJourneyPlan>;
 
-  // Dealer operations
   getDealer(id: string): Promise<Dealer | undefined>;
   getDealersByUserId(userId: number): Promise<Dealer[]>;
   getDealersByRegion(region: string): Promise<Dealer[]>;
   getDealersByArea(area: string): Promise<Dealer[]>;
-  getSubDealers(parentDealerId: string): Promise<Dealer[]>;
   createDealer(insertDealer: InsertDealer): Promise<Dealer>;
   updateDealer(id: string, updates: Partial<InsertDealer>): Promise<Dealer>;
 
-  // Salesman Attendance operations
   getSalesmanAttendance(id: string): Promise<SalesmanAttendance | undefined>;
   getSalesmanAttendanceByUserId(userId: number): Promise<SalesmanAttendance[]>;
-  getSalesmanAttendanceByDate(userId: number, date: Date): Promise<SalesmanAttendance | undefined>;
+  getSalesmanAttendanceByDate(userId: number, date: string): Promise<SalesmanAttendance | undefined>;
   createSalesmanAttendance(insertAttendance: InsertSalesmanAttendance): Promise<SalesmanAttendance>;
   updateSalesmanAttendance(id: string, updates: Partial<InsertSalesmanAttendance>): Promise<SalesmanAttendance>;
 
-  // Salesman Leave Application operations
   getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined>;
   getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]>;
   getSalesmanLeaveApplicationsByStatus(status: string): Promise<SalesmanLeaveApplication[]>;
-  createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication>;
+  createSalesmanLeaveApplication(insertLeave: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication>;
   updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication>;
 
-  // Client Report operations
   getClientReport(id: string): Promise<ClientReport | undefined>;
   getClientReportsByUserId(userId: number): Promise<ClientReport[]>;
   createClientReport(insertReport: InsertClientReport): Promise<ClientReport>;
   updateClientReport(id: string, updates: Partial<InsertClientReport>): Promise<ClientReport>;
 
-  // Competition Report operations
   getCompetitionReport(id: string): Promise<CompetitionReport | undefined>;
   getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]>;
-  getCompetitionReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<CompetitionReport[]>;
   createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport>;
   updateCompetitionReport(id: string, updates: Partial<InsertCompetitionReport>): Promise<CompetitionReport>;
 
-  // Geo Tracking operations
-  getGeoTrackingRecords(userId: number, limit?: number): Promise<GeoTracking[]>;
-  getGeoTrackingByDateRange(userId: number, startDate: Date, endDate: Date): Promise<GeoTracking[]>;
-  createGeoTrackingRecord(insertRecord: InsertGeoTracking): Promise<GeoTracking>;
+  getGeoTracking(id: string): Promise<GeoTracking | undefined>;
+  getGeoTrackingByUserId(userId: number): Promise<GeoTracking[]>;
+  createGeoTracking(insertGeo: InsertGeoTracking): Promise<GeoTracking>;
+  updateGeoTracking(id: string, updates: Partial<InsertGeoTracking>): Promise<GeoTracking>;
 
-  // Daily Task operations
   getDailyTask(id: string): Promise<DailyTask | undefined>;
-  getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]>;
-  getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]>;
-  getDailyTasksByStatus(status: string, companyId: number): Promise<DailyTask[]>;
+  getDailyTasksByUserId(userId: number): Promise<DailyTask[]>;
+  getDailyTasksAssignedByUserId(assignedByUserId: number): Promise<DailyTask[]>;
   createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask>;
   updateDailyTask(id: string, updates: Partial<InsertDailyTask>): Promise<DailyTask>;
-  updateTaskStatus(taskId: string, status: string): Promise<DailyTask>;
 
-  // Dealer Reports and Scores operations
   getDealerReportsAndScores(id: string): Promise<DealerReportsAndScores | undefined>;
   getDealerReportsAndScoresByDealerId(dealerId: string): Promise<DealerReportsAndScores | undefined>;
-  createDealerReportsAndScores(insertScores: InsertDealerReportsAndScores): Promise<DealerReportsAndScores>;
-  updateDealerReportsAndScores(id: string, updates: Partial<InsertDealerReportsAndScores>): Promise<DealerReportsAndScores>;
+  upsertDealerReportsAndScores(data: InsertDealerReportsAndScores): Promise<DealerReportsAndScores>;
 
-  // Enhanced business methods
-  authenticateUser(salesmanLoginId: string, password: string): Promise<User | null>;
-  trackLocation(userId: number, latitude: number, longitude: number): Promise<GeoTracking>;
-  getLocationAnalytics(userId: number, period: string): Promise<any>;
-  calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number;
-  punchIn(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance>;
-  punchOut(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance>;
   getBusinessMetrics(companyId: number): Promise<any>;
   assignTaskToUser(taskData: InsertDailyTask): Promise<DailyTask>;
+
+  // SALES REPORT
+  getSalesReport(id: number): Promise<SalesReport | undefined>;
+  getSalesReportsByUserId(userId: number): Promise<SalesReport[]>;
+  getSalesReportsByDealerId(dealerId: string): Promise<SalesReport[]>;
+  createSalesReport(data: InsertSalesReport): Promise<SalesReport>;
+  updateSalesReport(id: number, updates: Partial<InsertSalesReport>): Promise<SalesReport>;
+
+  // COLLECTION REPORTS
+  getCollectionReport(id: string): Promise<CollectionReport | undefined>;
+  getCollectionReportsByDealerId(dealerId: string): Promise<CollectionReport[]>;
+  createCollectionReport(data: InsertCollectionReport): Promise<CollectionReport>;
+  updateCollectionReport(id: string, updates: Partial<InsertCollectionReport>): Promise<CollectionReport>;
+
+  // DDP
+  getDdp(id: number): Promise<Ddp | undefined>;
+  getDdpByUserId(userId: number): Promise<Ddp[]>;
+  getDdpByDealerId(dealerId: string): Promise<Ddp[]>;
+  createDdp(data: InsertDdp): Promise<Ddp>;
+  updateDdp(id: number, updates: Partial<InsertDdp>): Promise<Ddp>;
+
+  // RATINGS
+  getRating(id: number): Promise<Rating | undefined>;
+  getRatingsByUserId(userId: number): Promise<Rating[]>;
+  createRating(data: InsertRating): Promise<Rating>;
+  updateRating(id: number, updates: Partial<InsertRating>): Promise<Rating>;
+
+  // BRANDS
+  getBrand(id: number): Promise<Brand | undefined>;
+  getBrandByName(name: string): Promise<Brand | undefined>;
+  listBrands(): Promise<Brand[]>;
+  createBrand(data: InsertBrand): Promise<Brand>;
+  updateBrand(id: number, updates: Partial<InsertBrand>): Promise<Brand>;
+
+  // DEALER BRAND MAPPING
+  getDealerBrandMap(id: string): Promise<DealerBrandMap | undefined>;
+  getDealerBrandMapsByDealerId(dealerId: string): Promise<DealerBrandMap[]>;
+  getDealerBrandMapsByBrandId(brandId: number): Promise<DealerBrandMap[]>;
+  upsertDealerBrandMap(data: InsertDealerBrandMap): Promise<DealerBrandMap>;
+
+  // MASTER CONNECTED TABLE
+  getMasterConnected(id: string): Promise<MasterConnected | undefined>;
+  createMasterConnected(data: InsertMasterConnected): Promise<MasterConnected>;
+  updateMasterConnected(id: string, updates: Partial<InsertMasterConnected>): Promise<MasterConnected>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -214,12 +259,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUserHierarchy(userId: number): Promise<User[]> {
-    // Get all users who report to this user (recursively)
-    const hierarchy = await db
-      .select()
-      .from(users)
-      .where(eq(users.reportsToId, userId));
-    return hierarchy;
+    const results = await db.execute(sql`
+      WITH RECURSIVE hierarchy AS (
+        SELECT * FROM users WHERE id = ${userId}
+        UNION ALL
+        SELECT u.* FROM users u
+        JOIN hierarchy h ON u.reports_to_id = h.id
+      )
+      SELECT * FROM hierarchy;
+    `);
+    // @ts-ignore drizzle execute returns rows
+    return results.rows as User[];
   }
 
   async getDirectReports(managerId: number): Promise<User[]> {
@@ -240,7 +290,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // DAILY VISIT REPORT OPERATIONS
+  // DAILY VISIT REPORTS
   // ========================================
 
   async getDailyVisitReport(id: string): Promise<DailyVisitReport | undefined> {
@@ -249,30 +299,29 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDailyVisitReportsByUserId(userId: number): Promise<DailyVisitReport[]> {
-    return await db.select().from(dailyVisitReports)
-      .where(eq(dailyVisitReports.userId, userId))
-      .orderBy(desc(dailyVisitReports.reportDate));
+    return await db.select().from(dailyVisitReports).where(eq(dailyVisitReports.userId, userId)).orderBy(desc(dailyVisitReports.createdAt));
   }
 
   async getDailyVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
-    return await db.select().from(dailyVisitReports)
-      .where(and(
+    return await db.select().from(dailyVisitReports).where(
+      and(
         eq(dailyVisitReports.userId, userId),
-        gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
-        lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
-      ))
-      .orderBy(desc(dailyVisitReports.reportDate));
+        gte(dailyVisitReports.createdAt, startDate),
+        lte(dailyVisitReports.createdAt, endDate)
+      )
+    ).orderBy(desc(dailyVisitReports.createdAt));
   }
 
   async getDailyVisitReportsByCompanyDateRange(companyId: number, startDate: Date, endDate: Date): Promise<DailyVisitReport[]> {
-    return await db.select().from(dailyVisitReports)
-      .innerJoin(users, eq(dailyVisitReports.userId, users.id))
-      .where(and(
-        eq(users.companyId, companyId),
-        gte(dailyVisitReports.reportDate, startDate.toISOString().split('T')[0]),
-        lte(dailyVisitReports.reportDate, endDate.toISOString().split('T')[0])
-      ))
-      .orderBy(desc(dailyVisitReports.reportDate));
+    return await db.execute(sql`
+      SELECT dvr.*
+      FROM daily_visit_reports dvr
+      JOIN users u ON u.id = dvr.user_id
+      WHERE u.company_id = ${companyId}
+        AND dvr.created_at >= ${startDate}
+        AND dvr.created_at <= ${endDate}
+      ORDER BY dvr.created_at DESC
+    `).then(res => (res as any).rows as DailyVisitReport[]);
   }
 
   async createDailyVisitReport(insertReport: InsertDailyVisitReport): Promise<DailyVisitReport> {
@@ -289,7 +338,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // TECHNICAL VISIT REPORT OPERATIONS
+  // TECHNICAL VISIT REPORTS
   // ========================================
 
   async getTechnicalVisitReport(id: string): Promise<TechnicalVisitReport | undefined> {
@@ -298,19 +347,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTechnicalVisitReportsByUserId(userId: number): Promise<TechnicalVisitReport[]> {
-    return await db.select().from(technicalVisitReports)
-      .where(eq(technicalVisitReports.userId, userId))
-      .orderBy(desc(technicalVisitReports.reportDate));
+    return await db.select().from(technicalVisitReports).where(eq(technicalVisitReports.userId, userId)).orderBy(desc(technicalVisitReports.createdAt));
   }
 
   async getTechnicalVisitReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<TechnicalVisitReport[]> {
-    return await db.select().from(technicalVisitReports)
-      .where(and(
+    return await db.select().from(technicalVisitReports).where(
+      and(
         eq(technicalVisitReports.userId, userId),
-        gte(technicalVisitReports.reportDate, startDate.toISOString().split('T')[0]),
-        lte(technicalVisitReports.reportDate, endDate.toISOString().split('T')[0])
-      ))
-      .orderBy(desc(technicalVisitReports.reportDate));
+        gte(technicalVisitReports.createdAt, startDate),
+        lte(technicalVisitReports.createdAt, endDate)
+      )
+    ).orderBy(desc(technicalVisitReports.createdAt));
   }
 
   async createTechnicalVisitReport(insertReport: InsertTechnicalVisitReport): Promise<TechnicalVisitReport> {
@@ -327,7 +374,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // PERMANENT JOURNEY PLAN OPERATIONS
+  // PERMANENT JOURNEY PLANS
   // ========================================
 
   async getPermanentJourneyPlan(id: string): Promise<PermanentJourneyPlan | undefined> {
@@ -336,9 +383,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPermanentJourneyPlansByUserId(userId: number): Promise<PermanentJourneyPlan[]> {
-    return await db.select().from(permanentJourneyPlans)
-      .where(eq(permanentJourneyPlans.userId, userId))
-      .orderBy(desc(permanentJourneyPlans.planDate));
+    return await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.createdById, userId)).orderBy(desc(permanentJourneyPlans.createdAt));
+  }
+
+  async getPermanentJourneyPlansAssignedToUser(userId: number): Promise<PermanentJourneyPlan[]> {
+    return await db.select().from(permanentJourneyPlans).where(eq(permanentJourneyPlans.userId, userId)).orderBy(desc(permanentJourneyPlans.createdAt));
   }
 
   async createPermanentJourneyPlan(insertPlan: InsertPermanentJourneyPlan): Promise<PermanentJourneyPlan> {
@@ -355,7 +404,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // DEALER OPERATIONS
+  // DEALERS
   // ========================================
 
   async getDealer(id: string): Promise<Dealer | undefined> {
@@ -364,27 +413,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getDealersByUserId(userId: number): Promise<Dealer[]> {
-    return await db.select().from(dealers)
-      .where(eq(dealers.userId, userId))
-      .orderBy(asc(dealers.name));
+    return await db.select().from(dealers).where(eq(dealers.userId, userId));
   }
 
   async getDealersByRegion(region: string): Promise<Dealer[]> {
-    return await db.select().from(dealers)
-      .where(eq(dealers.region, region))
-      .orderBy(asc(dealers.name));
+    return await db.select().from(dealers).where(eq(dealers.region, region));
   }
 
   async getDealersByArea(area: string): Promise<Dealer[]> {
-    return await db.select().from(dealers)
-      .where(eq(dealers.area, area))
-      .orderBy(asc(dealers.name));
-  }
-
-  async getSubDealers(parentDealerId: string): Promise<Dealer[]> {
-    return await db.select().from(dealers)
-      .where(eq(dealers.parentDealerId, parentDealerId))
-      .orderBy(asc(dealers.name));
+    return await db.select().from(dealers).where(eq(dealers.area, area));
   }
 
   async createDealer(insertDealer: InsertDealer): Promise<Dealer> {
@@ -401,7 +438,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // SALESMAN ATTENDANCE OPERATIONS
+  // SALESMAN ATTENDANCE
   // ========================================
 
   async getSalesmanAttendance(id: string): Promise<SalesmanAttendance | undefined> {
@@ -410,17 +447,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getSalesmanAttendanceByUserId(userId: number): Promise<SalesmanAttendance[]> {
-    return await db.select().from(salesmanAttendance)
-      .where(eq(salesmanAttendance.userId, userId))
-      .orderBy(desc(salesmanAttendance.attendanceDate));
+    return await db.select().from(salesmanAttendance).where(eq(salesmanAttendance.userId, userId)).orderBy(desc(salesmanAttendance.createdAt));
   }
 
-  async getSalesmanAttendanceByDate(userId: number, date: Date): Promise<SalesmanAttendance | undefined> {
-    const [attendance] = await db.select().from(salesmanAttendance)
-      .where(and(
-        eq(salesmanAttendance.userId, userId),
-        eq(salesmanAttendance.attendanceDate, date.toISOString().split('T')[0])
-      ));
+  async getSalesmanAttendanceByDate(userId: number, date: string): Promise<SalesmanAttendance | undefined> {
+    const [attendance] = await db.select().from(salesmanAttendance).where(
+      and(eq(salesmanAttendance.userId, userId), eq(salesmanAttendance.attendanceDate, date))
+    );
     return attendance || undefined;
   }
 
@@ -438,41 +471,37 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // SALESMAN LEAVE APPLICATION OPERATIONS
+  // LEAVE APPLICATIONS
   // ========================================
 
   async getSalesmanLeaveApplication(id: string): Promise<SalesmanLeaveApplication | undefined> {
-    const [application] = await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.id, id));
-    return application || undefined;
+    const [leave] = await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.id, id));
+    return leave || undefined;
   }
 
   async getSalesmanLeaveApplicationsByUserId(userId: number): Promise<SalesmanLeaveApplication[]> {
-    return await db.select().from(salesmanLeaveApplications)
-      .where(eq(salesmanLeaveApplications.userId, userId))
-      .orderBy(desc(salesmanLeaveApplications.createdAt));
+    return await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.userId, userId)).orderBy(desc(salesmanLeaveApplications.createdAt));
   }
 
   async getSalesmanLeaveApplicationsByStatus(status: string): Promise<SalesmanLeaveApplication[]> {
-    return await db.select().from(salesmanLeaveApplications)
-      .where(eq(salesmanLeaveApplications.status, status))
-      .orderBy(desc(salesmanLeaveApplications.createdAt));
+    return await db.select().from(salesmanLeaveApplications).where(eq(salesmanLeaveApplications.status, status)).orderBy(desc(salesmanLeaveApplications.createdAt));
   }
 
-  async createSalesmanLeaveApplication(insertApplication: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication> {
-    const [application] = await db.insert(salesmanLeaveApplications).values(insertApplication).returning();
-    return application;
+  async createSalesmanLeaveApplication(insertLeave: InsertSalesmanLeaveApplication): Promise<SalesmanLeaveApplication> {
+    const [leave] = await db.insert(salesmanLeaveApplications).values(insertLeave).returning();
+    return leave;
   }
 
   async updateSalesmanLeaveApplication(id: string, updates: Partial<InsertSalesmanLeaveApplication>): Promise<SalesmanLeaveApplication> {
-    const [application] = await db.update(salesmanLeaveApplications).set({
+    const [leave] = await db.update(salesmanLeaveApplications).set({
       ...updates,
       updatedAt: new Date()
     }).where(eq(salesmanLeaveApplications.id, id)).returning();
-    return application;
+    return leave;
   }
 
   // ========================================
-  // CLIENT REPORT OPERATIONS
+  // CLIENT REPORTS
   // ========================================
 
   async getClientReport(id: string): Promise<ClientReport | undefined> {
@@ -481,9 +510,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getClientReportsByUserId(userId: number): Promise<ClientReport[]> {
-    return await db.select().from(clientReports)
-      .where(eq(clientReports.userId, userId))
-      .orderBy(desc(clientReports.createdAt));
+    return await db.select().from(clientReports).where(eq(clientReports.userId, userId)).orderBy(desc(clientReports.createdAt));
   }
 
   async createClientReport(insertReport: InsertClientReport): Promise<ClientReport> {
@@ -500,7 +527,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // COMPETITION REPORT OPERATIONS
+  // COMPETITION REPORTS
   // ========================================
 
   async getCompetitionReport(id: string): Promise<CompetitionReport | undefined> {
@@ -509,19 +536,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getCompetitionReportsByUserId(userId: number): Promise<CompetitionReport[]> {
-    return await db.select().from(competitionReports)
-      .where(eq(competitionReports.userId, userId))
-      .orderBy(desc(competitionReports.reportDate));
-  }
-
-  async getCompetitionReportsByDateRange(userId: number, startDate: Date, endDate: Date): Promise<CompetitionReport[]> {
-    return await db.select().from(competitionReports)
-      .where(and(
-        eq(competitionReports.userId, userId),
-        gte(competitionReports.reportDate, startDate.toISOString().split('T')[0]),
-        lte(competitionReports.reportDate, endDate.toISOString().split('T')[0])
-      ))
-      .orderBy(desc(competitionReports.reportDate));
+    return await db.select().from(competitionReports).where(eq(competitionReports.userId, userId)).orderBy(desc(competitionReports.createdAt));
   }
 
   async createCompetitionReport(insertReport: InsertCompetitionReport): Promise<CompetitionReport> {
@@ -538,33 +553,33 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // GEO TRACKING OPERATIONS
+  // GEO TRACKING
   // ========================================
 
-  async getGeoTrackingRecords(userId: number, limit: number = 100): Promise<GeoTracking[]> {
-    return await db.select().from(geoTracking)
-      .where(eq(geoTracking.userId, userId))
-      .orderBy(desc(geoTracking.recordedAt))
-      .limit(limit);
+  async getGeoTracking(id: string): Promise<GeoTracking | undefined> {
+    const [geo] = await db.select().from(geoTracking).where(eq(geoTracking.id, id));
+    return geo || undefined;
   }
 
-  async getGeoTrackingByDateRange(userId: number, startDate: Date, endDate: Date): Promise<GeoTracking[]> {
-    return await db.select().from(geoTracking)
-      .where(and(
-        eq(geoTracking.userId, userId),
-        gte(geoTracking.recordedAt, startDate),
-        lte(geoTracking.recordedAt, endDate)
-      ))
-      .orderBy(desc(geoTracking.recordedAt));
+  async getGeoTrackingByUserId(userId: number): Promise<GeoTracking[]> {
+    return await db.select().from(geoTracking).where(eq(geoTracking.userId, userId)).orderBy(desc(geoTracking.createdAt));
   }
 
-  async createGeoTrackingRecord(insertRecord: InsertGeoTracking): Promise<GeoTracking> {
-    const [record] = await db.insert(geoTracking).values(insertRecord).returning();
-    return record;
+  async createGeoTracking(insertGeo: InsertGeoTracking): Promise<GeoTracking> {
+    const [geo] = await db.insert(geoTracking).values(insertGeo).returning();
+    return geo;
+  }
+
+  async updateGeoTracking(id: string, updates: Partial<InsertGeoTracking>): Promise<GeoTracking> {
+    const [geo] = await db.update(geoTracking).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(geoTracking.id, id)).returning();
+    return geo;
   }
 
   // ========================================
-  // DAILY TASK OPERATIONS
+  // DAILY TASKS
   // ========================================
 
   async getDailyTask(id: string): Promise<DailyTask | undefined> {
@@ -572,50 +587,12 @@ export class DatabaseStorage implements IStorage {
     return task || undefined;
   }
 
-  async getDailyTasksByAssignedUserId(userId: number): Promise<DailyTask[]> {
-    return await db.select().from(dailyTasks)
-      .where(eq(dailyTasks.userId, userId))
-      .orderBy(desc(dailyTasks.taskDate));
+  async getDailyTasksByUserId(userId: number): Promise<DailyTask[]> {
+    return await db.select().from(dailyTasks).where(eq(dailyTasks.userId, userId)).orderBy(desc(dailyTasks.createdAt));
   }
 
-  async getDailyTasksByCreatedUserId(userId: number): Promise<DailyTask[]> {
-    return await db.select().from(dailyTasks)
-      .where(eq(dailyTasks.assignedByUserId, userId))
-      .orderBy(desc(dailyTasks.taskDate));
-  }
-
-  async getDailyTasksByStatus(status: string, companyId: number): Promise<DailyTask[]> {
-    try {
-      const results = await db
-        .select({
-          id: dailyTasks.id,
-          createdAt: dailyTasks.createdAt,
-          updatedAt: dailyTasks.updatedAt,
-          status: dailyTasks.status,
-          userId: dailyTasks.userId,
-          visitType: dailyTasks.visitType,
-          description: dailyTasks.description,
-          siteName: dailyTasks.siteName,
-          assignedByUserId: dailyTasks.assignedByUserId,
-          taskDate: dailyTasks.taskDate,
-          relatedDealerId: dailyTasks.relatedDealerId,
-          pjpId: dailyTasks.pjpId
-        })
-        .from(dailyTasks)
-        .innerJoin(users, eq(dailyTasks.userId, users.id))
-        .where(
-          and(
-            eq(dailyTasks.status, status),
-            eq(users.companyId, companyId)
-          )
-        )
-        .orderBy(desc(dailyTasks.taskDate));
-
-      return results;
-    } catch (error) {
-      console.error('Error getting tasks by status:', error);
-      throw error;
-    }
+  async getDailyTasksAssignedByUserId(assignedByUserId: number): Promise<DailyTask[]> {
+    return await db.select().from(dailyTasks).where(eq(dailyTasks.assignedByUserId, assignedByUserId)).orderBy(desc(dailyTasks.createdAt));
   }
 
   async createDailyTask(insertTask: InsertDailyTask): Promise<DailyTask> {
@@ -631,309 +608,70 @@ export class DatabaseStorage implements IStorage {
     return task;
   }
 
-  async updateTaskStatus(taskId: string, status: string): Promise<DailyTask> {
-    try {
-      const [task] = await db
-        .update(dailyTasks)
-        .set({ 
-          status,
-          updatedAt: new Date()
-        })
-        .where(eq(dailyTasks.id, taskId))
-        .returning();
-      
-      return task;
-    } catch (error) {
-      console.error('Error updating task status:', error);
-      throw error;
-    }
-  }
-
   // ========================================
-  // DEALER REPORTS AND SCORES OPERATIONS
+  // DEALER REPORTS AND SCORES
   // ========================================
 
   async getDealerReportsAndScores(id: string): Promise<DealerReportsAndScores | undefined> {
-    const [scores] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.id, id));
-    return scores || undefined;
+    const [row] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.id, id));
+    return row || undefined;
   }
 
   async getDealerReportsAndScoresByDealerId(dealerId: string): Promise<DealerReportsAndScores | undefined> {
-    const [scores] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.dealerId, dealerId));
-    return scores || undefined;
+    const [row] = await db.select().from(dealerReportsAndScores).where(eq(dealerReportsAndScores.dealerId, dealerId));
+    return row || undefined;
   }
 
-  async createDealerReportsAndScores(insertScores: InsertDealerReportsAndScores): Promise<DealerReportsAndScores> {
-    const [scores] = await db.insert(dealerReportsAndScores).values(insertScores).returning();
-    return scores;
-  }
-
-  async updateDealerReportsAndScores(id: string, updates: Partial<InsertDealerReportsAndScores>): Promise<DealerReportsAndScores> {
-    const [scores] = await db.update(dealerReportsAndScores).set({
-      ...updates,
-      updatedAt: new Date()
-    }).where(eq(dealerReportsAndScores.id, id)).returning();
-    return scores;
-  }
-
-  // ========================================
-  // ENHANCED BUSINESS MANAGEMENT METHODS
-  // ========================================
-
-  // User Authentication for Salesman App
-  async authenticateUser(salesmanLoginId: string, password: string): Promise<User | null> {
+  async upsertDealerReportsAndScores(data: InsertDealerReportsAndScores): Promise<DealerReportsAndScores> {
+    // try insert; on conflict update
     try {
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(
-          and(
-            eq(users.salesmanLoginId, salesmanLoginId),
-            eq(users.hashedPassword, password), // In production, use proper password hashing
-            eq(users.status, "active")
-          )
-        )
-        .limit(1);
-      return user || null;
-    } catch (error) {
-      console.error('Error authenticating user:', error);
-      throw error;
-    }
-  }
-
-  // ========================================
-  // ATTENDANCE ENHANCEMENT METHODS
-  // ========================================
-
-  async punchIn(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance> {
-    try {
-      // Check if already punched in today
-      const today = new Date().toISOString().split('T')[0];
-      const [existingAttendance] = await db
-        .select()
-        .from(salesmanAttendance)
-        .where(
-          and(
-            eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, today)
-          )
-        )
-        .limit(1);
-
-      if (existingAttendance && existingAttendance.inTimeTimestamp) {
-        throw new Error('Already punched in today');
-      }
-
-      const attendanceRecord = await this.createSalesmanAttendance({
-        userId,
-        attendanceDate: today,
-        locationName: "Field Location", // Can be enhanced with reverse geocoding
-        inTimeTimestamp: new Date(),
-        outTimeTimestamp: null,
-        inTimeImageCaptured: !!photoUrl,
-        outTimeImageCaptured: false,
-        inTimeImageUrl: photoUrl,
-        outTimeImageUrl: null,
-        inTimeLatitude: latitude.toString(),
-        inTimeLongitude: longitude.toString(),
-        inTimeAccuracy: null,
-        inTimeSpeed: null,
-        inTimeHeading: null,
-        inTimeAltitude: null,
-        outTimeLatitude: null,
-        outTimeLongitude: null,
-        outTimeAccuracy: null,
-        outTimeSpeed: null,
-        outTimeHeading: null,
-        outTimeAltitude: null,
-      });
-
-      return attendanceRecord;
-    } catch (error) {
-      console.error('Error punching in:', error);
-      throw error;
-    }
-  }
-
-  async punchOut(userId: number, latitude: number, longitude: number, photoUrl?: string): Promise<SalesmanAttendance> {
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const [attendanceRecord] = await db
-        .select()
-        .from(salesmanAttendance)
-        .where(
-          and(
-            eq(salesmanAttendance.userId, userId),
-            eq(salesmanAttendance.attendanceDate, today)
-          )
-        )
-        .limit(1);
-
-      if (!attendanceRecord || !attendanceRecord.inTimeTimestamp) {
-        throw new Error('No punch in record found for today');
-      }
-
-      const [updatedRecord] = await db
-        .update(salesmanAttendance)
+      const [row] = await db.insert(dealerReportsAndScores).values(data).returning();
+      return row;
+    } catch {
+      const [row] = await db.update(dealerReportsAndScores)
         .set({
-          outTimeTimestamp: new Date(),
-          outTimeLatitude: latitude.toString(),
-          outTimeLongitude: longitude.toString(),
-          outTimeImageCaptured: !!photoUrl,
-          outTimeImageUrl: photoUrl,
+          dealerScore: (data as any).dealerScore,
+          trustWorthinessScore: (data as any).trustWorthinessScore,
+          creditWorthinessScore: (data as any).creditWorthinessScore,
+          orderHistoryScore: (data as any).orderHistoryScore,
+          visitFrequencyScore: (data as any).visitFrequencyScore,
+          lastUpdatedDate: (data as any).lastUpdatedDate,
           updatedAt: new Date()
         })
-        .where(eq(salesmanAttendance.id, attendanceRecord.id))
+        .where(eq(dealerReportsAndScores.dealerId, (data as any).dealerId))
         .returning();
-
-      return updatedRecord;
-    } catch (error) {
-      console.error('Error punching out:', error);
-      throw error;
+      return row;
     }
   }
 
   // ========================================
-  // LOCATION TRACKING METHODS
-  // ========================================
-
-  async trackLocation(userId: number, latitude: number, longitude: number): Promise<GeoTracking> {
-    try {
-      const locationRecord = await this.createGeoTrackingRecord({
-        userId,
-        latitude: latitude.toString(),
-        longitude: longitude.toString(),
-        recordedAt: new Date(),
-        accuracy: null,
-        speed: null,
-        heading: null,
-        altitude: null,
-        locationType: "GPS",
-        activityType: null,
-        appState: "foreground",
-        batteryLevel: null,
-        isCharging: null,
-        networkStatus: null,
-        ipAddress: null,
-        siteName: null,
-        checkInTime: null,
-        checkOutTime: null,
-        totalDistanceTravelled: null,
-      });
-
-      return locationRecord;
-    } catch (error) {
-      console.error('Error tracking location:', error);
-      throw error;
-    }
-  }
-
-  async getLocationAnalytics(userId: number, period: string): Promise<any> {
-    try {
-      let dateFilter;
-      const now = new Date();
-
-      switch (period) {
-        case 'today':
-          dateFilter = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-          break;
-        case 'week':
-          dateFilter = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case 'month':
-          dateFilter = new Date(now.getFullYear(), now.getMonth(), 1);
-          break;
-        default:
-          dateFilter = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-      }
-
-      const locations = await db
-        .select()
-        .from(geoTracking)
-        .where(
-          and(
-            eq(geoTracking.userId, userId),
-            gte(geoTracking.recordedAt, dateFilter)
-          )
-        )
-        .orderBy(desc(geoTracking.recordedAt));
-
-      // Calculate analytics
-      const totalDistance = locations.reduce((sum, loc, index) => {
-        if (index === 0) return sum;
-        const prev = locations[index - 1];
-        return sum + this.calculateDistance(
-          parseFloat(prev.latitude), 
-          parseFloat(prev.longitude), 
-          parseFloat(loc.latitude), 
-          parseFloat(loc.longitude)
-        );
-      }, 0);
-
-      return {
-        period,
-        totalLocations: locations.length,
-        totalDistance,
-        locations: locations.slice(0, 50), // Return latest 50 for performance
-        averageAccuracy: locations.reduce((sum, loc) => sum + (parseFloat(loc.accuracy || "0")), 0) / locations.length
-      };
-    } catch (error) {
-      console.error('Error getting location analytics:', error);
-      throw error;
-    }
-  }
-
-  // ========================================
-  // UTILITY METHODS
-  // ========================================
-
-  calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
-    const R = 6371e3; // Earth's radius in meters
-    const φ1 = lat1 * Math.PI / 180;
-    const φ2 = lat2 * Math.PI / 180;
-    const Δφ = (lat2 - lat1) * Math.PI / 180;
-    const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) *
-      Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in meters
-  }
-
-  // ========================================
-  // ENHANCED REPORTING METHODS
+  // BUSINESS METRICS (example aggregate)
   // ========================================
 
   async getBusinessMetrics(companyId: number): Promise<any> {
     try {
-      // Get total users
-      const totalUsers = await db
-        .select({ count: sql`count(*)` })
-        .from(users)
-        .where(eq(users.companyId, companyId));
-
-      // Get total daily visit reports
-      const totalReports = await db
-        .select({ count: sql`count(*)` })
-        .from(dailyVisitReports)
-        .innerJoin(users, eq(dailyVisitReports.userId, users.id))
-        .where(eq(users.companyId, companyId));
-
-      // Get active dealers
-      const activeDealers = await db
-        .select({ count: sql`count(*)` })
-        .from(dealers)
-        .innerJoin(users, eq(dealers.userId, users.id))
-        .where(eq(users.companyId, companyId));
-
-      // Get attendance records for current month
-      const currentMonth = new Date();
-      const firstDayOfMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1);
-      
-      const monthlyAttendance = await db
-        .select({ count: sql`count(*)` })
+      const totalUsers = await db.execute(sql`SELECT COUNT(*) FROM users WHERE company_id = ${companyId}`);
+      const totalReports = await db.execute(sql`
+        SELECT COUNT(*) FROM (
+          SELECT id FROM daily_visit_reports dvr
+          JOIN users u ON u.id = dvr.user_id
+          WHERE u.company_id = ${companyId}
+          UNION ALL
+          SELECT id FROM technical_visit_reports tvr
+          JOIN users u ON u.id = tvr.user_id
+          WHERE u.company_id = ${companyId}
+        ) q
+      `);
+      const activeDealers = await db.execute(sql`
+        SELECT COUNT(DISTINCT d.id) 
+        FROM dealers d
+        WHERE d.user_id IN (
+          SELECT id FROM users WHERE company_id = ${companyId}
+        )
+      `);
+      const now = new Date();
+      const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthlyAttendance = await db.select({ count: sql<number>`COUNT(*)` })
         .from(salesmanAttendance)
         .innerJoin(users, eq(salesmanAttendance.userId, users.id))
         .where(
@@ -956,21 +694,165 @@ export class DatabaseStorage implements IStorage {
   }
 
   // ========================================
-  // TASK MANAGEMENT ENHANCEMENTS
+  // TASK ASSIGNMENT (helper)
   // ========================================
 
   async assignTaskToUser(taskData: InsertDailyTask): Promise<DailyTask> {
     try {
       const task = await this.createDailyTask(taskData);
-      
-      // You could add notification logic here
       console.log(`Task assigned to user ${taskData.userId} by user ${taskData.assignedByUserId}`);
-      
       return task;
     } catch (error) {
       console.error('Error assigning task to user:', error);
       throw error;
     }
+  }
+
+  // ========================================
+  // SALES REPORT (NEW)
+  // ========================================
+  async getSalesReport(id: number): Promise<SalesReport | undefined> {
+    const [row] = await db.select().from(salesReport).where(eq(salesReport.id, id));
+    return row || undefined;
+  }
+  async getSalesReportsByUserId(userId: number): Promise<SalesReport[]> {
+    return await db.select().from(salesReport).where(eq(salesReport.salesPersonId, userId));
+  }
+  async getSalesReportsByDealerId(dealerId: string): Promise<SalesReport[]> {
+    return await db.select().from(salesReport).where(eq(salesReport.dealerId, dealerId));
+  }
+  async createSalesReport(data: InsertSalesReport): Promise<SalesReport> {
+    const [row] = await db.insert(salesReport).values(data).returning();
+    return row;
+  }
+  async updateSalesReport(id: number, updates: Partial<InsertSalesReport>): Promise<SalesReport> {
+    const [row] = await db.update(salesReport).set({ ...updates }).where(eq(salesReport.id, id)).returning();
+    return row;
+  }
+
+  // ========================================
+  // COLLECTION REPORTS (NEW)
+  // ========================================
+  async getCollectionReport(id: string): Promise<CollectionReport | undefined> {
+    const [row] = await db.select().from(collectionReports).where(eq(collectionReports.id, id));
+    return row || undefined;
+  }
+  async getCollectionReportsByDealerId(dealerId: string): Promise<CollectionReport[]> {
+    return await db.select().from(collectionReports).where(eq(collectionReports.dealerId, dealerId));
+  }
+  async createCollectionReport(data: InsertCollectionReport): Promise<CollectionReport> {
+    const [row] = await db.insert(collectionReports).values(data).returning();
+    return row;
+  }
+  async updateCollectionReport(id: string, updates: Partial<InsertCollectionReport>): Promise<CollectionReport> {
+    const [row] = await db.update(collectionReports).set({ ...updates }).where(eq(collectionReports.id, id)).returning();
+    return row;
+  }
+
+  // ========================================
+  // DEALER DEVELOPMENT PROCESS (DDP) (NEW)
+  // ========================================
+  async getDdp(id: number): Promise<Ddp | undefined> {
+    const [row] = await db.select().from(ddp).where(eq(ddp.id, id));
+    return row || undefined;
+  }
+  async getDdpByUserId(userId: number): Promise<Ddp[]> {
+    return await db.select().from(ddp).where(eq(ddp.userId, userId));
+  }
+  async getDdpByDealerId(dealerId: string): Promise<Ddp[]> {
+    return await db.select().from(ddp).where(eq(ddp.dealerId, dealerId));
+  }
+  async createDdp(data: InsertDdp): Promise<Ddp> {
+    const [row] = await db.insert(ddp).values(data).returning();
+    return row;
+  }
+  async updateDdp(id: number, updates: Partial<InsertDdp>): Promise<Ddp> {
+    const [row] = await db.update(ddp).set({ ...updates }).where(eq(ddp.id, id)).returning();
+    return row;
+  }
+
+  // ========================================
+  // RATINGS (NEW)
+  // ========================================
+  async getRating(id: number): Promise<Rating | undefined> {
+    const [row] = await db.select().from(ratings).where(eq(ratings.id, id));
+    return row || undefined;
+  }
+  async getRatingsByUserId(userId: number): Promise<Rating[]> {
+    return await db.select().from(ratings).where(eq(ratings.userId, userId));
+  }
+  async createRating(data: InsertRating): Promise<Rating> {
+    const [row] = await db.insert(ratings).values(data).returning();
+    return row;
+  }
+  async updateRating(id: number, updates: Partial<InsertRating>): Promise<Rating> {
+    const [row] = await db.update(ratings).set({ ...updates }).where(eq(ratings.id, id)).returning();
+    return row;
+  }
+
+  // ========================================
+  // BRANDS (NEW)
+  // ========================================
+  async getBrand(id: number): Promise<Brand | undefined> {
+    const [row] = await db.select().from(brands).where(eq(brands.id, id));
+    return row || undefined;
+  }
+  async getBrandByName(name: string): Promise<Brand | undefined> {
+    const [row] = await db.select().from(brands).where(eq(brands.name, name));
+    return row || undefined;
+  }
+  async listBrands(): Promise<Brand[]> {
+    return await db.select().from(brands).orderBy(asc(brands.name));
+  }
+  async createBrand(data: InsertBrand): Promise<Brand> {
+    const [row] = await db.insert(brands).values(data).returning();
+    return row;
+  }
+  async updateBrand(id: number, updates: Partial<InsertBrand>): Promise<Brand> {
+    const [row] = await db.update(brands).set({ ...updates }).where(eq(brands.id, id)).returning();
+    return row;
+  }
+
+  // ========================================
+  // DEALER BRAND MAPPING (NEW)
+  // ========================================
+  async getDealerBrandMap(id: string): Promise<DealerBrandMap | undefined> {
+    const [row] = await db.select().from(dealerBrandMapping).where(eq(dealerBrandMapping.id, id));
+    return row || undefined;
+  }
+  async getDealerBrandMapsByDealerId(dealerId: string): Promise<DealerBrandMap[]> {
+    return await db.select().from(dealerBrandMapping).where(eq(dealerBrandMapping.dealerId, dealerId));
+  }
+  async getDealerBrandMapsByBrandId(brandId: number): Promise<DealerBrandMap[]> {
+    return await db.select().from(dealerBrandMapping).where(eq(dealerBrandMapping.brandId, brandId));
+  }
+  async upsertDealerBrandMap(data: InsertDealerBrandMap): Promise<DealerBrandMap> {
+    try {
+      const [row] = await db.insert(dealerBrandMapping).values(data).returning();
+      return row;
+    } catch (e) {
+      const [row] = await db.update(dealerBrandMapping)
+        .set({ capacityMT: (data as any).capacityMT })
+        .where(and(eq(dealerBrandMapping.dealerId, (data as any).dealerId), eq(dealerBrandMapping.brandId, (data as any).brandId)))
+        .returning();
+      return row;
+    }
+  }
+
+  // ========================================
+  // MASTER CONNECTED TABLE (NEW)
+  // ========================================
+  async getMasterConnected(id: string): Promise<MasterConnected | undefined> {
+    const [row] = await db.select().from(masterConnectedTable).where(eq(masterConnectedTable.id, id));
+    return row || undefined;
+  }
+  async createMasterConnected(data: InsertMasterConnected): Promise<MasterConnected> {
+    const [row] = await db.insert(masterConnectedTable).values(data).returning();
+    return row;
+  }
+  async updateMasterConnected(id: string, updates: Partial<InsertMasterConnected>): Promise<MasterConnected> {
+    const [row] = await db.update(masterConnectedTable).set({ ...updates }).where(eq(masterConnectedTable.id, id)).returning();
+    return row;
   }
 }
 

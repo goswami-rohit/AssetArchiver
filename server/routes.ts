@@ -13,8 +13,14 @@ import {
   dailyTasks,
   users,
   dealers,
-  companies,
   dealerReportsAndScores,
+  salesReport,
+  collectionReports,
+  ddp,
+  ratings,
+  brands,
+  dealerBrandMapping,
+  masterConnectedTable,
   insertDailyVisitReportSchema,
   insertTechnicalVisitReportSchema,
   insertPermanentJourneyPlanSchema,
@@ -25,7 +31,15 @@ import {
   insertGeoTrackingSchema,
   insertDailyTaskSchema,
   insertDealerSchema,
-  insertDealerReportsAndScoresSchema
+  insertDealerReportsAndScoresSchema,
+  insertCompanySchema,
+  insertSalesReportSchema,
+  insertCollectionReportSchema,
+  insertDdpSchema,
+  insertRatingSchema,
+  insertBrandSchema,
+  insertDealerBrandMappingSchema,
+  insertMasterConnectedTableSchema
 } from 'shared/schema';
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -961,6 +975,51 @@ export function setupWebRoutes(app: Express) {
       lastUpdatedDate: () => new Date() // timestamp type
     }
   });
+  createAutoCRUD(app, {
+    endpoint: 'sales-reports',
+    table: salesReport,
+    schema: insertSalesReportSchema, // ← Need this import
+    tableName: 'Sales Report',
+    dateField: 'reportDate'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'dealer-brand-mapping',
+    table: dealerBrandMapping,
+    schema: insertDealerBrandMappingSchema, // ← Need this import
+    tableName: 'Dealer Brand Mapping'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'brands',
+    table: brands,
+    schema: insertBrandSchema, // ← Need this import
+    tableName: 'Brand'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'ratings',
+    table: ratings,
+    schema: insertRatingSchema, // ← Need this import
+    tableName: 'Rating'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'ddp',
+    table: ddp,
+    schema: insertDdpSchema, // ← Need this import
+    tableName: 'DDP'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'collection-reports',
+    table: collectionReports,
+    schema: insertCollectionReportSchema, // ← Need this import
+    tableName: 'Collection Report'
+  });
+  createAutoCRUD(app, {
+    endpoint: 'sales-reports',
+    table: salesReport,
+    schema: insertSalesReportSchema, // ← Need this import
+    tableName: 'Sales Report',
+    dateField: 'reportDate'
+  });
+
 
   // ============================================
   // SPECIAL ATTENDANCE ROUTES (with schema validation)

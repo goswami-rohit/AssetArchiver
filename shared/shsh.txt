@@ -334,3 +334,1939 @@ model DailyTask {
   @@index([pjpId], map: "idx_daily_tasks_pjp_id")
   @@map("daily_tasks")
 }
+
+
+/// OLD DRIZZLE schema
+import { pgTable, text, serial, varchar, integer, boolean, date, real, timestamp, decimal, uuid } from "drizzle-orm/pg-core";
+import { relations } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// Companies table
+export const companies = pgTable("companies", {
+  id: serial("id").primaryKey(),
+  companyName: varchar("company_name", { length: 255 }).notNull(),
+  officeAddress: text("office_address").notNull(),
+  isHeadOffice: boolean("is_head_office").default(true).notNull(),
+  phoneNumber: varchar("phone_number", { length: 50 }).notNull(),
+  region: varchar("region", { length: 255 }),
+  area: varchar("area", { length: 255 }),
+  adminUserId: text("admin_user_id").unique().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
+  workosOrganizationId: text("workos_organization_id").unique(),
+});
+
+// Users table
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  workosUserId: text("workos_user_id").unique(),
+  companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "no action", onUpdate: "no action" }),
+  email: text("email").notNull(),
+  firstName: text("first_name"),
+  lastName: text("last_name"),
+  role: text("role").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
+  phoneNumber: varchar("phone_number", { length: 50 }),
+  inviteToken: text("inviteToken").unique(),
+  status: text("status").default("active").notNull(),
+  region: varchar("region", { length: 255 }),
+  area: varchar("area", { length: 255 }),
+  salesmanLoginId: text("salesman_login_id").unique(),
+  hashedPassword: text("hashed_password"),
+  reportsToId: integer("reports_to_id").references(() => users.id, { onDelete: "set null" }),
+});
+
+// Daily Visit Reports table
+export const dailyVisitReports = pgTable("daily_visit_reports", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reportDate: date("report_date").notNull(),
+  dealerType: varchar("dealer_type", { length: 50 }).notNull(),
+  dealerName: varchar("dealer_name", { length: 255 }),
+  subDealerName: varchar("sub_dealer_name", { length: 255 }),
+  location: varchar("location", { length: 500 }).notNull(),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  visitType: varchar("visit_type", { length: 50 }).notNull(),
+  dealerTotalPotential: decimal("dealer_total_potential", { precision: 10, scale: 2 }).notNull(),
+  dealerBestPotential: decimal("dealer_best_potential", { precision: 10, scale: 2 }).notNull(),
+  brandSelling: text("brand_selling").array().notNull(),
+  contactPerson: varchar("contact_person", { length: 255 }),
+  contactPersonPhoneNo: varchar("contact_person_phone_no", { length: 20 }),
+  todayOrderMt: decimal("today_order_mt", { precision: 10, scale: 2 }).notNull(),
+  todayCollectionRupees: decimal("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
+  feedbacks: varchar("feedbacks", { length: 500 }).notNull(),
+  solutionBySalesperson: varchar("solution_by_salesperson", { length: 500 }),
+  anyRemarks: varchar("any_remarks", { length: 500 }),
+  checkInTime: timestamp("check_in_time", { withTimezone: true, precision: 6 }).notNull(),
+  checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }),
+  inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
+  outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Technical Visit Reports table
+export const technicalVisitReports = pgTable("technical_visit_reports", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reportDate: date("report_date").notNull(),
+  visitType: varchar("visit_type", { length: 50 }).notNull(),
+  siteNameConcernedPerson: varchar("site_name_concerned_person", { length: 255 }).notNull(),
+  phoneNo: varchar("phone_no", { length: 20 }).notNull(),
+  emailId: varchar("email_id", { length: 255 }),
+  clientsRemarks: varchar("clients_remarks", { length: 500 }).notNull(),
+  salespersonRemarks: varchar("salesperson_remarks", { length: 500 }).notNull(),
+  checkInTime: timestamp("check_in_time", { withTimezone: true, precision: 6 }).notNull(),
+  checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }),
+  inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
+  outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Permanent Journey Plans table
+export const permanentJourneyPlans = pgTable("permanent_journey_plans", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  planDate: date("plan_date").notNull(),
+  areaToBeVisited: varchar("area_to_be_visited", { length: 500 }).notNull(),
+  description: varchar("description", { length: 500 }),
+  status: varchar("status", { length: 50 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Dealers table
+export const dealers = pgTable("dealers", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  type: varchar("type", { length: 50 }).notNull(),
+  parentDealerId: varchar("parent_dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
+  name: varchar("name", { length: 255 }).notNull(),
+  region: varchar("region", { length: 100 }).notNull(),
+  area: varchar("area", { length: 255 }).notNull(),
+  phoneNo: varchar("phone_no", { length: 20 }).notNull(),
+  address: varchar("address", { length: 500 }).notNull(),
+  totalPotential: decimal("total_potential", { precision: 10, scale: 2 }).notNull(),
+  bestPotential: decimal("best_potential", { precision: 10, scale: 2 }).notNull(),
+  brandSelling: text("brand_selling").array().notNull(),
+  feedbacks: varchar("feedbacks", { length: 500 }).notNull(),
+  remarks: varchar("remarks", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Salesman Attendance table
+export const salesmanAttendance = pgTable("salesman_attendance", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  attendanceDate: date("attendance_date").notNull(),
+  locationName: varchar("location_name", { length: 500 }).notNull(),
+  inTimeTimestamp: timestamp("in_time_timestamp", { withTimezone: true, precision: 6 }).notNull(),
+  outTimeTimestamp: timestamp("out_time_timestamp", { withTimezone: true, precision: 6 }),
+  inTimeImageCaptured: boolean("in_time_image_captured").notNull(),
+  outTimeImageCaptured: boolean("out_time_image_captured").notNull(),
+  inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
+  outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
+  inTimeLatitude: decimal("in_time_latitude", { precision: 10, scale: 7 }).notNull(),
+  inTimeLongitude: decimal("in_time_longitude", { precision: 10, scale: 7 }).notNull(),
+  inTimeAccuracy: decimal("in_time_accuracy", { precision: 10, scale: 2 }),
+  inTimeSpeed: decimal("in_time_speed", { precision: 10, scale: 2 }),
+  inTimeHeading: decimal("in_time_heading", { precision: 10, scale: 2 }),
+  inTimeAltitude: decimal("in_time_altitude", { precision: 10, scale: 2 }),
+  outTimeLatitude: decimal("out_time_latitude", { precision: 10, scale: 7 }),
+  outTimeLongitude: decimal("out_time_longitude", { precision: 10, scale: 7 }),
+  outTimeAccuracy: decimal("out_time_accuracy", { precision: 10, scale: 2 }),
+  outTimeSpeed: decimal("out_time_speed", { precision: 10, scale: 2 }),
+  outTimeHeading: decimal("out_time_heading", { precision: 10, scale: 2 }),
+  outTimeAltitude: decimal("out_time_altitude", { precision: 10, scale: 2 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Salesman Leave Applications table
+export const salesmanLeaveApplications = pgTable("salesman_leave_applications", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  leaveType: varchar("leave_type", { length: 100 }).notNull(),
+  startDate: date("start_date").notNull(),
+  endDate: date("end_date").notNull(),
+  reason: varchar("reason", { length: 500 }).notNull(),
+  status: varchar("status", { length: 50 }).notNull(),
+  adminRemarks: varchar("admin_remarks", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Client Reports table
+export const clientReports = pgTable("client_reports", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  dealerType: text("dealerType").notNull(),
+  dealerSubDealerName: text("dealer_sub_dealer_name").notNull(),
+  location: text("location").notNull(),
+  typeBestNonBest: text("type_best_non_best").notNull(),
+  dealerTotalPotential: decimal("dealerTotalPotential", { precision: 10, scale: 2 }).notNull(),
+  dealerBestPotential: decimal("dealerBestPotential", { precision: 10, scale: 2 }).notNull(),
+  brandSelling: text("brandSelling").array().notNull(),
+  contactPerson: text("contactPerson").notNull(),
+  contactPersonPhoneNo: text("contact_person_phone_no").notNull(),
+  todayOrderMT: decimal("today_order_mt", { precision: 10, scale: 2 }).notNull(),
+  todayCollection: decimal("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
+  feedbacks: text("feedbacks").notNull(),
+  solutionsAsPerSalesperson: text("solutions_as_per_salesperson").notNull(),
+  anyRemarks: text("anyRemarks").notNull(),
+  checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }).notNull(),
+  userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("createdAt", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Competition Reports table
+export const competitionReports = pgTable("competition_reports", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  reportDate: date("report_date").notNull(),
+  brandName: varchar("brand_name", { length: 255 }).notNull(),
+  billing: varchar("billing", { length: 100 }).notNull(),
+  nod: varchar("nod", { length: 100 }).notNull(),
+  retail: varchar("retail", { length: 100 }).notNull(),
+  schemesYesNo: varchar("schemes_yes_no", { length: 10 }).notNull(),
+  avgSchemeCost: decimal("avg_scheme_cost", { precision: 10, scale: 2 }).notNull(),
+  remarks: varchar("remarks", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Geo Tracking table
+export const geoTracking = pgTable("geo_tracking", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  accuracy: decimal("accuracy", { precision: 10, scale: 2 }),
+  speed: decimal("speed", { precision: 10, scale: 2 }),
+  heading: decimal("heading", { precision: 10, scale: 2 }),
+  altitude: decimal("altitude", { precision: 10, scale: 2 }),
+  locationType: varchar("location_type", { length: 50 }),
+  activityType: varchar("activity_type", { length: 50 }),
+  appState: varchar("app_state", { length: 50 }),
+  batteryLevel: decimal("battery_level", { precision: 5, scale: 2 }),
+  isCharging: boolean("is_charging"),
+  networkStatus: varchar("network_status", { length: 50 }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  siteName: varchar("site_name", { length: 255 }),
+  checkInTime: timestamp("check_in_time", { withTimezone: true, precision: 6 }),
+  checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }),
+  totalDistanceTravelled: decimal("total_distance_travelled", { precision: 10, scale: 3 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Daily Tasks table
+export const dailyTasks = pgTable("daily_tasks", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  assignedByUserId: integer("assigned_by_user_id").notNull().references(() => users.id, { onDelete: "no action" }),
+  taskDate: date("task_date").notNull(),
+  visitType: varchar("visit_type", { length: 50 }).notNull(),
+  relatedDealerId: varchar("related_dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
+  siteName: varchar("site_name", { length: 255 }),
+  description: varchar("description", { length: 500 }),
+  status: varchar("status", { length: 50 }).default("Assigned").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  pjpId: varchar("pjp_id", { length: 255 }).references(() => permanentJourneyPlans.id, { onDelete: "set null" }),
+});
+
+// Dealer Reports and Scores table
+export const dealerReportsAndScores = pgTable("dealer_reports_and_scores", {
+  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  dealerId: varchar("dealer_id", { length: 255 }).unique().notNull().references(() => dealers.id),
+  dealerScore: decimal("dealer_score", { precision: 10, scale: 2 }).notNull(),
+  trustWorthinessScore: decimal("trust_worthiness_score", { precision: 10, scale: 2 }).notNull(),
+  creditWorthinessScore: decimal("credit_worthiness_score", { precision: 10, scale: 2 }).notNull(),
+  orderHistoryScore: decimal("order_history_score", { precision: 10, scale: 2 }).notNull(),
+  visitFrequencyScore: decimal("visit_frequency_score", { precision: 10, scale: 2 }).notNull(),
+  lastUpdatedDate: timestamp("last_updated_date", { withTimezone: true, precision: 6 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+});
+
+// Relations
+export const companiesRelations = relations(companies, ({ many }) => ({
+  users: many(users),
+}));
+
+export const usersRelations = relations(users, ({ one, many }) => ({
+  company: one(companies, {
+    fields: [users.companyId],
+    references: [companies.id],
+  }),
+  reportsTo: one(users, {
+    fields: [users.reportsToId],
+    references: [users.id],
+    relationName: "ReportsToManager",
+  }),
+  reports: many(users, { relationName: "ReportsToManager" }),
+  dailyVisitReports: many(dailyVisitReports),
+  technicalVisitReports: many(technicalVisitReports),
+  permanentJourneyPlans: many(permanentJourneyPlans),
+  dealers: many(dealers),
+  salesmanAttendance: many(salesmanAttendance),
+  salesmanLeaveApplications: many(salesmanLeaveApplications),
+  clientReports: many(clientReports),
+  competitionReports: many(competitionReports),
+  geoTrackingRecords: many(geoTracking, { relationName: "UserGeoTracking" }),
+  assignedTasks: many(dailyTasks, { relationName: "AssignedTasks" }),
+  createdTasks: many(dailyTasks, { relationName: "CreatedTasks" }),
+}));
+
+export const dailyVisitReportsRelations = relations(dailyVisitReports, ({ one }) => ({
+  user: one(users, {
+    fields: [dailyVisitReports.userId],
+    references: [users.id],
+  }),
+}));
+
+export const technicalVisitReportsRelations = relations(technicalVisitReports, ({ one }) => ({
+  user: one(users, {
+    fields: [technicalVisitReports.userId],
+    references: [users.id],
+  }),
+}));
+
+export const permanentJourneyPlansRelations = relations(permanentJourneyPlans, ({ one, many }) => ({
+  user: one(users, {
+    fields: [permanentJourneyPlans.userId],
+    references: [users.id],
+  }),
+  dailyTasks: many(dailyTasks, { relationName: "PJPTasks" }),
+}));
+
+export const dealersRelations = relations(dealers, ({ one, many }) => ({
+  user: one(users, {
+    fields: [dealers.userId],
+    references: [users.id],
+  }),
+  parentDealer: one(dealers, {
+    fields: [dealers.parentDealerId],
+    references: [dealers.id],
+    relationName: "SubDealers",
+  }),
+  subDealers: many(dealers, { relationName: "SubDealers" }),
+  dailyTasks: many(dailyTasks, { relationName: "DealerDailyTasks" }),
+  // ✅ FIXED - added missing fields and references
+  reportsAndScores: one(dealerReportsAndScores, { 
+    fields: [dealers.id],
+    references: [dealerReportsAndScores.dealerId],
+    relationName: "DealerScores" 
+  }),
+}));
+
+export const salesmanAttendanceRelations = relations(salesmanAttendance, ({ one }) => ({
+  user: one(users, {
+    fields: [salesmanAttendance.userId],
+    references: [users.id],
+  }),
+}));
+
+export const salesmanLeaveApplicationsRelations = relations(salesmanLeaveApplications, ({ one }) => ({
+  user: one(users, {
+    fields: [salesmanLeaveApplications.userId],
+    references: [users.id],
+  }),
+}));
+
+export const clientReportsRelations = relations(clientReports, ({ one }) => ({
+  user: one(users, {
+    fields: [clientReports.userId],
+    references: [users.id],
+  }),
+}));
+
+export const competitionReportsRelations = relations(competitionReports, ({ one }) => ({
+  user: one(users, {
+    fields: [competitionReports.userId],
+    references: [users.id],
+  }),
+}));
+
+export const geoTrackingRelations = relations(geoTracking, ({ one }) => ({
+  user: one(users, {
+    fields: [geoTracking.userId],
+    references: [users.id],
+    relationName: "UserGeoTracking",
+  }),
+}));
+
+export const dailyTasksRelations = relations(dailyTasks, ({ one }) => ({
+  user: one(users, {
+    fields: [dailyTasks.userId],
+    references: [users.id],
+    relationName: "AssignedTasks",
+  }),
+  assignedBy: one(users, {
+    fields: [dailyTasks.assignedByUserId],
+    references: [users.id],
+    relationName: "CreatedTasks",
+  }),
+  relatedDealer: one(dealers, {
+    fields: [dailyTasks.relatedDealerId],
+    references: [dealers.id],
+    relationName: "DealerDailyTasks",
+  }),
+  permanentJourneyPlan: one(permanentJourneyPlans, {
+    fields: [dailyTasks.pjpId],
+    references: [permanentJourneyPlans.id],
+    relationName: "PJPTasks",
+  }),
+}));
+
+export const dealerReportsAndScoresRelations = relations(dealerReportsAndScores, ({ one }) => ({
+  dealer: one(dealers, {
+    fields: [dealerReportsAndScores.dealerId],
+    references: [dealers.id],
+    relationName: "DealerScores",
+  }),
+}));
+
+// Insert schemas for type safety
+export const insertCompanySchema = createInsertSchema(companies);
+export const insertUserSchema = createInsertSchema(users);
+export const insertDailyVisitReportSchema = createInsertSchema(dailyVisitReports);
+export const insertTechnicalVisitReportSchema = createInsertSchema(technicalVisitReports);
+export const insertPermanentJourneyPlanSchema = createInsertSchema(permanentJourneyPlans);
+export const insertDealerSchema = createInsertSchema(dealers);
+export const insertSalesmanAttendanceSchema = createInsertSchema(salesmanAttendance);
+export const insertSalesmanLeaveApplicationSchema = createInsertSchema(salesmanLeaveApplications);
+export const insertClientReportSchema = createInsertSchema(clientReports);
+export const insertCompetitionReportSchema = createInsertSchema(competitionReports);
+export const insertGeoTrackingSchema = createInsertSchema(geoTracking, {
+  createdAt: undefined,
+  updatedAt: undefined,
+});
+export const insertDailyTaskSchema = createInsertSchema(dailyTasks);
+export const insertDealerReportsAndScoresSchema = createInsertSchema(dealerReportsAndScores);
+
+// Export types
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = typeof companies.$inferInsert;
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type DailyVisitReport = typeof dailyVisitReports.$inferSelect;
+export type InsertDailyVisitReport = typeof dailyVisitReports.$inferInsert;
+export type TechnicalVisitReport = typeof technicalVisitReports.$inferSelect;
+export type InsertTechnicalVisitReport = typeof technicalVisitReports.$inferInsert;
+export type PermanentJourneyPlan = typeof permanentJourneyPlans.$inferSelect;
+export type InsertPermanentJourneyPlan = typeof permanentJourneyPlans.$inferInsert;
+export type Dealer = typeof dealers.$inferSelect;
+export type InsertDealer = typeof dealers.$inferInsert;
+export type SalesmanAttendance = typeof salesmanAttendance.$inferSelect;
+export type InsertSalesmanAttendance = typeof salesmanAttendance.$inferInsert;
+export type SalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferSelect;
+export type InsertSalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferInsert;
+export type ClientReport = typeof clientReports.$inferSelect;
+export type InsertClientReport = typeof clientReports.$inferInsert;
+export type CompetitionReport = typeof competitionReports.$inferSelect;
+export type InsertCompetitionReport = typeof competitionReports.$inferInsert;
+export type GeoTracking = typeof geoTracking.$inferSelect;
+export type InsertGeoTracking = typeof geoTracking.$inferInsert;
+export type DailyTask = typeof dailyTasks.$inferSelect;
+export type InsertDailyTask = typeof dailyTasks.$inferInsert;
+export type DealerReportsAndScores = typeof dealerReportsAndScores.$inferSelect;
+export type InsertDealerReportsAndScores = typeof dealerReportsAndScores.$inferInsert;
+
+/// thank you
+
+// schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_DATABASE_URL")
+}
+
+model Company {
+  id                   Int       @id @default(autoincrement())
+  companyName          String    @map("company_name") @db.VarChar(255)
+  officeAddress        String    @map("office_address")
+  isHeadOffice         Boolean   @default(true) @map("is_head_office")
+  phoneNumber          String    @map("phone_number") @db.VarChar(50)
+  region               String?   @map("region")
+  area                 String?   @map("area")
+  adminUserId          String    @unique @map("admin_user_id")
+  createdAt            DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workosOrganizationId String?   @unique @map("workos_organization_id")
+  users                User[]
+
+  @@index([adminUserId], map: "idx_admin_user_id")
+  @@map("companies")
+}
+
+model User {
+  id                        Int       @id @default(autoincrement())
+  workosUserId              String?    @unique @map("workos_user_id")
+  companyId                 Int       @map("company_id")
+  email                     String    @map("email")
+  firstName                 String?   @map("first_name")
+  lastName                  String?   @map("last_name")
+  role                      String    @map("role") // Jr Exec, Exec, Sr Exec, Asst Manager, Manager, Sr Manager, etc....
+  createdAt                 DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  phoneNumber               String?   @map("phone_number") @db.VarChar(50)
+  company                   Company   @relation(fields: [companyId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  inviteToken               String?   @unique
+  status                    String    @default("active") // "pending", "active", "inactive"
+  region                    String?   @map("region")
+  area                      String?   @map("area")
+
+
+  // Fields for salesman app specific login (empID and emp_password)
+  salesmanLoginId           String?   @unique @map("salesman_login_id")
+  hashedPassword            String?   @map("hashed_password") // Stores securely hashed passwords
+
+  // --- HIERARCHY FIELDS ---
+  reportsToId               Int?      @map("reports_to_id")
+  reportsTo                 User?     @relation("ReportsToManager", fields: [reportsToId], references: [id], onDelete: SetNull)
+  reports                   User[]    @relation("ReportsToManager")
+
+  // Relationships to new tables
+  dealers                   Dealer[] 
+  dailyVisitReports         DailyVisitReport[]
+  technicalVisitReports     TechnicalVisitReport[]
+  salesmanAttendance        SalesmanAttendance[]
+  salesmanLeaveApplications SalesmanLeaveApplication[]
+  clientReports             ClientReport[]
+  competitionReports        CompetitionReport[]
+  geoTrackingRecords        GeoTracking[] @relation("UserGeoTracking") // Relationship for GeoTracking records
+  assignedTasks             DailyTask[]  @relation("AssignedTasks") // Tasks assigned to this user (salesman)
+  createdTasks              DailyTask[]  @relation("CreatedTasks") // Tasks created by this user (admin)
+  salesReports              SalesReport[]
+  ddpRecords                DDP[]
+  ratings                   Rating[]
+  // PJPs assigned to this user
+  permanentJourneyPlansAssigned PermanentJourneyPlan[] @relation("PJP_AssignedUser")
+  // PJPs created by this user
+  permanentJourneyPlansCreated  PermanentJourneyPlan[] @relation("PJP_CreatedBy")
+  
+  @@unique([companyId, email])
+  @@index([companyId], map: "idx_user_company_id")
+  @@index([workosUserId], map: "idx_workos_user_id")
+  @@map("users")
+}
+
+// Daily Visit Reports
+model DailyVisitReport {
+  id                    String    @id @default(uuid()) @db.VarChar(255)
+  userId                Int       @map("user_id") // Foreign Key to User.id
+  reportDate            DateTime  @map("report_date") @db.Date
+  dealerType            String    @map("dealer_type") @db.VarChar(50) // "Dealer", "Sub Dealer"
+  dealerName            String?   @map("dealer_name") @db.VarChar(255)
+  subDealerName         String?   @map("sub_dealer_name") @db.VarChar(255)
+  location              String    @db.VarChar(500)
+  latitude              Decimal   @db.Decimal(10, 7)
+  longitude             Decimal   @db.Decimal(10, 7)
+  visitType             String    @map("visit_type") @db.VarChar(50) // "Best", "Non Best"
+  dealerTotalPotential  Decimal   @map("dealer_total_potential") @db.Decimal(10, 2)
+  dealerBestPotential   Decimal   @map("dealer_best_potential") @db.Decimal(10, 2)
+  brandSelling          String[]  @map("brand_selling") // Array of strings
+  contactPerson         String?   @map("contact_person") @db.VarChar(255)
+  contactPersonPhoneNo  String?   @map("contact_person_phone_no") @db.VarChar(20)
+  todayOrderMt          Decimal   @map("today_order_mt") @db.Decimal(10, 2)
+  todayCollectionRupees Decimal   @map("today_collection_rupees") @db.Decimal(10, 2)
+  overdueAmount         Decimal?  @map("overdue_amount") @db.Decimal(12, 2)
+  feedbacks             String    @db.VarChar(500)
+  solutionBySalesperson String?   @map("solution_by_salesperson") @db.VarChar(500)
+  anyRemarks            String?   @map("any_remarks") @db.VarChar(500)
+  checkInTime           DateTime  @map("check_in_time") @db.Timestamptz(6)
+  checkOutTime          DateTime? @map("check_out_time") @db.Timestamptz(6)
+  inTimeImageUrl        String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl       String?   @map("out_time_image_url") @db.VarChar(500)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user                  User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // New relation to the CollectionReport. A Daily Visit Report can be associated with one CollectionReport
+  // This sets up a one-to-one or one-to-many link, allowing a collection to be recorded for a specific visit.
+  collectionReport      CollectionReport?
+
+  @@index([userId], map: "idx_daily_visit_reports_user_id")
+  @@map("daily_visit_reports")
+}
+
+// Technical Visit Reports
+model TechnicalVisitReport {
+  id                      String    @id @default(uuid()) @db.VarChar(255)
+  userId                  Int       @map("user_id") // Foreign Key to User.id
+  reportDate              DateTime  @map("report_date") @db.Date
+  visitType               String    @map("visit_type") @db.VarChar(50) // "Installation", "Repair", "Maintenance"
+  siteNameConcernedPerson String    @map("site_name_concerned_person") @db.VarChar(255)
+  phoneNo                 String    @map("phone_no") @db.VarChar(20)
+  emailId                 String?   @map("email_id") @db.VarChar(255)
+  clientsRemarks          String    @map("clients_remarks") @db.VarChar(500)
+  salespersonRemarks      String    @map("salesperson_remarks") @db.VarChar(500)
+  checkInTime             DateTime  @map("check_in_time") @db.Timestamptz(6)
+  checkOutTime            DateTime? @map("check_out_time") @db.Timestamptz(6)
+  inTimeImageUrl          String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl         String?   @map("out_time_image_url") @db.VarChar(500)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  //Added fields from the pdf
+  siteVisitBrandInUse String? @map("site_visit_brand_in_use") // e.g., "Star/Dalmia/Ultratech" [cite: 99]
+  siteVisitStage      String? @map("site_visit_stage")      // e.g., "Foundation/column/slab casting" [cite: 100]
+  conversionFromBrand     String?  @map("conversion_from_brand")      // e.g., "Dalmia/Star" [cite: 102]
+  conversionQuantityValue Decimal? @map("conversion_quantity_value") @db.Decimal(10, 2)
+  conversionQuantityUnit  String?  @map("conversion_quantity_unit")  @db.VarChar(20) // "Bag" or "MT" [cite: 103]
+  associatedPartyName     String?  @map("associated_party_name")     // Dealer, Sub dealer name [cite: 104]
+  influencerType String? @map("influencer_type") // e.g., "Contractor", "Engineer" etc. [cite: 106, 107, 108, 109, 110, 111]
+  serviceType String? @map("service_type") // e.g., "Dhalai Attend" [cite: 113]
+  qualityComplaint String? @map("quality_complaint") // e.g., "Slow Setting", "Cracks" etc. [cite: 116, 117, 118, 119]
+  promotionalActivity String? @map("promotional_activity") // e.g., "Mason Meet" [cite: 122]
+  channelPartnerVisit String? @map("channel_partner_visit") // e.g., "Dealer Visit" [cite: 129]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_technical_visit_reports_user_id")
+  @@map("technical_visit_reports")
+}
+
+// Permanent Journey Plans
+model PermanentJourneyPlan {
+  id              String   @id @default(uuid()) @db.VarChar(255)
+
+  // Assigned-to user
+  userId          Int      @map("user_id")
+  user            User     @relation("PJP_AssignedUser", fields: [userId], references: [id])
+
+  // Creator user
+  createdById     Int      @map("created_by_id")
+  createdBy       User     @relation("PJP_CreatedBy", fields: [createdById], references: [id])
+
+  planDate        DateTime @map("plan_date") @db.Date
+  areaToBeVisited String   @map("area_to_be_visited") @db.VarChar(500)
+  description     String?  @db.VarChar(500)
+  status          String   @db.VarChar(50)
+
+  // Ensure the name here matches DailyTask (see below)
+  dailyTasks      DailyTask[] @relation("PJPTasks")
+
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([userId], map: "idx_permanent_journey_plans_user_id")
+  @@index([createdById], map: "idx_permanent_journey_plans_created_by_id")
+  @@map("permanent_journey_plans")
+}
+
+// Dealers (Consolidated for Dealers and Sub-Dealers)
+model Dealer {
+  id             String   @id @default(uuid()) @db.VarChar(255)
+  userId         Int?      @map("user_id") // Primary user (salesman) associated
+  type           String   @db.VarChar(50) // "Dealer", "Sub Dealer"
+  parentDealerId String?  @map("parent_dealer_id") @db.VarChar(255) // Self-referencing FK for sub-dealers
+  name           String   @db.VarChar(255) // Stores dealerName or subDealerName
+  region         String   @db.VarChar(100)
+  area           String   @db.VarChar(255)
+  phoneNo        String   @map("phone_no") @db.VarChar(20)
+  address        String   @db.VarChar(500)
+  totalPotential Decimal  @map("total_potential") @db.Decimal(10, 2)
+  bestPotential  Decimal  @map("best_potential") @db.Decimal(10, 2)
+  brandSelling   String[] @map("brand_selling") // Array of strings
+  feedbacks      String   @db.VarChar(500)
+  remarks        String?  @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user            User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parentDealer    Dealer?  @relation("SubDealers", fields: [parentDealerId], references: [id], onDelete: SetNull)
+  subDealers      Dealer[] @relation("SubDealers")
+  dailyTasks      DailyTask[] @relation("DealerDailyTasks") // NEW: Tasks related to this dealer (Named relation)
+
+  reportsAndScores DealerReportsAndScores? @relation("DealerScores")
+
+  //New fields linked back to tables under 3 Excel files: Sales & Colln August'25 + 
+  //                                                      Daily Sale & Collection + MIS Pointers
+  salesReports            SalesReport[]
+  collectionReports CollectionReport[]
+  dealerBrandCapacities  DealerBrandMapping[]
+  ddpRecords                DDP[]
+
+  @@index([userId], map: "idx_dealers_user_id")
+  @@index([parentDealerId], map: "idx_dealers_parent_dealer_id")
+  @@map("dealers")
+}
+
+// Salesman Attendance
+model SalesmanAttendance {
+  id                   String    @id @default(uuid()) @db.VarChar(255)
+  userId               Int       @map("user_id") // Foreign Key to User.id
+  attendanceDate       DateTime  @map("attendance_date") @db.Date
+  locationName         String    @map("location_name") @db.VarChar(500)
+  inTimeTimestamp      DateTime  @map("in_time_timestamp") @db.Timestamptz(6)
+  outTimeTimestamp     DateTime? @map("out_time_timestamp") @db.Timestamptz(6)
+  inTimeImageCaptured  Boolean   @map("in_time_image_captured")
+  outTimeImageCaptured Boolean   @map("out_time_image_captured")
+  inTimeImageUrl       String?   @map("in_time_image_url") @db.VarChar(500)
+  outTimeImageUrl      String?   @map("out_time_image_url") @db.VarChar(500)
+  inTimeLatitude       Decimal   @map("in_time_latitude") @db.Decimal(10, 7)
+  inTimeLongitude      Decimal   @map("in_time_longitude") @db.Decimal(10, 7)
+  inTimeAccuracy       Decimal?  @map("in_time_accuracy") @db.Decimal(10, 2)
+  inTimeSpeed          Decimal?  @map("in_time_speed") @db.Decimal(10, 2)
+  inTimeHeading        Decimal?  @map("in_time_heading") @db.Decimal(10, 2)
+  inTimeAltitude       Decimal?  @map("in_time_altitude") @db.Decimal(10, 2)
+  outTimeLatitude      Decimal?  @map("out_time_latitude") @db.Decimal(10, 7)
+  outTimeLongitude     Decimal?  @map("out_time_longitude") @db.Decimal(10, 7)
+  outTimeAccuracy      Decimal?  @map("out_time_accuracy") @db.Decimal(10, 2)
+  outTimeSpeed         Decimal?  @map("out_time_speed") @db.Decimal(10, 2)
+  outTimeHeading       Decimal?  @map("out_time_heading") @db.Decimal(10, 2)
+  outTimeAltitude      Decimal?  @map("out_time_altitude") @db.Decimal(10, 2)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_salesman_attendance_user_id")
+  @@map("salesman_attendance")
+}
+
+// Salesman Leave Applications
+model SalesmanLeaveApplication {
+  id           String   @id @default(uuid()) @db.VarChar(255)
+  userId       Int      @map("user_id") // Foreign Key to User.id
+  leaveType    String   @map("leave_type") @db.VarChar(100)
+  startDate    DateTime @map("start_date") @db.Date
+  endDate      DateTime @map("end_date") @db.Date
+  reason       String   @db.VarChar(500)
+  status       String   @db.VarChar(50) // "Pending", "Approved", "Rejected"
+  adminRemarks String?  @map("admin_remarks") @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_salesman_leave_applications_user_id")
+  @@map("salesman_leave_applications")
+}
+
+// Client Report
+model ClientReport {
+  id                        String   @id @default(cuid()) // Unique ID for each report
+  dealerType                String
+  dealerSubDealerName       String   @map("dealer_sub_dealer_name")
+  location                  String
+  typeBestNonBest           String   @map("type_best_non_best")
+  dealerTotalPotential      Decimal  @db.Decimal(10, 2)
+  dealerBestPotential       Decimal  @db.Decimal(10, 2)
+  brandSelling              String[]
+  contactPerson             String
+  contactPersonPhoneNo      String   @map("contact_person_phone_no")
+  todayOrderMT              Decimal  @map("today_order_mt") @db.Decimal(10, 2)
+  todayCollection           Decimal  @map("today_collection_rupees") @db.Decimal(10, 2)
+  feedbacks                 String
+  solutionsAsPerSalesperson String   @map("solutions_as_per_salesperson")
+  anyRemarks                String
+  checkOutTime              DateTime @map("check_out_time")
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("client_reports")
+}
+
+// Competition Report
+model CompetitionReport {
+  id                    String    @id @default(cuid()) // Unique ID for each report
+  userId                Int       @map("user_id") // Foreign Key to User.id (salesman who created report)
+  reportDate            DateTime  @map("report_date") @db.Date
+  brandName             String    @map("brand_name") @db.VarChar(255)
+  billing               String    @db.VarChar(100)
+  nod                   String    @db.VarChar(100)
+  retail                String    @db.VarChar(100)
+  schemesYesNo          String    @map("schemes_yes_no") @db.VarChar(10) // "Yes" or "No"
+  avgSchemeCost         Decimal   @map("avg_scheme_cost") @db.Decimal(10, 2)
+  remarks               String?   @db.VarChar(500) // Made optional
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("competition_reports") // Table name in DB
+  @@index([userId]) // Index for faster lookups by user
+}
+
+// Geo Tracking
+model GeoTracking {
+  id                      String    @id @default(uuid()) // Unique ID for each geo-tracking record
+  userId                  Int       @map("user_id") // Foreign Key to User.id
+  latitude                Decimal   @db.Decimal(10, 7)
+  longitude               Decimal   @db.Decimal(10, 7)
+  recordedAt              DateTime  @default(now()) @map("recorded_at") @db.Timestamptz(6) // Timestamp of the recording
+  accuracy                Decimal?  @db.Decimal(10, 2) // Optional: GPS accuracy in meters
+  speed                   Decimal?  @db.Decimal(10, 2) // Optional: Speed in m/s
+  heading                 Decimal?  @db.Decimal(10, 2) // Optional: Direction of travel in degrees
+  altitude                Decimal?  @db.Decimal(10, 2) // Optional: Altitude in meters
+  locationType            String?   @map("location_type") @db.VarChar(50) // Optional: e.g., 'GPS', 'Network', 'Fused'
+  activityType            String?   @map("activity_type") @db.VarChar(50) // Optional: e.g., 'still', 'in_vehicle', 'walking'
+  appState                String?   @map("app_state") @db.VarChar(50) // Optional: 'foreground', 'background'
+  batteryLevel            Decimal?  @map("battery_level") @db.Decimal(5, 2) // Optional: Battery percentage (0-100)
+  isCharging              Boolean?  @map("is_charging") // Optional: Is device charging?
+  networkStatus           String?   @map("network_status") @db.VarChar(50) // Optional: 'wifi', 'mobile', 'none'
+  ipAddress               String?   @map("ip_address") @db.VarChar(45) // Optional: IPv4 or IPv6
+  siteName                String?   @map("site_name") @db.VarChar(255) // Optional: Name of a specific site if visited
+  checkInTime             DateTime? @map("check_in_time") @db.Timestamptz(6) // Optional: Timestamp of check-in
+  checkOutTime            DateTime? @map("check_out_time") @db.Timestamptz(6) // Optional: Timestamp of check-out
+  totalDistanceTravelled Decimal? @map("total_distance_travelled") @db.Decimal(10, 3) // NEW FIELD! Total distance in KM or M
+  journeyId               String?   @map("journey_id")
+  isActive                Boolean   @default(true) @map("is_active")
+  destLat                 Decimal?  @map("dest_lat") @db.Decimal(10, 7)
+  destLng                 Decimal?  @map("dest_lng") @db.Decimal(10, 7)
+
+  // Relationship to the User (junior-exec, exec, etc...)
+  user User @relation("UserGeoTracking", fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+   // INDEXES THAT MATTER
+  @@index([userId, recordedAt], map: "idx_geo_user_time")
+  @@index([journeyId, recordedAt], map: "idx_geo_journey_time")
+  @@index([isActive], map: "idx_geo_active")
+  @@index([userId], map: "idx_geo_tracking_user_id")
+  @@index([recordedAt], map: "idx_geo_tracking_recorded_at") // Useful for time-based queries
+  @@map("geo_tracking") // Table name in DB
+}
+
+// DailyTask model for admin to salesman task assignment
+model DailyTask {
+  id                String    @id @default(uuid()) @db.VarChar(255)
+  userId            Int       @map("user_id") // Salesman to whom the task is assigned
+  assignedByUserId  Int       @map("assigned_by_user_id") // Admin/Manager who assigned the task
+  taskDate          DateTime  @map("task_date") @db.Date
+  visitType         String    @map("visit_type") @db.VarChar(50) // "Client Visit", "Technical Visit"
+  relatedDealerId   String?   @map("related_dealer_id") @db.VarChar(255) // Optional: For Client Visits (FK to Dealer.id)
+  siteName          String?   @map("site_name") @db.VarChar(255) // Optional: For Technical Visits
+  description       String?   @db.VarChar(500)
+  status            String    @default("Assigned") @db.VarChar(50) // "Assigned", "Accepted", "Completed", "Rejected", "In Progress"
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  pjpId             String?   @map("pjp_id") @db.VarChar(255) // Foreign Key to PermanentJourneyPlan
+
+  user              User      @relation("AssignedTasks", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy        User      @relation("CreatedTasks", fields: [assignedByUserId], references: [id], onDelete: NoAction) // NoAction to keep admin record if deleted
+  relatedDealer     Dealer?   @relation("DealerDailyTasks", fields: [relatedDealerId], references: [id], onDelete: SetNull) // Named relation
+  permanentJourneyPlan PermanentJourneyPlan? @relation("PJPTasks", fields: [pjpId], references: [id], onDelete: SetNull) // Named relation
+
+  @@index([userId], map: "idx_daily_tasks_user_id")
+  @@index([assignedByUserId], map: "idx_daily_tasks_assigned_by_user_id")
+  @@index([taskDate], map: "idx_daily_tasks_task_date")
+  @@index([pjpId], map: "idx_daily_tasks_pjp_id")
+  @@index([relatedDealerId], map: "idx_daily_tasks_related_dealer_id")
+  @@index([taskDate, userId], map: "idx_daily_tasks_date_user")
+  @@index([status], map: "idx_daily_tasks_status")
+  @@map("daily_tasks")
+}
+
+// Dealer Reports and Scores
+model DealerReportsAndScores {
+  id                      String    @id @default(cuid()) @db.VarChar(255)
+  dealerId                String    @unique @map("dealer_id") // Foreign Key to the Dealer.id, ensures one score entry per dealer
+  dealerScore             Decimal   @map("dealer_score") @db.Decimal(10, 2)
+  trustWorthinessScore    Decimal   @map("trust_worthiness_score") @db.Decimal(10, 2) // Based on timely payments
+  creditWorthinessScore   Decimal   @map("credit_worthiness_score") @db.Decimal(10, 2) // Based on payment history and collection data
+  orderHistoryScore       Decimal   @map("order_history_score") @db.Decimal(10, 2) // Based on volume and consistency of orders
+  visitFrequencyScore     Decimal   @map("visit_frequency_score") @db.Decimal(10, 2) // Based on technical and daily visits
+  lastUpdatedDate         DateTime  @map("last_updated_date") @db.Timestamptz(6) // Timestamp of the last score calculation
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relation back to the Dealer model
+  dealer Dealer @relation("DealerScores", fields: [dealerId], references: [id])
+
+  @@map("dealer_reports_and_scores")
+}
+
+// Newly added tables from the Excel file: Sales & Collection for August'25 + 
+//                                         Daily Sale & Collection + MIS Pointers
+// SalesReport: Tracks sales data for each salesperson and dealer.
+model SalesReport {
+  id                     Int        @id @default(autoincrement())
+  date                   DateTime   @db.Date
+  monthlyTarget          Decimal    @map("monthly_target") @db.Decimal(12, 2)
+  tillDateAchievement    Decimal    @map("till_date_achievement") @db.Decimal(12, 2)
+  yesterdayTarget        Decimal?   @map("yesterday_target") @db.Decimal(12, 2)
+  yesterdayAchievement   Decimal?   @map("yesterday_achievement") @db.Decimal(12, 2)
+
+  // Foreign keys to User and Dealer tables
+  salesPersonId           Int       @map("sales_person_id")
+  dealerId                String    @map("dealer_id")
+
+  // Relations
+  salesPerson             User      @relation(fields: [salesPersonId], references: [id])
+  dealer                  Dealer    @relation(fields: [dealerId], references: [id])
+
+  @@map("sales_report")
+}
+
+// Derived from the 'Collection' sheet.
+// Collection Reports (Refactored to be transactional)
+model CollectionReport {
+  id                String   @id @default(uuid()) @db.VarChar(255)
+  // Foreign key to link to a specific Daily Visit Report
+  dvrId             String   @unique @map("dvr_id")
+  // Foreign key to link to the Dealer who made the payment
+  dealerId          String   @map("dealer_id")
+  // The amount collected during this visit
+  collectedAmount   Decimal  @map("collected_amount") @db.Decimal(12, 2)
+  // The date the collection was made, which is the same as the DVR created date
+  collectedOnDate   DateTime @map("collected_on_date") @db.Date
+
+  weeklyTarget          Decimal?  @map("weekly_target") @db.Decimal(12, 2)
+  tillDateAchievement   Decimal?  @map("till_date_achievement") @db.Decimal(12, 2)
+  yesterdayTarget       Decimal?  @map("yesterday_target") @db.Decimal(12, 2)
+  yesterdayAchievement  Decimal?  @map("yesterday_achievement") @db.Decimal(12, 2)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime? @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // Relations to the Daily Visit Report and the Dealer
+  dvr               DailyVisitReport @relation(fields: [dvrId], references: [id], onDelete: Cascade)
+  dealer            Dealer           @relation(fields: [dealerId], references: [id], onDelete: Cascade)
+
+  @@index([dealerId], map: "idx_collection_reports_dealer_id")
+  @@map("collection_reports")
+}
+
+// DDP: Tracks the Dealer Development Process.
+model DDP {
+  id                     Int        @id @default(autoincrement())
+  userId          Int       @map("user_id") // Foreign key to User model
+  dealerId        String    @map("dealer_id") // Foreign key to Dealer model
+  creationDate           DateTime   @map("creation_date") @db.Date
+  status                 String     @map("status")
+  obstacle               String?    @map("obstacle")
+
+  // Relations to other tables
+  user            User      @relation(fields: [userId], references: [id])
+  dealer          Dealer    @relation(fields: [dealerId], references: [id])
+
+  @@map("dealer_development_process")
+}
+
+// Rating: Stores ratings for salespeople.
+model Rating {
+  id                      Int        @id @default(autoincrement())
+  userId                  Int        @map("user_id") // Foreign key to User model
+  area                    String     @map("area")
+  region                  String     @map("region")
+  rating                  Int        @map("rating")
+
+  // Relations to other tables
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("ratings")
+}
+
+// Brand and DealerBrandMapping tables are taken and used together 
+// model to store the brand names to normalize the schema
+model Brand {
+  id         Int    @id @default(autoincrement())
+  name       String @unique @map("brand_name") @db.VarChar(255)
+  // Relation to DealerBrandMapping
+  dealers    DealerBrandMapping[]
+  
+  @@map("brands")
+}
+
+// model for the mapping of dealers to brand capacities
+model DealerBrandMapping {
+  id          String   @id @default(cuid()) @db.VarChar(255)
+  dealerId    String   @map("dealer_id")
+  brandId     Int      @map("brand_id")
+  capacityMT  Decimal  @map("capacity_mt") @db.Decimal(12, 2)
+
+  // Relations
+  dealer      Dealer @relation(fields: [dealerId], references: [id])
+  brand       Brand  @relation(fields: [brandId], references: [id])
+
+  @@unique([dealerId, brandId])
+  @@map("dealer_brand_mapping")
+}
+
+// MASTER TABLE LINKING ALL USERS-DEALERS-REPORTS-SCORES-TRACKING-... etc.
+model MasterConnectedTable {
+  id                              String   @id @default(uuid()) @db.VarChar(255)
+
+  companyId                       Int?
+  userId                          Int?
+  dealerId                        String?  @db.VarChar(255)
+
+  dvrId                           String?  @db.VarChar(255)
+  tvrId                           String?  @db.VarChar(255)
+
+  permanentJourneyPlanId          String?  @db.VarChar(255)
+  permanentJourneyPlanCreatedById Int?     // mirrors PermanentJourneyPlan.created_by_id
+
+  dailyTaskId                     String?  @db.VarChar(255)
+
+  attendanceId                    String?  @db.VarChar(255)
+  leaveApplicationId              String?  @db.VarChar(255)
+
+  clientReportId                  String?  @db.VarChar(255)
+  competitionReportId             String?  @db.VarChar(255)
+  geoTrackingId                   String?  @db.VarChar(255)
+
+  dealerReportsAndScoresId        String?  @db.VarChar(255)
+
+  salesReportId                   Int?
+  collectionReportId              String?  @db.VarChar(255)
+
+  ddpId                           Int?
+  ratingId                        Int?
+  brandId                         Int?
+  dealerBrandMappingId            String?  @db.VarChar(255)
+
+  createdAt                       DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt                       DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@index([companyId], map: "idx_mct_company_id")
+  @@index([userId], map: "idx_mct_user_id")
+  @@index([dealerId], map: "idx_mct_dealer_id")
+  @@index([permanentJourneyPlanId], map: "idx_mct_pjp_id")
+  @@index([permanentJourneyPlanCreatedById], map: "idx_mct_pjp_created_by_id")
+  @@index([dailyTaskId], map: "idx_mct_dailytask_id")
+  @@index([dvrId], map: "idx_mct_dvr_id")
+  @@index([tvrId], map: "idx_mct_tvr_id")
+  @@index([attendanceId], map: "idx_mct_attendance_id")
+  @@index([leaveApplicationId], map: "idx_mct_leave_id")
+  @@index([clientReportId], map: "idx_mct_client_report_id")
+  @@index([competitionReportId], map: "idx_mct_comp_report_id")
+  @@index([geoTrackingId], map: "idx_mct_geotracking_id")
+  @@index([dealerReportsAndScoresId], map: "idx_mct_dealer_scores_id")
+  @@index([salesReportId], map: "idx_mct_sales_report_id")
+  @@index([collectionReportId], map: "idx_mct_collection_report_id")
+  @@index([ddpId], map: "idx_mct_ddp_id")
+  @@index([ratingId], map: "idx_mct_rating_id")
+  @@index([brandId], map: "idx_mct_brand_id")
+  @@index([dealerBrandMappingId], map: "idx_mct_dealer_brand_map_id")
+
+  @@map("master_connected_table")
+}
+// END OF MASTER TABLE
+
+crm dasboard tsx
+import React, { useEffect, useMemo, useCallback, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { create } from "zustand";
+import {
+  Button,
+} from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+
+import {
+  Home,
+  MessageCircle,
+  MapPin,
+  User,
+  Plus,
+  CheckCircle,
+  Calendar,
+  Building2,
+  FileText,
+  BarChart3,
+  LogIn,
+  LogOut,
+  Bell,
+  Edit,
+  Trash2,
+  Eye,
+  Navigation,
+  Locate,
+  RefreshCw,
+  X,
+  Award,
+  Target,
+  Star,
+} from "lucide-react";
+
+// External widgets
+import ChatInterface from "@/components/ChatInterface";
+import JourneyTracker from "@/components/JourneyTracker";
+
+// --------------------
+// Store
+// --------------------
+interface Company { companyName?: string }
+interface UserShape {
+  id: number
+  firstName?: string
+  lastName?: string
+  email?: string
+  role?: string
+  company?: Company
+  companyId?: number | null
+}
+
+interface AppState {
+  user: UserShape | null
+  currentPage: "home" | "ai" | "journey" | "profile"
+  attendanceStatus: "in" | "out"
+  isLoading: boolean
+  isOnline: boolean
+  lastSync: Date | null
+
+  dailyTasks: any[]
+  pjps: any[]
+  dealers: any[]
+  reports: any[]
+  userTargets: any[]
+  dealerScores: any[]
+
+  showCreateModal: boolean
+  createType: "task" | "pjp" | "dealer" | "dvr" | "tvr" | "dealer-score"
+  selectedItem: any
+  showDetailModal: boolean
+
+  setUser: (u: UserShape | null) => void
+  setCurrentPage: (p: AppState["currentPage"]) => void
+  setAttendanceStatus: (s: AppState["attendanceStatus"]) => void
+  setLoading: (b: boolean) => void
+  setOnlineStatus: (b: boolean) => void
+  updateLastSync: () => void
+  setData: (k: keyof Pick<AppState,
+    | "dailyTasks" | "pjps" | "dealers" | "reports" | "userTargets" | "dealerScores"
+  >, data: any) => void
+  setUIState: (k: keyof Pick<AppState,
+    | "showCreateModal" | "createType" | "selectedItem" | "showDetailModal"
+  >, v: any) => void
+  resetModals: () => void
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  user: null,
+  currentPage: "home",
+  attendanceStatus: "out",
+  isLoading: false,
+  isOnline: true,
+  lastSync: null,
+
+  dailyTasks: [],
+  pjps: [],
+  dealers: [],
+  reports: [],
+  userTargets: [],
+  dealerScores: [],
+
+  showCreateModal: false,
+  createType: "task",
+  selectedItem: null,
+  showDetailModal: false,
+
+  setUser: (user) => set({ user }),
+  setCurrentPage: (currentPage) => set({ currentPage }),
+  setAttendanceStatus: (attendanceStatus) => set({ attendanceStatus }),
+  setLoading: (isLoading) => set({ isLoading }),
+  setOnlineStatus: (isOnline) => set({ isOnline }),
+  updateLastSync: () => set({ lastSync: new Date() }),
+  setData: (key, data) => set({ [key]: data } as any),
+  setUIState: (key, value) => set({ [key]: value } as any),
+  resetModals: () => set({ showCreateModal: false, showDetailModal: false, selectedItem: null }),
+}))
+
+// --------------------
+// API Hook
+// --------------------
+const useAPI = () => {
+  const { user, setLoading, setData, updateLastSync } = useAppStore.getState()
+
+  const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    try {
+      const res = await fetch(endpoint, {
+        headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+        signal: controller.signal,
+        ...options,
+      })
+      if (!res.ok) throw new Error(`API ${res.status}`)
+      const data = await res.json()
+      updateLastSync()
+      return data
+    } finally {
+      clearTimeout(timeout)
+    }
+  }, [updateLastSync])
+
+  const fetchDashboardStats = useCallback(async () => {
+    if (!user) return
+    try {
+      const data = await apiCall(`/api/dashboard/stats/${user.id}`)
+      setData("userTargets" as any, data?.data?.targets || [])
+    } catch {}
+  }, [user, apiCall, setData])
+
+  const fetchAllData = useCallback(async () => {
+    if (!user) return
+    setLoading(true)
+    try {
+      const [tasks, pjps, dealers, dvr] = await Promise.all([
+        apiCall(`/api/daily-tasks/user/${user.id}`),
+        apiCall(`/api/pjp/user/${user.id}`),
+        apiCall(`/api/dealers/user/${user.id}`),
+        apiCall(`/api/dvr/user/${user.id}?limit=20`),
+      ])
+      setData("dailyTasks", tasks?.data ?? [])
+      setData("pjps", pjps?.data ?? [])
+      setData("dealers", dealers?.data ?? [])
+      setData("reports", dvr?.data ?? [])
+      await fetchDashboardStats()
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setLoading(false)
+    }
+  }, [user, apiCall, setData, setLoading, fetchDashboardStats])
+
+  const handleAttendance = useCallback(async () => {
+    if (!user) return
+    const status = useAppStore.getState().attendanceStatus
+    const endpoint = status === "out" ? "/api/attendance/punch-in" : "/api/attendance/punch-out"
+
+    if (endpoint.endsWith("punch-in") && !user.companyId) {
+      console.error("Missing companyId on user; cannot punch in.")
+      return
+    }
+
+    try {
+      setLoading(true)
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 })
+      })
+      const { latitude, longitude, accuracy, speed, heading, altitude } = pos.coords
+      const n = (v: any) => (Number.isFinite(Number(v)) ? Number(v) : undefined)
+      const body: any = {
+        userId: user.id,
+        companyId: endpoint.endsWith("punch-in") ? user.companyId : undefined,
+        latitude: n(latitude),
+        longitude: n(longitude),
+        accuracy: n(accuracy),
+        speed: n(speed),
+        heading: n(heading),
+        altitude: n(altitude),
+        locationName: "Mobile App",
+      }
+      const resp = await apiCall(endpoint, { method: "POST", body: JSON.stringify(body) })
+      if (resp?.success) {
+        useAppStore.getState().setAttendanceStatus(status === "out" ? "in" : "out")
+        await fetchDashboardStats()
+      }
+    } catch (e) {
+      console.error("Attendance failed", e)
+    } finally {
+      setLoading(false)
+    }
+  }, [user, apiCall, setLoading, fetchDashboardStats])
+
+  const createRecord = useCallback(async (type: string, payload: any) => {
+    if (!user) return
+    const endpoints: Record<string, string> = {
+      task: "/api/daily-tasks",
+      pjp: "/api/pjp",
+      dealer: "/api/dealers",
+      dvr: "/api/dvr",
+      tvr: "/api/tvr",
+      "dealer-score": "/api/dealer-reports-scores",
+    }
+    const resp = await apiCall(endpoints[type], { method: "POST", body: JSON.stringify({ ...payload, userId: user.id }) })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [user, apiCall, fetchAllData])
+
+  const updateRecord = useCallback(async (type: string, id: string, payload: any) => {
+    const endpoints: Record<string, (id: string) => string> = {
+      task: (id) => `/api/daily-tasks/${id}`,
+      pjp: (id) => `/api/pjp/${id}`,
+      dealer: (id) => `/api/dealers/${id}`,
+      dvr: (id) => `/api/dvr/${id}`,
+      tvr: (id) => `/api/tvr/${id}`,
+      "dealer-score": (id) => `/api/dealer-reports-scores/${id}`,
+    }
+    const resp = await apiCall(endpoints[type](id), { method: "PUT", body: JSON.stringify(payload) })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [apiCall, fetchAllData])
+
+  const deleteRecord = useCallback(async (type: string, id: string) => {
+    const endpoints: Record<string, (id: string) => string> = {
+      task: (id) => `/api/daily-tasks/${id}`,
+      pjp: (id) => `/api/pjp/${id}`,
+      dealer: (id) => `/api/dealers/${id}`,
+      dvr: (id) => `/api/dvr/${id}`,
+      tvr: (id) => `/api/tvr/${id}`,
+      "dealer-score": (id) => `/api/dealer-reports-scores/${id}`,
+    }
+    const resp = await apiCall(endpoints[type](id), { method: "DELETE" })
+    if (resp?.success) await fetchAllData()
+    return resp
+  }, [apiCall, fetchAllData])
+
+  return { fetchAllData, fetchDashboardStats, handleAttendance, createRecord, updateRecord, deleteRecord }
+}
+
+// --------------------
+// Reusable UI
+// --------------------
+const StatusBar = () => {
+  const { isOnline, lastSync } = useAppStore()
+  return (
+    <div className="flex items-center justify-between px-4 py-2 bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2 w-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+        <span className="text-xs text-muted-foreground">{isOnline ? "Online" : "Offline"}</span>
+      </div>
+      {lastSync && (
+        <span className="text-xs text-muted-foreground">Last sync: {lastSync.toLocaleTimeString()}</span>
+      )}
+    </div>
+  )
+}
+
+const LoadingList = ({ rows = 3 }: { rows?: number }) => (
+  <div className="space-y-3">
+    {Array.from({ length: rows }).map((_, i) => (
+      <Card key={i} className="bg-card/50">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="flex-1 space-y-2">
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-3 w-1/2" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    ))}
+  </div>
+)
+
+const StatCard = ({ label, value, Icon, gradient }: { label: string; value: number; Icon: any; gradient: string }) => (
+  <Card className="bg-card/60 hover:bg-card transition-colors">
+    <CardContent className="p-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="text-2xl font-semibold tracking-tight">{value}</p>
+        </div>
+        <div className={`p-3 rounded-xl ${gradient}`}>
+          <Icon className="h-5 w-5 text-white" />
+        </div>
+      </div>
+    </CardContent>
+  </Card>
+)
+
+// --------------------
+// Main
+// --------------------
+export default function CRMDashboard() {
+  const {
+    user,
+    currentPage,
+    attendanceStatus,
+    isLoading,
+    dailyTasks,
+    pjps,
+    dealers,
+    reports,
+    userTargets,
+    showCreateModal,
+    createType,
+    setUser,
+    setCurrentPage,
+    setUIState,
+    resetModals,
+  } = useAppStore()
+
+  const { fetchAllData, handleAttendance, createRecord, updateRecord, deleteRecord } = useAPI()
+
+  // boot
+  useEffect(() => {
+    const s = localStorage.getItem("user")
+    if (s) setUser(JSON.parse(s))
+  }, [setUser])
+
+  useEffect(() => {
+    if (user) fetchAllData()
+  }, [user, fetchAllData])
+
+  // memo slices
+  const filteredTasks = useMemo(() => (dailyTasks || []).filter((t) => t.status !== "Completed").slice(0, 5), [dailyTasks])
+  const activePJPs = useMemo(() => (pjps || []).filter((p: any) => ["active", "planned"].includes(String(p.status))).slice(0, 5), [pjps])
+  const recentReports = useMemo(() => (reports || []).slice(0, 3), [reports])
+
+  return (
+    <div className="h-screen max-w-md mx-auto flex flex-col bg-background text-foreground">
+      <div className="flex-1 overflow-hidden">
+        <AnimatePresence mode="wait">
+          {currentPage === "home" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col">
+              <StatusBar />
+
+              <div className="flex-1 overflow-y-auto">
+                {/* Header */}
+                <div className="relative">
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-600/15 to-purple-600/15" />
+                  <div className="relative px-6 py-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Avatar className="h-12 w-12 ring-2 ring-blue-500/40">
+                          <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold">
+                            {user?.firstName?.[0]}
+                            {user?.lastName?.[0]}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div>
+                          <h1 className="text-xl font-semibold leading-tight">
+                            {user?.firstName} {user?.lastName}
+                          </h1>
+                          <p className="text-xs text-muted-foreground">{user?.company?.companyName}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Button variant={attendanceStatus === "in" ? "destructive" : "default"} onClick={handleAttendance} className="rounded-xl">
+                          {attendanceStatus === "in" ? (
+                            <><LogOut className="h-4 w-4 mr-2" /> Punch Out</>
+                          ) : (
+                            <><LogIn className="h-4 w-4 mr-2" /> Punch In</>
+                          )}
+                        </Button>
+                        <Button variant="ghost" size="icon" className="rounded-xl">
+                          <Bell className="h-5 w-5" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Stats */}
+                    <div className="grid grid-cols-2 gap-3 mt-5">
+                      <StatCard label="Today's Tasks" value={filteredTasks.length} Icon={CheckCircle} gradient="bg-blue-600" />
+                      <StatCard label="Active PJPs" value={activePJPs.length} Icon={Calendar} gradient="bg-purple-600" />
+                      <StatCard label="Total Dealers" value={(dealers || []).length} Icon={Building2} gradient="bg-orange-600" />
+                      <StatCard label="This Month" value={(reports || []).length} Icon={BarChart3} gradient="bg-emerald-600" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sections */}
+                <div className="px-6 pb-28 space-y-8">
+                  <Section title="Today's Tasks" Icon={CheckCircle} onAdd={() => { setUIState("createType", "task"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : filteredTasks.length ? (
+                      <AnimatePresence>
+                        {filteredTasks.map((task: any, i: number) => (
+                          <TaskCard key={task.id ?? i} task={task} onEdit={(t) => { setUIState("selectedItem", t); setUIState("createType", "task"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("task", id)} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={CheckCircle} label="No tasks for today" />
+                    )}
+                  </Section>
+
+                  <Section title="Journey Plans" Icon={Navigation} onAdd={() => { setUIState("createType", "pjp"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : activePJPs.length ? (
+                      <AnimatePresence>
+                        {activePJPs.map((pjp: any, i: number) => (
+                          <PJPCard key={pjp.id ?? i} pjp={pjp} onView={(p) => { setUIState("selectedItem", p); setUIState("showDetailModal", true) }} onEdit={(p) => { setUIState("selectedItem", p); setUIState("createType", "pjp"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("pjp", id)} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={Navigation} label="No active journey plans" />
+                    )}
+                  </Section>
+
+                  <Section title="Recent Dealers" Icon={Building2} onAdd={() => { setUIState("createType", "dealer"); setUIState("showCreateModal", true) }}>
+                    {isLoading ? (
+                      <LoadingList rows={3} />
+                    ) : (dealers || []).length ? (
+                      <AnimatePresence>
+                        {(dealers || []).slice(0, 5).map((dealer: any, i: number) => (
+                          <DealerCard key={dealer.id ?? i} dealer={dealer} onView={(d) => { setUIState("selectedItem", d); setUIState("showDetailModal", true) }} onEdit={(d) => { setUIState("selectedItem", d); setUIState("createType", "dealer"); setUIState("showCreateModal", true) }} onDelete={(id) => deleteRecord("dealer", id)} onScore={(d) => { setUIState("selectedItem", d); setUIState("createType", "dealer-score"); setUIState("showCreateModal", true) }} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <div className="text-center py-6">
+                        <Empty icon={Building2} label="No dealers yet" />
+                        <Button className="mt-3" onClick={() => { setUIState("createType", "dealer"); setUIState("showCreateModal", true) }}>
+                          <Plus className="h-4 w-4 mr-2" /> Add First Dealer
+                        </Button>
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Recent Reports" Icon={FileText} onAdd={() => { setUIState("createType", "dvr"); setUIState("showCreateModal", true) }}>
+                    <div className="flex gap-2 mb-3">
+                      <Button variant="outline" size="sm" onClick={() => { setUIState("createType", "dvr"); setUIState("showCreateModal", true) }}>
+                        <FileText className="h-4 w-4 mr-2" /> Create DVR
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => { setUIState("createType", "tvr"); setUIState("showCreateModal", true) }}>
+                        <BarChart3 className="h-4 w-4 mr-2" /> Create TVR
+                      </Button>
+                    </div>
+
+                    {recentReports.length ? (
+                      <AnimatePresence>
+                        {recentReports.map((r: any, i: number) => (
+                          <ReportCard key={r.id ?? i} report={r} onView={(rr) => { setUIState("selectedItem", rr); setUIState("showDetailModal", true) }} />
+                        ))}
+                      </AnimatePresence>
+                    ) : (
+                      <Empty icon={FileText} label="No reports yet" />
+                    )}
+                  </Section>
+                </div>
+              </div>
+
+              {/* Bottom nav */}
+              <BottomNav current={currentPage} onChange={(k) => useAppStore.getState().setCurrentPage(k as any)} />
+            </motion.div>
+          )}
+
+          {currentPage === "profile" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full flex flex-col">
+              <StatusBar />
+              <div className="flex-1 overflow-y-auto px-6 py-6 pb-28">
+                <div className="text-center mb-6">
+                  <Avatar className="h-24 w-24 mx-auto ring-4 ring-blue-500/25">
+                    <AvatarFallback className="bg-gradient-to-r from-blue-500 to-purple-600 text-white text-2xl font-bold">
+                      {user?.firstName?.[0]}
+                      {user?.lastName?.[0]}
+                    </AvatarFallback>
+                  </Avatar>
+                  <h2 className="text-2xl font-semibold mt-3">{user?.firstName} {user?.lastName}</h2>
+                  <p className="text-sm text-muted-foreground">{user?.email}</p>
+                  <Badge className="mt-2">{user?.role ?? "User"}</Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 mb-6">
+                  <StatTile icon={FileText} value={(reports || []).length} label="Total Reports" tint="text-blue-500" />
+                  <StatTile icon={Building2} value={(dealers || []).length} label="Dealers Managed" tint="text-orange-500" />
+                </div>
+
+                <Card className="bg-card/60 mb-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5 text-yellow-500" /> Performance</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {(userTargets || []).map((t: any, idx: number) => {
+                        const progress = Math.min(100, Math.round(((t.current ?? 0) / (t.target || 1)) * 100))
+                        const bar = progress >= 80 ? "bg-emerald-500" : progress >= 60 ? "bg-yellow-500" : "bg-red-500"
+                        const Icon = t.icon || Target
+                        return (
+                          <div key={`${t.label}-${idx}`} className="space-y-1">
+                            <div className="flex items-center justify-between text-sm">
+                              <div className="flex items-center gap-2"><Icon className={`h-4 w-4 ${t.color || "text-muted-foreground"}`} /><span>{t.label}</span></div>
+                              <span className="tabular-nums">{t.current} / {t.target}</span>
+                            </div>
+                            <div className="h-2 bg-muted rounded-full overflow-hidden">
+                              <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }} transition={{ duration: 0.8, delay: idx * 0.1 }} className={`h-full ${bar}`} />
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Button variant="destructive" className="w-full" onClick={() => { localStorage.removeItem("user"); useAppStore.getState().setUser(null) }}>
+                  <LogOut className="h-4 w-4 mr-2" /> Logout
+                </Button>
+              </div>
+              <BottomNav current={currentPage} onChange={(k) => useAppStore.getState().setCurrentPage(k as any)} />
+            </motion.div>
+          )}
+
+          {currentPage === "ai" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <ChatInterface onBack={() => useAppStore.getState().setCurrentPage("home") } />
+            </motion.div>
+          )}
+
+          {currentPage === "journey" && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full">
+              <JourneyTracker userId={user?.id || 1} onBack={() => useAppStore.getState().setCurrentPage("home")} onJourneyEnd={() => { useAPI().fetchAllData(); useAppStore.getState().setCurrentPage("home") }} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {showCreateModal && (
+        <CreateModal type={createType} onClose={resetModals} onCreate={createRecord} />
+      )}
+    </div>
+  )
+}
+
+// --------------------
+// Sections & Cards
+// --------------------
+function Section({ title, Icon, children, onAdd }: { title: string; Icon: any; children: React.ReactNode; onAdd: () => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Icon className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">{title}</h2>
+        </div>
+        <Button size="icon" className="rounded-full" onClick={onAdd}>
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="space-y-3">{children}</div>
+    </div>
+  )
+}
+
+function Empty({ icon: Icon, label }: { icon: any; label: string }) {
+  return (
+    <div className="text-center py-6 text-muted-foreground">
+      <Icon className="h-10 w-10 mx-auto opacity-50 mb-2" />
+      <p className="text-sm">{label}</p>
+    </div>
+  )
+}
+
+function TaskCard({ task, onEdit, onDelete }: { task: any; onEdit: (t: any) => void; onDelete: (id: string) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1">
+            <h3 className="font-medium">{task.visitType || task.title}</h3>
+            {task.description && <p className="text-sm text-muted-foreground mt-1">{task.description}</p>}
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant={task.priority === "high" ? "destructive" : "outline"}>{task.priority || "Normal"}</Badge>
+              {task.taskDate && <span className="text-xs text-muted-foreground">{task.taskDate}</span>}
+              {task.pjpId && <Badge variant="outline">PJP</Badge>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onEdit(task)} Icon={Edit} tooltip="Edit" />
+            <IconBtn onClick={() => onDelete(String(task.id))} Icon={Trash2} tooltip="Delete" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PJPCard({ pjp, onView, onEdit, onDelete }: { pjp: any; onView: (p: any) => void; onEdit: (p: any) => void; onDelete: (id: string) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(pjp)}>
+            <h3 className="font-medium">{pjp.objective}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{pjp.siteName || pjp.location}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant="outline">{pjp.status}</Badge>
+              {pjp.planDate && <span className="text-xs text-muted-foreground">{pjp.planDate}</span>}
+              {pjp.areaToBeVisited && <span className="text-xs text-muted-foreground">📍 {pjp.areaToBeVisited}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onView(pjp)} Icon={Eye} />
+            <IconBtn onClick={() => onEdit(pjp)} Icon={Edit} />
+            <IconBtn onClick={() => onDelete(String(pjp.id))} Icon={Trash2} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DealerCard({ dealer, onView, onEdit, onDelete, onScore }: { dealer: any; onView: (d: any) => void; onEdit: (d: any) => void; onDelete: (id: string) => void; onScore: (d: any) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(dealer)}>
+            <h3 className="font-medium">{dealer.name}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{dealer.region} {dealer.area ? `- ${dealer.area}` : ""}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              {dealer.type && <Badge variant="outline">{dealer.type}</Badge>}
+              {dealer.totalPotential && <span className="text-xs text-muted-foreground">₹{dealer.totalPotential}</span>}
+              {dealer.phoneNo && <span className="text-xs text-muted-foreground">{dealer.phoneNo}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <IconBtn onClick={() => onScore(dealer)} Icon={Star} />
+            <IconBtn onClick={() => onView(dealer)} Icon={Eye} />
+            <IconBtn onClick={() => onEdit(dealer)} Icon={Edit} />
+            <IconBtn onClick={() => onDelete(String(dealer.id))} Icon={Trash2} />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReportCard({ report, onView }: { report: any; onView: (r: any) => void }) {
+  return (
+    <Card className="bg-card/60">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 cursor-pointer" onClick={() => onView(report)}>
+            <h3 className="font-medium">{report.title || "Daily Report"}</h3>
+            <p className="text-sm text-muted-foreground mt-1">{report.location || "Field Visit"}</p>
+            <div className="flex items-center flex-wrap gap-2 mt-2">
+              <Badge variant="outline">{report.type || "DVR"}</Badge>
+              {report.date && <span className="text-xs text-muted-foreground">{report.date}</span>}
+              {report.amount && <span className="text-xs text-green-600">₹{report.amount}</span>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1"><IconBtn onClick={() => onView(report)} Icon={Eye} /></div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function IconBtn({ onClick, Icon, tooltip }: { onClick: () => void; Icon: any; tooltip?: string }) {
+  return (
+    <Button type="button" variant="ghost" size="icon" className="rounded-xl" onClick={onClick} title={tooltip}>
+      <Icon className="h-4 w-4" />
+    </Button>
+  )
+}
+
+function BottomNav({ current, onChange }: { current: string; onChange: (k: string) => void }) {
+  const items = [
+    { key: "home", icon: Home, label: "Home" },
+    { key: "ai", icon: MessageCircle, label: "AI" },
+    { key: "journey", icon: MapPin, label: "Journey" },
+    { key: "profile", icon: User, label: "Profile" },
+  ]
+  return (
+    <div className="sticky bottom-0 left-0 right-0 bg-background/95 backdrop-blur border-t">
+      <div className="flex items-center justify-around py-3 px-4">
+        {items.map((it) => (
+          <Button key={it.key} variant={current === it.key ? "default" : "ghost"} className="flex flex-col gap-1 rounded-2xl min-w-[64px]" onClick={() => onChange(it.key)}>
+            <it.icon className="h-5 w-5" />
+            <span className="text-xs">{it.label}</span>
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// --------------------
+// Create Modal (Task/PJP/Dealer/DVR/TVR minimal, shadcn-styled)
+// --------------------
+function CreateModal({ type, onClose, onCreate }: { type: string; onClose: () => void; onCreate: (type: string, data: any) => Promise<any> }) {
+  const [form, setForm] = useState<any>({})
+  const [submitting, setSubmitting] = useState(false)
+  const { pjps, selectedItem } = useAppStore()
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSubmitting(true)
+    try {
+      let payload = { ...form }
+      if (type === "task") {
+        payload = {
+          taskDate: form.taskDate || new Date().toISOString().slice(0, 10),
+          visitType: form.title || form.visitType || "General Task",
+          siteName: form.siteName || "",
+          description: form.description || "",
+          pjpId: form.isPjp ? form.pjpId : null,
+        }
+      }
+      if (type === "pjp") {
+        payload = {
+          planDate: form.plannedDate,
+          visitType: form.visitType || "Field Visit",
+          siteName: form.location,
+          areaToBeVisited: form.area || form.location,
+          objective: form.objective || "",
+          expectedOutcome: form.expectedOutcome || "",
+          status: "planned",
+        }
+      }
+      if (type === "dealer") {
+        payload = {
+          name: form.name,
+          type: form.type,
+          region: form.region,
+          area: form.area,
+          phoneNo: form.phoneNo,
+          address: form.address,
+          totalPotential: Number(form.totalPotential || 0),
+          bestPotential: Number(form.bestPotential || 0),
+          brandSelling: form.brandSelling || [],
+          remarks: form.remarks || null,
+        }
+      }
+      if (type === "dvr" || type === "tvr") {
+        payload = {
+          type: type.toUpperCase(),
+          title: form.title || `${type.toUpperCase()} Report`,
+          location: form.location || "",
+          amount: Number(form.amount || 0),
+          description: form.description || "",
+          date: form.date || new Date().toISOString().slice(0, 10),
+        }
+      }
+      await onCreate(type, payload)
+      onClose()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const TitleMap: Record<string, string> = {
+    task: "Create Task",
+    pjp: "Create PJP",
+    dealer: "Create Dealer",
+    dvr: "Create DVR",
+    tvr: "Create TVR",
+    "dealer-score": "Score Dealer",
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/50">
+      <div className="w-full max-w-md rounded-2xl border bg-card/95 backdrop-blur p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">{TitleMap[type] || "Create"}</h3>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+        <form onSubmit={submit} className="space-y-4">
+          {type === "task" && (
+            <>
+              <Field label="Task Title">
+                <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+              </Field>
+              <Field label="Description"><Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+              <Field label="Task Date"><Input type="date" value={form.taskDate || ""} onChange={(e) => setForm({ ...form, taskDate: e.target.value })} /></Field>
+              <Field label="Site/Location"><Input value={form.siteName || ""} onChange={(e) => setForm({ ...form, siteName: e.target.value })} placeholder="e.g. Ahmedabad" /></Field>
+              <div className="flex items-center gap-2">
+                <Switch checked={!!form.isPjp} onCheckedChange={(v) => setForm({ ...form, isPjp: v })} />
+                <Label>This is a PJP task</Label>
+              </div>
+              {form.isPjp && (
+                <Field label="Related PJP">
+                  <Select value={String(form.pjpId || "")} onValueChange={(v) => setForm({ ...form, pjpId: v })}>
+                    <SelectTrigger><SelectValue placeholder="Select PJP" /></SelectTrigger>
+                    <SelectContent>
+                      {(pjps || []).map((p: any) => (
+                        <SelectItem key={p.id} value={String(p.id)}>{p.objective}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            </>
+          )}
+
+          {type === "pjp" && (
+            <>
+              <Field label="Objective"><Input value={form.objective || ""} onChange={(e) => setForm({ ...form, objective: e.target.value })} required /></Field>
+              <Field label="Location"><Input value={form.location || ""} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="City / Site" /></Field>
+              <Field label="Area to Visit"><Input value={form.area || ""} onChange={(e) => setForm({ ...form, area: e.target.value })} /></Field>
+              <Field label="Planned Date"><Input type="date" value={form.plannedDate || ""} onChange={(e) => setForm({ ...form, plannedDate: e.target.value })} required /></Field>
+              <Field label="Expected Outcome"><Textarea value={form.expectedOutcome || ""} onChange={(e) => setForm({ ...form, expectedOutcome: e.target.value })} /></Field>
+            </>
+          )}
+
+          {type === "dealer" && (
+            <>
+              <Field label="Dealer Name"><Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></Field>
+              <Field label="Type">
+                <Select value={form.type || ""} onValueChange={(v) => setForm({ ...form, type: v })}>
+                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Premium">Premium</SelectItem>
+                    <SelectItem value="Standard">Standard</SelectItem>
+                    <SelectItem value="Basic">Basic</SelectItem>
+                    <SelectItem value="Distributor">Distributor</SelectItem>
+                    <SelectItem value="Retailer">Retailer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Phone Number"><Input value={form.phoneNo || ""} onChange={(e) => setForm({ ...form, phoneNo: e.target.value })} required /></Field>
+              <Field label="Region"><Input value={form.region || ""} onChange={(e) => setForm({ ...form, region: e.target.value })} required /></Field>
+              <Field label="Area"><Input value={form.area || ""} onChange={(e) => setForm({ ...form, area: e.target.value })} required /></Field>
+              <Field label="Full Address"><Textarea value={form.address || ""} onChange={(e) => setForm({ ...form, address: e.target.value })} required rows={2} /></Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Total Potential (₹)"><Input type="number" value={form.totalPotential || ""} onChange={(e) => setForm({ ...form, totalPotential: e.target.value })} /></Field>
+                <Field label="Best Potential (₹)"><Input type="number" value={form.bestPotential || ""} onChange={(e) => setForm({ ...form, bestPotential: e.target.value })} /></Field>
+              </div>
+            </>
+          )}
+
+          {(type === "dvr" || type === "tvr") && (
+            <>
+              <Field label="Title"><Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
+              <Field label="Location"><Input value={form.location || ""} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Amount (₹)"><Input type="number" value={form.amount || ""} onChange={(e) => setForm({ ...form, amount: e.target.value })} /></Field>
+                <Field label="Date"><Input type="date" value={form.date || ""} onChange={(e) => setForm({ ...form, date: e.target.value })} /></Field>
+              </div>
+              <Field label="Description"><Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
+            </>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={submitting}>{submitting ? <><RefreshCw className="h-4 w-4 mr-2 animate-spin" /> Saving</> : "Save"}</Button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <Label>{label}</Label>
+      {children}
+    </div>
+  )
+}
+
+

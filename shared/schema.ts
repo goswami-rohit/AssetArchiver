@@ -1,63 +1,73 @@
-import { pgTable, text, serial, varchar, integer, boolean, date, real, timestamp, decimal, uuid } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+// schema.ts
+import {
+  pgTable, serial, integer, varchar, text, boolean, timestamp, date, numeric, uuid,
+  uniqueIndex, index
+} from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
 
-// Companies table
+// ------------------------- companies -------------------------
 export const companies = pgTable("companies", {
   id: serial("id").primaryKey(),
   companyName: varchar("company_name", { length: 255 }).notNull(),
   officeAddress: text("office_address").notNull(),
-  isHeadOffice: boolean("is_head_office").default(true).notNull(),
+  isHeadOffice: boolean("is_head_office").notNull().default(true),
   phoneNumber: varchar("phone_number", { length: 50 }).notNull(),
-  region: varchar("region", { length: 255 }),
-  area: varchar("area", { length: 255 }),
-  adminUserId: text("admin_user_id").unique().notNull(),
+  region: text("region"),
+  area: text("area"),
+  adminUserId: varchar("admin_user_id", { length: 255 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
-  workosOrganizationId: text("workos_organization_id").unique(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow(),
+  workosOrganizationId: varchar("workos_organization_id", { length: 255 }).unique(),
+}, (t) => [
+  index("idx_admin_user_id").on(t.adminUserId),
+]);
 
-// Users table
+// ------------------------- users -------------------------
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
-  workosUserId: text("workos_user_id").unique(),
+  workosUserId: varchar("workos_user_id", { length: 255 }).unique(),
   companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "no action", onUpdate: "no action" }),
   email: text("email").notNull(),
   firstName: text("first_name"),
   lastName: text("last_name"),
   role: text("role").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow(),
   phoneNumber: varchar("phone_number", { length: 50 }),
-  inviteToken: text("inviteToken").unique(),
-  status: text("status").default("active").notNull(),
-  region: varchar("region", { length: 255 }),
-  area: varchar("area", { length: 255 }),
-  salesmanLoginId: text("salesman_login_id").unique(),
+  inviteToken: varchar("inviteToken", { length: 255 }).unique(),
+  status: text("status").notNull().default("active"),
+  region: text("region"),
+  area: text("area"),
+  salesmanLoginId: varchar("salesman_login_id", { length: 255 }).unique(),
   hashedPassword: text("hashed_password"),
   reportsToId: integer("reports_to_id").references(() => users.id, { onDelete: "set null" }),
-});
+}, (t) => [
+  uniqueIndex("users_companyid_email_unique").on(t.companyId, t.email),
+  index("idx_user_company_id").on(t.companyId),
+  index("idx_workos_user_id").on(t.workosUserId),
+]);
 
-// Daily Visit Reports table
+// ------------------------- daily_visit_reports -------------------------
 export const dailyVisitReports = pgTable("daily_visit_reports", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   reportDate: date("report_date").notNull(),
   dealerType: varchar("dealer_type", { length: 50 }).notNull(),
   dealerName: varchar("dealer_name", { length: 255 }),
   subDealerName: varchar("sub_dealer_name", { length: 255 }),
   location: varchar("location", { length: 500 }).notNull(),
-  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
-  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  latitude: numeric("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: numeric("longitude", { precision: 10, scale: 7 }).notNull(),
   visitType: varchar("visit_type", { length: 50 }).notNull(),
-  dealerTotalPotential: decimal("dealer_total_potential", { precision: 10, scale: 2 }).notNull(),
-  dealerBestPotential: decimal("dealer_best_potential", { precision: 10, scale: 2 }).notNull(),
+  dealerTotalPotential: numeric("dealer_total_potential", { precision: 10, scale: 2 }).notNull(),
+  dealerBestPotential: numeric("dealer_best_potential", { precision: 10, scale: 2 }).notNull(),
   brandSelling: text("brand_selling").array().notNull(),
   contactPerson: varchar("contact_person", { length: 255 }),
   contactPersonPhoneNo: varchar("contact_person_phone_no", { length: 20 }),
-  todayOrderMt: decimal("today_order_mt", { precision: 10, scale: 2 }).notNull(),
-  todayCollectionRupees: decimal("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
+  todayOrderMt: numeric("today_order_mt", { precision: 10, scale: 2 }).notNull(),
+  todayCollectionRupees: numeric("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
+  overdueAmount: numeric("overdue_amount", { precision: 12, scale: 2 }),
   feedbacks: varchar("feedbacks", { length: 500 }).notNull(),
   solutionBySalesperson: varchar("solution_by_salesperson", { length: 500 }),
   anyRemarks: varchar("any_remarks", { length: 500 }),
@@ -66,12 +76,14 @@ export const dailyVisitReports = pgTable("daily_visit_reports", {
   inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
   outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_daily_visit_reports_user_id").on(t.userId),
+]);
 
-// Technical Visit Reports table
+// ------------------------- technical_visit_reports -------------------------
 export const technicalVisitReports = pgTable("technical_visit_reports", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   reportDate: date("report_date").notNull(),
   visitType: varchar("visit_type", { length: 50 }).notNull(),
@@ -85,25 +97,42 @@ export const technicalVisitReports = pgTable("technical_visit_reports", {
   inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
   outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  siteVisitBrandInUse: text("site_visit_brand_in_use"),
+  siteVisitStage: text("site_visit_stage"),
+  conversionFromBrand: text("conversion_from_brand"),
+  conversionQuantityValue: numeric("conversion_quantity_value", { precision: 10, scale: 2 }),
+  conversionQuantityUnit: varchar("conversion_quantity_unit", { length: 20 }),
+  associatedPartyName: text("associated_party_name"),
+  influencerType: text("influencer_type"),
+  serviceType: text("service_type"),
+  qualityComplaint: text("quality_complaint"),
+  promotionalActivity: text("promotional_activity"),
+  channelPartnerVisit: text("channel_partner_visit"),
+}, (t) => [
+  index("idx_technical_visit_reports_user_id").on(t.userId),
+]);
 
-// Permanent Journey Plans table
+// ------------------------- permanent_journey_plans -------------------------
 export const permanentJourneyPlans = pgTable("permanent_journey_plans", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: integer("user_id").notNull().references(() => users.id),
+  createdById: integer("created_by_id").notNull().references(() => users.id),
   planDate: date("plan_date").notNull(),
   areaToBeVisited: varchar("area_to_be_visited", { length: 500 }).notNull(),
   description: varchar("description", { length: 500 }),
   status: varchar("status", { length: 50 }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_permanent_journey_plans_user_id").on(t.userId),
+  index("idx_permanent_journey_plans_created_by_id").on(t.createdById),
+]);
 
-// Dealers table
+// ------------------------- dealers -------------------------
 export const dealers = pgTable("dealers", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
-  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
+  userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
   type: varchar("type", { length: 50 }).notNull(),
   parentDealerId: varchar("parent_dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
   name: varchar("name", { length: 255 }).notNull(),
@@ -111,18 +140,21 @@ export const dealers = pgTable("dealers", {
   area: varchar("area", { length: 255 }).notNull(),
   phoneNo: varchar("phone_no", { length: 20 }).notNull(),
   address: varchar("address", { length: 500 }).notNull(),
-  totalPotential: decimal("total_potential", { precision: 10, scale: 2 }).notNull(),
-  bestPotential: decimal("best_potential", { precision: 10, scale: 2 }).notNull(),
+  totalPotential: numeric("total_potential", { precision: 10, scale: 2 }).notNull(),
+  bestPotential: numeric("best_potential", { precision: 10, scale: 2 }).notNull(),
   brandSelling: text("brand_selling").array().notNull(),
   feedbacks: varchar("feedbacks", { length: 500 }).notNull(),
   remarks: varchar("remarks", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_dealers_user_id").on(t.userId),
+  index("idx_dealers_parent_dealer_id").on(t.parentDealerId),
+]);
 
-// Salesman Attendance table
+// ------------------------- salesman_attendance -------------------------
 export const salesmanAttendance = pgTable("salesman_attendance", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   attendanceDate: date("attendance_date").notNull(),
   locationName: varchar("location_name", { length: 500 }).notNull(),
@@ -132,25 +164,27 @@ export const salesmanAttendance = pgTable("salesman_attendance", {
   outTimeImageCaptured: boolean("out_time_image_captured").notNull(),
   inTimeImageUrl: varchar("in_time_image_url", { length: 500 }),
   outTimeImageUrl: varchar("out_time_image_url", { length: 500 }),
-  inTimeLatitude: decimal("in_time_latitude", { precision: 10, scale: 7 }).notNull(),
-  inTimeLongitude: decimal("in_time_longitude", { precision: 10, scale: 7 }).notNull(),
-  inTimeAccuracy: decimal("in_time_accuracy", { precision: 10, scale: 2 }),
-  inTimeSpeed: decimal("in_time_speed", { precision: 10, scale: 2 }),
-  inTimeHeading: decimal("in_time_heading", { precision: 10, scale: 2 }),
-  inTimeAltitude: decimal("in_time_altitude", { precision: 10, scale: 2 }),
-  outTimeLatitude: decimal("out_time_latitude", { precision: 10, scale: 7 }),
-  outTimeLongitude: decimal("out_time_longitude", { precision: 10, scale: 7 }),
-  outTimeAccuracy: decimal("out_time_accuracy", { precision: 10, scale: 2 }),
-  outTimeSpeed: decimal("out_time_speed", { precision: 10, scale: 2 }),
-  outTimeHeading: decimal("out_time_heading", { precision: 10, scale: 2 }),
-  outTimeAltitude: decimal("out_time_altitude", { precision: 10, scale: 2 }),
+  inTimeLatitude: numeric("in_time_latitude", { precision: 10, scale: 7 }).notNull(),
+  inTimeLongitude: numeric("in_time_longitude", { precision: 10, scale: 7 }).notNull(),
+  inTimeAccuracy: numeric("in_time_accuracy", { precision: 10, scale: 2 }),
+  inTimeSpeed: numeric("in_time_speed", { precision: 10, scale: 2 }),
+  inTimeHeading: numeric("in_time_heading", { precision: 10, scale: 2 }),
+  inTimeAltitude: numeric("in_time_altitude", { precision: 10, scale: 2 }),
+  outTimeLatitude: numeric("out_time_latitude", { precision: 10, scale: 7 }),
+  outTimeLongitude: numeric("out_time_longitude", { precision: 10, scale: 7 }),
+  outTimeAccuracy: numeric("out_time_accuracy", { precision: 10, scale: 2 }),
+  outTimeSpeed: numeric("out_time_speed", { precision: 10, scale: 2 }),
+  outTimeHeading: numeric("out_time_heading", { precision: 10, scale: 2 }),
+  outTimeAltitude: numeric("out_time_altitude", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_salesman_attendance_user_id").on(t.userId),
+]);
 
-// Salesman Leave Applications table
+// ------------------------- salesman_leave_applications -------------------------
 export const salesmanLeaveApplications = pgTable("salesman_leave_applications", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   leaveType: varchar("leave_type", { length: 100 }).notNull(),
   startDate: date("start_date").notNull(),
@@ -159,35 +193,37 @@ export const salesmanLeaveApplications = pgTable("salesman_leave_applications", 
   status: varchar("status", { length: 50 }).notNull(),
   adminRemarks: varchar("admin_remarks", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_salesman_leave_applications_user_id").on(t.userId),
+]);
 
-// Client Reports table
+// ------------------------- client_reports -------------------------
 export const clientReports = pgTable("client_reports", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`substr(replace(cast(gen_random_uuid() as text),'-',''),1,25)`),
   dealerType: text("dealerType").notNull(),
   dealerSubDealerName: text("dealer_sub_dealer_name").notNull(),
   location: text("location").notNull(),
   typeBestNonBest: text("type_best_non_best").notNull(),
-  dealerTotalPotential: decimal("dealerTotalPotential", { precision: 10, scale: 2 }).notNull(),
-  dealerBestPotential: decimal("dealerBestPotential", { precision: 10, scale: 2 }).notNull(),
+  dealerTotalPotential: numeric("dealer_total_potential", { precision: 10, scale: 2 }).notNull(),
+  dealerBestPotential: numeric("dealer_best_potential", { precision: 10, scale: 2 }).notNull(),
   brandSelling: text("brandSelling").array().notNull(),
   contactPerson: text("contactPerson").notNull(),
   contactPersonPhoneNo: text("contact_person_phone_no").notNull(),
-  todayOrderMT: decimal("today_order_mt", { precision: 10, scale: 2 }).notNull(),
-  todayCollection: decimal("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
+  todayOrderMT: numeric("today_order_mt", { precision: 10, scale: 2 }).notNull(),
+  todayCollection: numeric("today_collection_rupees", { precision: 10, scale: 2 }).notNull(),
   feedbacks: text("feedbacks").notNull(),
   solutionsAsPerSalesperson: text("solutions_as_per_salesperson").notNull(),
   anyRemarks: text("anyRemarks").notNull(),
   checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }).notNull(),
   userId: integer("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
-  createdAt: timestamp("createdAt", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  createdAt: timestamp("createdAt", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// Competition Reports table
+// ------------------------- competition_reports -------------------------
 export const competitionReports = pgTable("competition_reports", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`substr(replace(cast(gen_random_uuid() as text),'-',''),1,25)`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   reportDate: date("report_date").notNull(),
   brandName: varchar("brand_name", { length: 255 }).notNull(),
@@ -195,41 +231,53 @@ export const competitionReports = pgTable("competition_reports", {
   nod: varchar("nod", { length: 100 }).notNull(),
   retail: varchar("retail", { length: 100 }).notNull(),
   schemesYesNo: varchar("schemes_yes_no", { length: 10 }).notNull(),
-  avgSchemeCost: decimal("avg_scheme_cost", { precision: 10, scale: 2 }).notNull(),
+  avgSchemeCost: numeric("avg_scheme_cost", { precision: 10, scale: 2 }).notNull(),
   remarks: varchar("remarks", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("competition_reports_user_idx").on(t.userId),
+]);
 
-// Geo Tracking table
+// ------------------------- geo_tracking -------------------------
 export const geoTracking = pgTable("geo_tracking", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  latitude: decimal("latitude", { precision: 10, scale: 7 }).notNull(),
-  longitude: decimal("longitude", { precision: 10, scale: 7 }).notNull(),
+  latitude: numeric("latitude", { precision: 10, scale: 7 }).notNull(),
+  longitude: numeric("longitude", { precision: 10, scale: 7 }).notNull(),
   recordedAt: timestamp("recorded_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  accuracy: decimal("accuracy", { precision: 10, scale: 2 }),
-  speed: decimal("speed", { precision: 10, scale: 2 }),
-  heading: decimal("heading", { precision: 10, scale: 2 }),
-  altitude: decimal("altitude", { precision: 10, scale: 2 }),
+  accuracy: numeric("accuracy", { precision: 10, scale: 2 }),
+  speed: numeric("speed", { precision: 10, scale: 2 }),
+  heading: numeric("heading", { precision: 10, scale: 2 }),
+  altitude: numeric("altitude", { precision: 10, scale: 2 }),
   locationType: varchar("location_type", { length: 50 }),
   activityType: varchar("activity_type", { length: 50 }),
   appState: varchar("app_state", { length: 50 }),
-  batteryLevel: decimal("battery_level", { precision: 5, scale: 2 }),
+  batteryLevel: numeric("battery_level", { precision: 5, scale: 2 }),
   isCharging: boolean("is_charging"),
   networkStatus: varchar("network_status", { length: 50 }),
   ipAddress: varchar("ip_address", { length: 45 }),
   siteName: varchar("site_name", { length: 255 }),
   checkInTime: timestamp("check_in_time", { withTimezone: true, precision: 6 }),
   checkOutTime: timestamp("check_out_time", { withTimezone: true, precision: 6 }),
-  totalDistanceTravelled: decimal("total_distance_travelled", { precision: 10, scale: 3 }),
+  totalDistanceTravelled: numeric("total_distance_travelled", { precision: 10, scale: 3 }),
+  journeyId: varchar("journey_id", { length: 255 }),
+  isActive: boolean("is_active").notNull().default(true),
+  destLat: numeric("dest_lat", { precision: 10, scale: 7 }),
+  destLng: numeric("dest_lng", { precision: 10, scale: 7 }),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
-});
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_geo_user_time").on(t.userId, t.recordedAt),
+  index("idx_geo_journey_time").on(t.journeyId, t.recordedAt),
+  index("idx_geo_active").on(t.isActive),
+  index("idx_geo_tracking_user_id").on(t.userId),
+  index("idx_geo_tracking_recorded_at").on(t.recordedAt),
+]);
 
-// Daily Tasks table
+// ------------------------- daily_tasks -------------------------
 export const dailyTasks = pgTable("daily_tasks", {
-  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
   userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   assignedByUserId: integer("assigned_by_user_id").notNull().references(() => users.id, { onDelete: "no action" }),
   taskDate: date("task_date").notNull(),
@@ -237,165 +285,147 @@ export const dailyTasks = pgTable("daily_tasks", {
   relatedDealerId: varchar("related_dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
   siteName: varchar("site_name", { length: 255 }),
   description: varchar("description", { length: 500 }),
-  status: varchar("status", { length: 50 }).default("Assigned").notNull(),
+  status: varchar("status", { length: 50 }).notNull().default("Assigned"),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
   pjpId: varchar("pjp_id", { length: 255 }).references(() => permanentJourneyPlans.id, { onDelete: "set null" }),
-});
+}, (t) => [
+  index("idx_daily_tasks_user_id").on(t.userId),
+  index("idx_daily_tasks_assigned_by_user_id").on(t.assignedByUserId),
+  index("idx_daily_tasks_task_date").on(t.taskDate),
+  index("idx_daily_tasks_pjp_id").on(t.pjpId),
+  index("idx_daily_tasks_related_dealer_id").on(t.relatedDealerId),
+  index("idx_daily_tasks_date_user").on(t.taskDate, t.userId),
+  index("idx_daily_tasks_status").on(t.status),
+]);
 
-// Dealer Reports and Scores table
+// ------------------------- dealer_reports_and_scores -------------------------
 export const dealerReportsAndScores = pgTable("dealer_reports_and_scores", {
-  id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
-  dealerId: varchar("dealer_id", { length: 255 }).unique().notNull().references(() => dealers.id),
-  dealerScore: decimal("dealer_score", { precision: 10, scale: 2 }).notNull(),
-  trustWorthinessScore: decimal("trust_worthiness_score", { precision: 10, scale: 2 }).notNull(),
-  creditWorthinessScore: decimal("credit_worthiness_score", { precision: 10, scale: 2 }).notNull(),
-  orderHistoryScore: decimal("order_history_score", { precision: 10, scale: 2 }).notNull(),
-  visitFrequencyScore: decimal("visit_frequency_score", { precision: 10, scale: 2 }).notNull(),
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`substr(replace(cast(gen_random_uuid() as text),'-',''),1,25)`),
+  dealerId: varchar("dealer_id", { length: 255 }).notNull().unique().references(() => dealers.id),
+  dealerScore: numeric("dealer_score", { precision: 10, scale: 2 }).notNull(),
+  trustWorthinessScore: numeric("trust_worthiness_score", { precision: 10, scale: 2 }).notNull(),
+  creditWorthinessScore: numeric("credit_worthiness_score", { precision: 10, scale: 2 }).notNull(),
+  orderHistoryScore: numeric("order_history_score", { precision: 10, scale: 2 }).notNull(),
+  visitFrequencyScore: numeric("visit_frequency_score", { precision: 10, scale: 2 }).notNull(),
   lastUpdatedDate: timestamp("last_updated_date", { withTimezone: true, precision: 6 }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
 });
 
-// Relations
-export const companiesRelations = relations(companies, ({ many }) => ({
-  users: many(users),
-}));
+// ------------------------- sales_report -------------------------
+export const salesReport = pgTable("sales_report", {
+  id: serial("id").primaryKey(),
+  date: date("date").notNull(),
+  monthlyTarget: numeric("monthly_target", { precision: 12, scale: 2 }).notNull(),
+  tillDateAchievement: numeric("till_date_achievement", { precision: 12, scale: 2 }).notNull(),
+  yesterdayTarget: numeric("yesterday_target", { precision: 12, scale: 2 }),
+  yesterdayAchievement: numeric("yesterday_achievement", { precision: 12, scale: 2 }),
+  salesPersonId: integer("sales_person_id").notNull().references(() => users.id),
+  dealerId: varchar("dealer_id", { length: 255 }).notNull().references(() => dealers.id),
+});
 
-export const usersRelations = relations(users, ({ one, many }) => ({
-  company: one(companies, {
-    fields: [users.companyId],
-    references: [companies.id],
-  }),
-  reportsTo: one(users, {
-    fields: [users.reportsToId],
-    references: [users.id],
-    relationName: "ReportsToManager",
-  }),
-  reports: many(users, { relationName: "ReportsToManager" }),
-  dailyVisitReports: many(dailyVisitReports),
-  technicalVisitReports: many(technicalVisitReports),
-  permanentJourneyPlans: many(permanentJourneyPlans),
-  dealers: many(dealers),
-  salesmanAttendance: many(salesmanAttendance),
-  salesmanLeaveApplications: many(salesmanLeaveApplications),
-  clientReports: many(clientReports),
-  competitionReports: many(competitionReports),
-  geoTrackingRecords: many(geoTracking, { relationName: "UserGeoTracking" }),
-  assignedTasks: many(dailyTasks, { relationName: "AssignedTasks" }),
-  createdTasks: many(dailyTasks, { relationName: "CreatedTasks" }),
-}));
+// ------------------------- collection_reports -------------------------
+export const collectionReports = pgTable("collection_reports", {
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
+  dvrId: varchar("dvr_id", { length: 255 }).notNull().unique().references(() => dailyVisitReports.id, { onDelete: "cascade" }),
+  dealerId: varchar("dealer_id", { length: 255 }).notNull().references(() => dealers.id, { onDelete: "cascade" }),
+  collectedAmount: numeric("collected_amount", { precision: 12, scale: 2 }).notNull(),
+  collectedOnDate: date("collected_on_date").notNull(),
+  weeklyTarget: numeric("weekly_target", { precision: 12, scale: 2 }),
+  tillDateAchievement: numeric("till_date_achievement", { precision: 12, scale: 2 }),
+  yesterdayTarget: numeric("yesterday_target", { precision: 12, scale: 2 }),
+  yesterdayAchievement: numeric("yesterday_achievement", { precision: 12, scale: 2 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow(),
+}, (t) => [
+  index("idx_collection_reports_dealer_id").on(t.dealerId),
+]);
 
-export const dailyVisitReportsRelations = relations(dailyVisitReports, ({ one }) => ({
-  user: one(users, {
-    fields: [dailyVisitReports.userId],
-    references: [users.id],
-  }),
-}));
+// ------------------------- dealer_development_process -------------------------
+export const ddp = pgTable("dealer_development_process", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  dealerId: varchar("dealer_id", { length: 255 }).notNull().references(() => dealers.id),
+  creationDate: date("creation_date").notNull(),
+  status: text("status").notNull(),
+  obstacle: text("obstacle"),
+});
 
-export const technicalVisitReportsRelations = relations(technicalVisitReports, ({ one }) => ({
-  user: one(users, {
-    fields: [technicalVisitReports.userId],
-    references: [users.id],
-  }),
-}));
+// ------------------------- ratings -------------------------
+export const ratings = pgTable("ratings", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  area: text("area").notNull(),
+  region: text("region").notNull(),
+  rating: integer("rating").notNull(),
+});
 
-export const permanentJourneyPlansRelations = relations(permanentJourneyPlans, ({ one, many }) => ({
-  user: one(users, {
-    fields: [permanentJourneyPlans.userId],
-    references: [users.id],
-  }),
-  dailyTasks: many(dailyTasks, { relationName: "PJPTasks" }),
-}));
+// ------------------------- brands -------------------------
+export const brands = pgTable("brands", {
+  id: serial("id").primaryKey(),
+  name: varchar("brand_name", { length: 255 }).notNull().unique(),
+});
 
-export const dealersRelations = relations(dealers, ({ one, many }) => ({
-  user: one(users, {
-    fields: [dealers.userId],
-    references: [users.id],
-  }),
-  parentDealer: one(dealers, {
-    fields: [dealers.parentDealerId],
-    references: [dealers.id],
-    relationName: "SubDealers",
-  }),
-  subDealers: many(dealers, { relationName: "SubDealers" }),
-  dailyTasks: many(dailyTasks, { relationName: "DealerDailyTasks" }),
-  // ✅ FIXED - added missing fields and references
-  reportsAndScores: one(dealerReportsAndScores, { 
-    fields: [dealers.id],
-    references: [dealerReportsAndScores.dealerId],
-    relationName: "DealerScores" 
-  }),
-}));
+// ------------------------- dealer_brand_mapping -------------------------
+export const dealerBrandMapping = pgTable("dealer_brand_mapping", {
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`substr(replace(cast(gen_random_uuid() as text),'-',''),1,25)`),
+  dealerId: varchar("dealer_id", { length: 255 }).notNull().references(() => dealers.id),
+  brandId: integer("brand_id").notNull().references(() => brands.id),
+  capacityMT: numeric("capacity_mt", { precision: 12, scale: 2 }).notNull(),
+}, (t) => [
+  uniqueIndex("dealer_brand_mapping_dealer_id_brand_id_unique").on(t.dealerId, t.brandId),
+]);
 
-export const salesmanAttendanceRelations = relations(salesmanAttendance, ({ one }) => ({
-  user: one(users, {
-    fields: [salesmanAttendance.userId],
-    references: [users.id],
-  }),
-}));
+// ------------------------- master_connected_table -------------------------
+export const masterConnectedTable = pgTable("master_connected_table", {
+  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
+  companyId: integer("companyId"),
+  userId: integer("userId"),
+  dealerId: varchar("dealerId", { length: 255 }),
+  dvrId: varchar("dvrId", { length: 255 }),
+  tvrId: varchar("tvrId", { length: 255 }),
+  permanentJourneyPlanId: varchar("permanentJourneyPlanId", { length: 255 }),
+  permanentJourneyPlanCreatedById: integer("permanentJourneyPlanCreatedById"),
+  dailyTaskId: varchar("dailyTaskId", { length: 255 }),
+  attendanceId: varchar("attendanceId", { length: 255 }),
+  leaveApplicationId: varchar("leaveApplicationId", { length: 255 }),
+  clientReportId: varchar("clientReportId", { length: 255 }),
+  competitionReportId: varchar("competitionReportId", { length: 255 }),
+  geoTrackingId: varchar("geoTrackingId", { length: 255 }),
+  dealerReportsAndScoresId: varchar("dealerReportsAndScoresId", { length: 255 }),
+  salesReportId: integer("salesReportId"),
+  collectionReportId: varchar("collectionReportId", { length: 255 }),
+  ddpId: integer("ddpId"),
+  ratingId: integer("ratingId"),
+  brandId: integer("brandId"),
+  dealerBrandMappingId: varchar("dealerBrandMappingId", { length: 255 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_mct_company_id").on(t.companyId),
+  index("idx_mct_user_id").on(t.userId),
+  index("idx_mct_dealer_id").on(t.dealerId),
+  index("idx_mct_pjp_id").on(t.permanentJourneyPlanId),
+  index("idx_mct_pjp_created_by_id").on(t.permanentJourneyPlanCreatedById),
+  index("idx_mct_dailytask_id").on(t.dailyTaskId),
+  index("idx_mct_dvr_id").on(t.dvrId),
+  index("idx_mct_tvr_id").on(t.tvrId),
+  index("idx_mct_attendance_id").on(t.attendanceId),
+  index("idx_mct_leave_id").on(t.leaveApplicationId),
+  index("idx_mct_client_report_id").on(t.clientReportId),
+  index("idx_mct_comp_report_id").on(t.competitionReportId),
+  index("idx_mct_geotracking_id").on(t.geoTrackingId),
+  index("idx_mct_dealer_scores_id").on(t.dealerReportsAndScoresId),
+  index("idx_mct_sales_report_id").on(t.salesReportId),
+  index("idx_mct_collection_report_id").on(t.collectionReportId),
+  index("idx_mct_ddp_id").on(t.ddpId),
+  index("idx_mct_rating_id").on(t.ratingId),
+  index("idx_mct_brand_id").on(t.brandId),
+  index("idx_mct_dealer_brand_map_id").on(t.dealerBrandMappingId),
+]);
 
-export const salesmanLeaveApplicationsRelations = relations(salesmanLeaveApplications, ({ one }) => ({
-  user: one(users, {
-    fields: [salesmanLeaveApplications.userId],
-    references: [users.id],
-  }),
-}));
-
-export const clientReportsRelations = relations(clientReports, ({ one }) => ({
-  user: one(users, {
-    fields: [clientReports.userId],
-    references: [users.id],
-  }),
-}));
-
-export const competitionReportsRelations = relations(competitionReports, ({ one }) => ({
-  user: one(users, {
-    fields: [competitionReports.userId],
-    references: [users.id],
-  }),
-}));
-
-export const geoTrackingRelations = relations(geoTracking, ({ one }) => ({
-  user: one(users, {
-    fields: [geoTracking.userId],
-    references: [users.id],
-    relationName: "UserGeoTracking",
-  }),
-}));
-
-export const dailyTasksRelations = relations(dailyTasks, ({ one }) => ({
-  user: one(users, {
-    fields: [dailyTasks.userId],
-    references: [users.id],
-    relationName: "AssignedTasks",
-  }),
-  assignedBy: one(users, {
-    fields: [dailyTasks.assignedByUserId],
-    references: [users.id],
-    relationName: "CreatedTasks",
-  }),
-  relatedDealer: one(dealers, {
-    fields: [dailyTasks.relatedDealerId],
-    references: [dealers.id],
-    relationName: "DealerDailyTasks",
-  }),
-  permanentJourneyPlan: one(permanentJourneyPlans, {
-    fields: [dailyTasks.pjpId],
-    references: [permanentJourneyPlans.id],
-    relationName: "PJPTasks",
-  }),
-}));
-
-export const dealerReportsAndScoresRelations = relations(dealerReportsAndScores, ({ one }) => ({
-  dealer: one(dealers, {
-    fields: [dealerReportsAndScores.dealerId],
-    references: [dealers.id],
-    relationName: "DealerScores",
-  }),
-}));
-
-// Insert schemas for type safety
+// Generate and export insert schemas
 export const insertCompanySchema = createInsertSchema(companies);
 export const insertUserSchema = createInsertSchema(users);
 export const insertDailyVisitReportSchema = createInsertSchema(dailyVisitReports);
@@ -406,37 +436,13 @@ export const insertSalesmanAttendanceSchema = createInsertSchema(salesmanAttenda
 export const insertSalesmanLeaveApplicationSchema = createInsertSchema(salesmanLeaveApplications);
 export const insertClientReportSchema = createInsertSchema(clientReports);
 export const insertCompetitionReportSchema = createInsertSchema(competitionReports);
-export const insertGeoTrackingSchema = createInsertSchema(geoTracking, {
-  createdAt: undefined,
-  updatedAt: undefined,
-});
+export const insertGeoTrackingSchema = createInsertSchema(geoTracking);
 export const insertDailyTaskSchema = createInsertSchema(dailyTasks);
 export const insertDealerReportsAndScoresSchema = createInsertSchema(dealerReportsAndScores);
-
-// Export types
-export type Company = typeof companies.$inferSelect;
-export type InsertCompany = typeof companies.$inferInsert;
-export type User = typeof users.$inferSelect;
-export type InsertUser = typeof users.$inferInsert;
-export type DailyVisitReport = typeof dailyVisitReports.$inferSelect;
-export type InsertDailyVisitReport = typeof dailyVisitReports.$inferInsert;
-export type TechnicalVisitReport = typeof technicalVisitReports.$inferSelect;
-export type InsertTechnicalVisitReport = typeof technicalVisitReports.$inferInsert;
-export type PermanentJourneyPlan = typeof permanentJourneyPlans.$inferSelect;
-export type InsertPermanentJourneyPlan = typeof permanentJourneyPlans.$inferInsert;
-export type Dealer = typeof dealers.$inferSelect;
-export type InsertDealer = typeof dealers.$inferInsert;
-export type SalesmanAttendance = typeof salesmanAttendance.$inferSelect;
-export type InsertSalesmanAttendance = typeof salesmanAttendance.$inferInsert;
-export type SalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferSelect;
-export type InsertSalesmanLeaveApplication = typeof salesmanLeaveApplications.$inferInsert;
-export type ClientReport = typeof clientReports.$inferSelect;
-export type InsertClientReport = typeof clientReports.$inferInsert;
-export type CompetitionReport = typeof competitionReports.$inferSelect;
-export type InsertCompetitionReport = typeof competitionReports.$inferInsert;
-export type GeoTracking = typeof geoTracking.$inferSelect;
-export type InsertGeoTracking = typeof geoTracking.$inferInsert;
-export type DailyTask = typeof dailyTasks.$inferSelect;
-export type InsertDailyTask = typeof dailyTasks.$inferInsert;
-export type DealerReportsAndScores = typeof dealerReportsAndScores.$inferSelect;
-export type InsertDealerReportsAndScores = typeof dealerReportsAndScores.$inferInsert;
+export const insertSalesReportSchema = createInsertSchema(salesReport);
+export const insertCollectionReportSchema = createInsertSchema(collectionReports);
+export const insertDdpSchema = createInsertSchema(ddp);
+export const insertRatingSchema = createInsertSchema(ratings);
+export const insertBrandSchema = createInsertSchema(brands);
+export const insertDealerBrandMappingSchema = createInsertSchema(dealerBrandMapping);
+export const insertMasterConnectedTableSchema = createInsertSchema(masterConnectedTable);
