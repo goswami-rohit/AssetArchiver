@@ -1,12 +1,12 @@
 // src/pages/HomePage.tsx
-import React, { useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-
 import {
+  Edit,
   Plus,
   CheckCircle,
   Building2,
@@ -18,14 +18,25 @@ import {
   Navigation,
   TrendingUp,
   DollarSign,
-  Package,
-  Edit,
+  Wrench,
   Trash2,
   Eye,
   MapIcon,
   PhoneCall,
   Star,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogTrigger,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogClose,
+} from "@/components/ui/dialog";
+import DVRForm from "@/pages/forms/DVRForm";
+import TVRForm from "@/pages/forms/TVRForm";
+import AttendanceInForm from "@/pages/forms/AttendanceInForm";
+import AttendanceOutForm from "@/pages/forms/AttendanceOutForm";
 
 // shared bits you said you exported
 import { useAppStore, StatusBar, LoadingList, StatCard } from "@/components/ReusableUI";
@@ -230,14 +241,14 @@ function ReportCard({
     type === "sales"
       ? `Sales Report - ${report.dealerId || "N/A"}`
       : type === "collection"
-      ? `Collection - ₹${Number(report.collectedAmount || 0).toLocaleString()}`
-      : report.title || "Daily Report";
+        ? `Collection - ₹${Number(report.collectedAmount || 0).toLocaleString()}`
+        : report.title || "Daily Report";
   const getSubtitle = () =>
     type === "sales"
       ? `Target: ₹${Number(report.monthlyTarget || 0).toLocaleString()}`
       : type === "collection"
-      ? `Dealer: ${report.dealerId}`
-      : report.location || "Field Visit";
+        ? `Dealer: ${report.dealerId}`
+        : report.location || "Field Visit";
 
   const Icon = getIcon();
 
@@ -363,6 +374,7 @@ export default function HomePage() {
   const {
     user,
     attendanceStatus,
+    setAttendanceStatus,
     isLoading,
     dailyTasks,
     pjps,
@@ -389,6 +401,8 @@ export default function HomePage() {
     () => (collectionReports || []).slice(0, 3),
     [collectionReports]
   );
+  const [openDvr, setOpenDvr] = useState(false);
+  const [openTvr, setOpenTvr] = useState(false);
 
   return (
     <div className="min-h-full flex flex-col">
@@ -413,29 +427,54 @@ export default function HomePage() {
               </div>
             </div>
 
+            {/*Attendance In and Out section */}
             <div className="flex items-center gap-2">
-              <Button
-                variant={attendanceStatus === "in" ? "destructive" : "default"}
-                size="sm"
-                onClick={handleAttendance}
-                className="rounded-full shadow-sm"
-                disabled={isLoading}
-              >
-                {attendanceStatus === "in" ? (
-                  <>
-                    <LogOut className="h-4 w-4 mr-1" /> Out
-                  </>
-                ) : (
-                  <>
+              {/* In */}
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="default" size="sm" className="rounded-full shadow-sm" disabled={isLoading}>
                     <LogIn className="h-4 w-4 mr-1" /> In
-                  </>
-                )}
-              </Button>
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
+                  <div className="h-full overflow-y-auto p-4">
+                    <AttendanceInForm
+                      userId={user?.id}
+                      onSubmitted={(payload) => {
+                        setAttendanceStatus("in"); // from useAppStore
+                      }}
+                      onCancel={() => { }}
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              {/* Out */}
+              <Dialog>
+                <DialogTrigger asChild>
+                  <Button variant="destructive" size="sm" className="rounded-full shadow-sm" disabled={isLoading}>
+                    <LogOut className="h-4 w-4 mr-1" /> Out
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
+                  <div className="h-full overflow-y-auto p-4">
+                    <AttendanceOutForm
+                      userId={user?.id}
+                      onSubmitted={(payload) => {
+                        setAttendanceStatus("out");
+                      }}
+                      onCancel={() => { }}
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               <Button variant="outline" size="icon" className="rounded-full">
                 <Bell className="h-4 w-4" />
               </Button>
             </div>
           </div>
+
 
           {/* Stats Grid */}
           <div className="grid grid-cols-2 gap-3">
@@ -475,52 +514,74 @@ export default function HomePage() {
             <Plus className="h-5 w-5 text-primary" />
             Quick Actions
           </h2>
+
           <div className="grid grid-cols-2 gap-3">
-            <Button
-              variant="outline"
-              className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
-              onClick={() => {
-                setUIState("createType", "dvr");
-                setUIState("showCreateModal", true);
-              }}
-            >
-              <FileText className="h-5 w-5" />
-              <span className="text-xs">Create DVR</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
-              onClick={() => {
-                setUIState("createType", "sales-report");
-                setUIState("showCreateModal", true);
-              }}
-            >
-              <TrendingUp className="h-5 w-5" />
-              <span className="text-xs">Sales Report</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
-              onClick={() => {
-                setUIState("createType", "collection-report");
-                setUIState("showCreateModal", true);
-              }}
-            >
-              <DollarSign className="h-5 w-5" />
-              <span className="text-xs">Collection</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
-              onClick={() => {
-                setUIState("createType", "ddp");
-                setUIState("showCreateModal", true);
-              }}
-            >
-              <Package className="h-5 w-5" />
-              <span className="text-xs">DDP</span>
-            </Button>
+            {/* DVR */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
+                >
+                  <FileText className="h-5 w-5" />
+                  <span className="text-xs">Create DVR</span>
+                </Button>
+              </DialogTrigger>
+
+              <DialogContent
+                // mobile-friendly: wide and tall enough, with internal scroll
+                className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden"
+              >
+                <DialogHeader className="px-4 pt-4 pb-2">
+                  <DialogTitle>Daily Visit Report</DialogTitle>
+                </DialogHeader>
+                <div className="h-full sm:h-auto overflow-y-auto px-4 pb-4">
+                  <DVRForm
+                    userId={user?.id}
+                    onSubmitted={(payload) => {
+                      // TODO: POST to API, then:
+                      // queryClient.invalidateQueries(/* dashboards */)
+                      // Close dialog programmatically if you want:
+                      // document.querySelector("[data-dialog-close]")?.click()
+                    }}
+                    onCancel={() => {
+                      // let users close via the X in your form or:
+                      // document.querySelector("[data-dialog-close]")?.click()
+                    }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* TVR */}
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
+                >
+                  <Wrench className="h-5 w-5" />
+                  <span className="text-xs">Create TVR</span>
+                </Button>
+              </DialogTrigger>
+
+              <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
+                <DialogHeader className="px-4 pt-4 pb-2">
+                  <DialogTitle>Technical Visit Report</DialogTitle>
+                </DialogHeader>
+                <div className="h-full sm:h-auto overflow-y-auto px-4 pb-4">
+                  <TVRForm
+                    userId={user?.id}
+                    onSubmitted={(payload) => {
+                      // TODO: POST to API
+                    }}
+                    onCancel={() => { }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
+
         </div>
 
         {/* Tasks */}
