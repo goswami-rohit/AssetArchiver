@@ -685,11 +685,10 @@ function CreateModal({ type, onClose, onCreate }: {
                   <Select value={form.type || ""} onValueChange={(v) => setForm({ ...form, type: v })}>
                     <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Premium">Premium</SelectItem>
-                      <SelectItem value="Standard">Standard</SelectItem>
-                      <SelectItem value="Basic">Basic</SelectItem>
-                      <SelectItem value="Distributor">Distributor</SelectItem>
-                      <SelectItem value="Retailer">Retailer</SelectItem>
+                      <SelectItem value="Dealer-Best">Dealer-Best</SelectItem>
+                      <SelectItem value="Sub-Dealer-Best">Sub Dealer-Best</SelectItem>
+                      <SelectItem value="Dealer-Non-Best">Dealer-Non Best</SelectItem>
+                      <SelectItem value="Sub-Dealer-Non-Best">Sub Dealer-Non Best</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
