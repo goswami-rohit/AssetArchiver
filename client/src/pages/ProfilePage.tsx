@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,10 +19,13 @@ import {
   Clock,
 } from "lucide-react";
 
-import { useAppStore } from "@/components/ReusableUI"; 
-import { StatusBar, StatTile } from "@/components/ReusableUI"; 
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import LeaveApplicationForm from "@/pages/forms/LeaveApplicationForm";
 
-// Tiny local fallback to avoid importing half the dashboard just for an "Empty" component.
+import { useAppStore } from "@/components/ReusableUI";
+import { StatusBar, StatTile } from "@/components/ReusableUI";
+
+// Tiny local fallback for "Empty"
 function Empty({ icon: Icon, label }: { icon: any; label: string }) {
   return (
     <div className="text-center py-8 text-muted-foreground">
@@ -47,18 +50,19 @@ export default function ProfilePage() {
     setUser,
   } = useAppStore();
 
-  // This replaces the old handleLogout from CRMDashboard.useAPI
+  const [openLeave, setOpenLeave] = useState(false);
+
   const handleLogout = useCallback(() => {
     localStorage.removeItem("user");
+    localStorage.removeItem("userId");
+    localStorage.removeItem("isAuthenticated");
     setUser(null);
   }, [setUser]);
 
   return (
     <div className="min-h-full flex flex-col">
-      {/* Keep this if you actually exported StatusBar from your shared UI; otherwise remove it */}
       <StatusBar />
 
-      {/* Do NOT wrap with ScrollArea. AppShell already provides the one true scroll container. */}
       <div className="px-6 py-6 pb-32">
         {/* Profile Header */}
         <div className="text-center mb-8">
@@ -206,22 +210,45 @@ export default function ProfilePage() {
         </Card>
 
         {/* Settings & Actions */}
-        <div className="space-y-3">
+        <div className="space-y-5">
+          {/* Apply for Leave */}
           <Button
             variant="outline"
-            className="w-full justify-start gap-3 h-12 bg-card/50 border-0"
-            onClick={() => {
-              setUIState("createType", "leave-application");
-              setUIState("showCreateModal", true);
-            }}
+            className="w-full justify-start gap-3 h-12 rounded-xl border bg-card hover:bg-accent/10"
+            onClick={() => setOpenLeave(true)}
           >
             <ClipboardList className="h-5 w-5" />
             Apply for Leave
           </Button>
 
+          {/* Leave Application Dialog */}
+          <Dialog modal={false} open={openLeave} onOpenChange={setOpenLeave}>
+            <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
+              <DialogHeader className="px-4 pt-4 pb-2">
+                <DialogTitle>Apply for Leave</DialogTitle>
+              </DialogHeader>
+              <div className="h-full overflow-y-auto px-4 pb-4">
+                <LeaveApplicationForm
+                  userId={user?.id}
+                  onSubmitted={() => setOpenLeave(false)}
+                  onCancel={() => setOpenLeave(false)}
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Leave Applications show area*/}
+          <div className="rounded-xl border bg-card/60 p-4">
+            <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+              Your Leave Applications
+            </h3>
+            <Empty icon={ClipboardList} label="No leave applications yet" />
+          </div>
+
+          {/* Brand Mapping */}
           <Button
             variant="outline"
-            className="w-full justify-start gap-3 h-12 bg-card/50 border-0"
+            className="w-full justify-start gap-3 h-12 rounded-xl border bg-card hover:bg-accent/10"
             onClick={() => {
               setUIState("createType", "dealer-brand-mapping");
               setUIState("showCreateModal", true);
@@ -231,14 +258,28 @@ export default function ProfilePage() {
             Manage Brand Mapping
           </Button>
 
-          <Separator className="my-4" />
+          {/* Brand Mapping List show area*/}
+          <div className="rounded-xl border bg-card/60 p-4">
+            <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+              Dealer-Brand Mapping
+            </h3>
+            <Empty icon={Package} label="No mappings yet" />
+          </div>
+        </div>
 
-          <Button variant="destructive" className="w-full gap-3 h-12 shadow-sm" onClick={handleLogout}>
-            <LogOut className="h-5 w-5" />
+        {/* Logout */}
+        <div className="mt-6">
+          <Button
+            variant="destructive"
+            className="w-full h-12 rounded-xl shadow-sm"
+            onClick={handleLogout}
+          >
+            <LogOut className="h-5 w-5 mr-2" />
             Logout
           </Button>
         </div>
       </div>
+
     </div>
   );
 }

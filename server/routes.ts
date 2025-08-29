@@ -1,4 +1,5 @@
 // routes.ts - COMPLETE IMPLEMENTATION WITH AUTO-CRUD
+// two major functions: createAutoCRUD ->>> for AI ChatInterface && setupWebRoutes ->>> for manual endpoint fixing
 import { Express, Request, Response } from 'express';
 import { db } from 'server/db';
 import {
@@ -493,7 +494,7 @@ export function setupWebRoutes(app: Express) {
   });
 
   // ==================== AUTH ====================
-  //JSON normalizer
+  //JSON normalizer to help in /api/auth/login
   function toJsonSafe<T>(obj: T): T {
     return JSON.parse(
       JSON.stringify(obj, (_, v) => (typeof v === 'bigint' ? v.toString() : v))
@@ -539,10 +540,59 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
+  // fetching user details to populate HomePage.tsx and ProfilePage.tsx
+  // Returns the current user's profile + company
+  app.get("/api/user/:id", async (req: Request, res: Response) => {
+    try {
+      const userId = Number(req.params.id);
+      if (!userId || Number.isNaN(userId)) {
+        return res.status(400).json({ error: "Invalid user id" });
+      }
+
+      // Manual join
+      const rows = await db
+        .select({
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+          role: users.role,
+          phoneNumber: users.phoneNumber,
+          companyId: users.companyId,
+          companyName: companies.companyName,
+        })
+        .from(users)
+        .leftJoin(companies, eq(companies.id, users.companyId))
+        .where(eq(users.id, userId))
+        .limit(1);
+
+      if (!rows.length) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const row = rows[0];
+      const user = {
+        id: row.id,
+        email: row.email,
+        firstName: row.firstName ?? null,
+        lastName: row.lastName ?? null,
+        role: row.role,
+        phoneNumber: row.phoneNumber ?? null,
+        company: row.companyId
+          ? { id: row.companyId, companyName: row.companyName ?? "" }
+          : null,
+      };
+
+      res.json({ user });
+    } catch (err) {
+      console.error("GET /api/user error:", err);
+      res.status(500).json({ error: "Failed to load user" });
+    }
+  });
   // ==================== ENHANCED AI/RAG ROUTES ====================
   // Import the enhanced service
 
-  // 🚀 ENHANCED RAG CHAT with Vector Search
+  //  ENHANCED RAG CHAT with Vector Search
   app.post('/api/rag/chat', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId?: number } = req.body;
@@ -586,7 +636,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🤖 INTELLIGENT RAG CHAT (Complete Vector Flow)
+  // INTELLIGENT RAG CHAT (Complete Vector Flow)
   app.post('/api/rag/vector-chat', async (req: Request, res: Response) => {
     try {
       const { message, userId }: { message: string, userId?: number } = req.body;
@@ -625,7 +675,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🔍 VECTOR-POWERED ENDPOINT DISCOVERY
+  //  VECTOR-POWERED ENDPOINT DISCOVERY
   app.post('/api/rag/find-endpoint', async (req: Request, res: Response) => {
     try {
       const { query }: { query: string } = req.body;
@@ -667,7 +717,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // ⚡ DIRECT API EXECUTION
+  // DIRECT API EXECUTION
   app.post('/api/rag/execute', async (req: Request, res: Response) => {
     try {
       const { endpoint, data, userId }: { endpoint: string, data: any, userId?: number } = req.body;
@@ -702,7 +752,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 📋 ENHANCED DATA EXTRACTION & SUBMISSION
+  //  ENHANCED DATA EXTRACTION & SUBMISSION
   app.post('/api/rag/submit', async (req: Request, res: Response) => {
     try {
       const { messages, userId }: { messages: ChatMessage[], userId: number } = req.body;
@@ -793,7 +843,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 📊 SMART DATA FETCHING
+  // SMART DATA FETCHING
   app.get('/api/rag/fetch/:endpoint/user/:userId', async (req: Request, res: Response) => {
     try {
       const { endpoint, userId } = req.params;
@@ -833,7 +883,7 @@ export function setupWebRoutes(app: Express) {
     }
   });
 
-  // 🎯 RAG HEALTH CHECK with Vector Status
+  //  RAG HEALTH CHECK with Vector Status
   app.get('/api/rag/health', async (req: Request, res: Response) => {
     try {
       // Test Qdrant connection
@@ -1577,7 +1627,6 @@ export function setupWebRoutes(app: Express) {
       return res.status(500).json({ success: false, error: 'Failed to delete geo_tracking row' });
     }
   });
-
 
   // ============================================
   // DASHBOARD STATS (with proper type handling)

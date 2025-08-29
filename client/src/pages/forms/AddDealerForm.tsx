@@ -22,21 +22,33 @@ export const areas = ["Guwahati", "Beltola", "Zoo Road", "Tezpur", "Diphu", "Nag
 
 type DealerLite = { id: string; name: string };
 
+// add dealer form mutilselect
 function BrandsMultiSelect({
   value, onChange, placeholder = "Select brands",
 }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
   const [open, setOpen] = React.useState(false);
-  const toggle = (b: string) => onChange(value.includes(b) ? value.filter(v => v !== b) : [...value, b]);
+  const toggle = (b: string) =>
+    onChange(value.includes(b) ? value.filter(v => v !== b) : [...value, b]);
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+        <Button
+          type="button"                           // ✅ don’t submit the form
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between"
+        >
           {value.length ? `${value.length} selected` : placeholder}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(22rem,calc(100vw-2rem))] p-0">
+      <PopoverContent
+        className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]" // ✅ above dialog
+        align="start"
+        sideOffset={8}
+      >
         <Command>
           <CommandInput placeholder="Search brand..." />
           <CommandList>
@@ -45,7 +57,11 @@ function BrandsMultiSelect({
               {brands.map(b => {
                 const active = value.includes(b);
                 return (
-                  <CommandItem key={b} onSelect={() => toggle(b)} className="cursor-pointer">
+                  <CommandItem
+                    key={b}
+                    onSelect={() => toggle(b)}           // keep open for multi-pick
+                    className="cursor-pointer"
+                  >
                     <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
                     {b}
                   </CommandItem>
@@ -58,6 +74,7 @@ function BrandsMultiSelect({
     </Popover>
   );
 }
+
 
 export default function AddDealerForm({
   userId,
@@ -153,7 +170,7 @@ export default function AddDealerForm({
         <Label>Type</Label>
         <Select value={type} onValueChange={setType}>
           <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-          <SelectContent>
+          <SelectContent className="z-[60]">
             {dealerTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -165,7 +182,7 @@ export default function AddDealerForm({
           <Label>Parent Dealer</Label>
           <Select value={parentDealerId} onValueChange={setParentDealerId}>
             <SelectTrigger><SelectValue placeholder="Select parent dealer" /></SelectTrigger>
-            <SelectContent>
+            <SelectContent className="z-[60]">
               {parentDealers.length
                 ? parentDealers.map(d => (
                     <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
@@ -189,14 +206,16 @@ export default function AddDealerForm({
           <Label>Region</Label>
           <Select value={region} onValueChange={setRegion}>
             <SelectTrigger><SelectValue placeholder="Select region" /></SelectTrigger>
-            <SelectContent>{regions.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+            <SelectContent className="z-[60]">
+              {regions.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div className="grid gap-2">
           <Label>Area</Label>
           <Select value={area} onValueChange={setArea}>
             <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
-            <SelectContent>{areas.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
+            <SelectContent className="z-[60]">
+              {areas.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>
@@ -231,7 +250,7 @@ export default function AddDealerForm({
         <Label>Feedbacks</Label>
         <Select value={feedbacks} onValueChange={setFeedbacks}>
           <SelectTrigger><SelectValue placeholder="Select feedback" /></SelectTrigger>
-          <SelectContent>
+          <SelectContent className="z-[60]">
             <SelectItem value="Interested">Interested</SelectItem>
             <SelectItem value="Not Interested">Not Interested</SelectItem>
           </SelectContent>

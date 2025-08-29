@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,8 +29,8 @@ import { Check, ChevronsUpDown, Camera, X, RefreshCw } from "lucide-react";
 // ————————————————————————————————————————————
 // Options
 // ————————————————————————————————————————————
-const BRANDS = ["Star","Amrit","Dalmia","Topcem","Black Tiger","Surya Gold","Max","Taj","Specify in remarks"];
-const UNITS = ["MT","KG","Bags"] as const;
+const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
+const UNITS = ["MT", "KG", "Bags"] as const;
 
 const INFLUENCERS = [
   "Contractor",
@@ -64,9 +65,17 @@ const CHANNEL_PARTNER_VISIT = [
   "Other Brand counters",
 ];
 
+type TVRFormValues = {
+  siteVisitBrandInUse: string[];
+  influencerType: string[];
+};
+
+
+
 // ————————————————————————————————————————————
 // Small Multi-Select (shadcn Command based)
 // ————————————————————————————————————————————
+// TVR form multiselect for 2 fields
 function MultiSelect({
   value,
   onChange,
@@ -79,19 +88,34 @@ function MultiSelect({
   placeholder: string;
 }) {
   const [open, setOpen] = useState(false);
+
   const toggle = (item: string) => {
-    if (value.includes(item)) onChange(value.filter(v => v !== item));
-    else onChange([...value, item]);
+    const next = value.includes(item)
+      ? value.filter(v => v !== item)
+      : [...value, item];
+    onChange(next);
   };
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" role="combobox" aria-expanded={open} className="w-full justify-between">
+        <Button
+          type="button"                 // ← don't submit the form
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between"
+        >
           {value.length ? `${value.length} selected` : placeholder}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(22rem,calc(100vw-2rem))] p-0">
+
+      <PopoverContent
+        className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]" // ← keep above dialog
+        align="start"
+        sideOffset={8}
+      >
         <Command>
           <CommandInput placeholder="Search..." />
           <CommandList>
@@ -100,7 +124,11 @@ function MultiSelect({
               {options.map(opt => {
                 const active = value.includes(opt);
                 return (
-                  <CommandItem key={opt} onSelect={() => toggle(opt)} className="cursor-pointer">
+                  <CommandItem
+                    key={opt}
+                    onSelect={() => toggle(opt)} // keep popover open for multi-pick
+                    className="cursor-pointer"
+                  >
                     <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
                     {opt}
                   </CommandItem>
@@ -177,17 +205,26 @@ export default function TVRForm({
   const [salespersonRemarks, setSalespersonRemarks] = useState("");
 
   // extended fields
-  const [siteVisitBrandInUse, setSiteVisitBrandInUse] = useState<string[]>([]);
   const [siteVisitStage, setSiteVisitStage] = useState("");
   const [conversionFromBrand, setConversionFromBrand] = useState("");
   const [conversionQuantityValue, setConversionQuantityValue] = useState<string>("");
   const [conversionQuantityUnit, setConversionQuantityUnit] = useState<string>("");
   const [associatedPartyName, setAssociatedPartyName] = useState("");
-  const [influencerType, setInfluencerType] = useState<string[]>([]);
   const [serviceType, setServiceType] = useState("");
   const [qualityComplaint, setQualityComplaint] = useState("");
   const [promotionalActivity, setPromotionalActivity] = useState("");
   const [channelPartnerVisit, setChannelPartnerVisit] = useState("");
+
+  //multiselect helper
+  const form = useForm<TVRFormValues>({
+    defaultValues: {
+      siteVisitBrandInUse: [],
+      influencerType: [],
+    },
+  });
+  const { setValue, watch } = form;
+  const siteVisitBrandInUse = watch("siteVisitBrandInUse");
+  const influencerType = watch("influencerType");
 
   // start/stop camera when needed
   useEffect(() => {
@@ -243,13 +280,13 @@ export default function TVRForm({
       checkOutTime,
       inTimeImageUrl: null,  // TODO: upload inPhoto -> URL
       outTimeImageUrl: null, // TODO: upload outPhoto -> URL
-      siteVisitBrandInUse,         // text[]
-      siteVisitStage,              // text
-      conversionFromBrand,         // text
+      //siteVisitBrandInUse,  // text[] //Removed from payload as they are directly pushed from UI using multiselect helpers above
+      siteVisitStage,              
+      conversionFromBrand,        
       conversionQuantityValue: num(conversionQuantityValue),
-      conversionQuantityUnit,      // varchar
+      conversionQuantityUnit,      
       associatedPartyName,
-      influencerType,              // text[]
+      //influencerType,  // text[] //Removed from payload as they are directly pushed from UI using multiselect helpers above
       serviceType,
       qualityComplaint,
       promotionalActivity,
@@ -374,8 +411,14 @@ export default function TVRForm({
         <div className="grid gap-2">
           <Label>Site Visit - Brand in Use</Label>
           <MultiSelect
-            value={siteVisitBrandInUse}
-            onChange={setSiteVisitBrandInUse}
+            value={siteVisitBrandInUse || []}
+            onChange={(next) =>
+              setValue("siteVisitBrandInUse", next, {
+                shouldValidate: true,
+                shouldDirty: true,
+                shouldTouch: true,
+              })
+            }
             options={BRANDS}
             placeholder="Select brands"
           />
@@ -422,8 +465,14 @@ export default function TVRForm({
         <div className="grid gap-2">
           <Label>Influencer Type</Label>
           <MultiSelect
-            value={influencerType}
-            onChange={setInfluencerType}
+            value={influencerType || []}
+            onChange={(next) =>
+              setValue("influencerType", next, {
+                shouldValidate: true,
+                shouldDirty: true,
+                shouldTouch: true,
+              })
+            }
             options={INFLUENCERS}
             placeholder="Select influencers"
           />

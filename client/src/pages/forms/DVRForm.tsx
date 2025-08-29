@@ -67,6 +67,7 @@ function useCamera() {
     return { start, stop, capture };
 }
 
+// DVR form multiselect 
 export function BrandsMultiSelect({
     value,
     onChange,
@@ -84,9 +85,10 @@ export function BrandsMultiSelect({
     };
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover modal={false} open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
                 <Button
+                    type="button"               // ← don’t submit the form
                     variant="outline"
                     role="combobox"
                     aria-expanded={open}
@@ -96,26 +98,26 @@ export function BrandsMultiSelect({
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[min(22rem,calc(100vw-2rem))] p-0">
+
+            <PopoverContent
+                className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]"  // ← stay above dialog
+                align="start"
+                sideOffset={8}
+            >
                 <Command>
                     <CommandInput placeholder="Search brand..." />
                     <CommandList>
                         <CommandEmpty>No brand found.</CommandEmpty>
                         <CommandGroup>
-                            {BRANDS.map((brand) => {
+                            {BRANDS.map(brand => {
                                 const active = value.includes(brand);
                                 return (
                                     <CommandItem
                                         key={brand}
-                                        onSelect={() => toggle(brand)}
+                                        onSelect={() => toggle(brand)} // keep open for multi-pick
                                         className="cursor-pointer"
                                     >
-                                        <Check
-                                            className={cn(
-                                                "mr-2 h-4 w-4",
-                                                active ? "opacity-100" : "opacity-0"
-                                            )}
-                                        />
+                                        <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
                                         {brand}
                                     </CommandItem>
                                 );
@@ -353,7 +355,7 @@ export default function DVRForm({ userId, onSubmitted, onCancel }: DVRFormProps)
                     <Label>Dealer Type</Label>
                     <Select value={dealerType} onValueChange={setDealerType}>
                         <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="z-[60]">
                             {DEALER_TYPES.map(t => (
                                 <SelectItem key={t} value={t}>{t}</SelectItem>
                             ))}
@@ -449,7 +451,7 @@ export default function DVRForm({ userId, onSubmitted, onCancel }: DVRFormProps)
                     <Label>Feedbacks</Label>
                     <Select value={feedbacks} onValueChange={setFeedbacks}>
                         <SelectTrigger><SelectValue placeholder="Select feedback" /></SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="z-[60]">
                             {FEEDBACKS.map(f => (
                                 <SelectItem key={f} value={f}>{f}</SelectItem>
                             ))}

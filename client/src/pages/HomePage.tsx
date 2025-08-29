@@ -1,5 +1,6 @@
 // src/pages/HomePage.tsx
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -371,9 +372,11 @@ const useAPIActions = () => {
   return { handleAttendance, deleteRecord };
 };
 
+
 export default function HomePage() {
   const {
     user,
+    setUser,
     attendanceStatus,
     setAttendanceStatus,
     isLoading,
@@ -406,6 +409,68 @@ export default function HomePage() {
   const [openTvr, setOpenTvr] = useState(false);
   const [openDealer, setOpenDealer] = useState(false);
 
+  // fetching user details handler
+  const [, navigate] = useLocation();
+
+  //attendace hendlers
+  const [openIn, setOpenIn] = useState(false);
+  const [openOut, setOpenOut] = useState(false);
+
+  // GETTING USER DETAILS TO POPULATE THE USER NAME AND ROLES AT TOP
+  // 1) Prime from localStorage once (fast path)
+  useEffect(() => {
+    if (!user) {
+      const raw = localStorage.getItem("user");
+      if (raw) {
+        try {
+          const cached = JSON.parse(raw);
+          if (cached && typeof cached === "object" && cached.id) {
+            setUser(cached);
+          }
+        } catch { }
+      }
+    }
+  }, [user, setUser]);
+
+  // 2) Revalidate from server (source of truth)
+  useEffect(() => {
+    const storedUserId = localStorage.getItem("userId");
+    if (!storedUserId) return;
+
+    const ac = new AbortController();
+    fetch(`/api/user/${storedUserId}`, {
+      signal: ac.signal,
+      credentials: "include", // if you use cookies/sessions
+    })
+      .then(async (r) => {
+        if (r.status === 401) {
+          localStorage.removeItem("isAuthenticated");
+          localStorage.removeItem("user");
+          localStorage.removeItem("userId");
+          navigate("/login");
+          return null;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (!data) return;
+        setUser(data.user);
+        // keep cache fresh for next boot
+        localStorage.setItem("user", JSON.stringify(data.user));
+      })
+      .catch((err) => {
+        if (err.name !== "AbortError") console.error("load /api/user failed:", err);
+      });
+    return () => ac.abort();
+  }, [setUser, navigate]);
+
+  // persist the attendace status on HomePage on page refresh. change only on user clicks
+  useEffect(() => {
+    const saved = localStorage.getItem("attendanceStatus");
+    if (saved === "in" || saved === "out") setAttendanceStatus(saved as "in" | "out");
+  }, [setAttendanceStatus]);
+
 
   return (
     <div className="min-h-full flex flex-col">
@@ -414,70 +479,98 @@ export default function HomePage() {
       {/* Header */}
       <div className="relative bg-gradient-to-br from-primary/10 via-primary/5 to-background">
         <div className="px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-3">
-              <Avatar className="h-12 w-12 ring-2 ring-primary/20 shadow-md">
-                <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-bold">
-                  {user?.firstName?.[0]}
-                  {user?.lastName?.[0]}
-                </AvatarFallback>
-              </Avatar>
-              <div>
-                <h1 className="text-xl font-bold">
-                  {user?.firstName} {user?.lastName}
-                </h1>
-                <p className="text-sm text-muted-foreground">{user?.company?.companyName}</p>
-              </div>
+          {/* Row 1: Logo + Attendance */}
+          <div className="flex items-center justify-between">
+            <div className="h-12 w-12 overflow-hidden rounded-full shadow-md bg-white/5">
+              <img
+                src="/BEST_CEMENT_LOGO.webp"   // lives in /public
+                alt="Best Cement Logo"
+                className="h-full w-full object-contain"
+              />
             </div>
 
-            {/*Attendance In and Out section */}
+            {/*Attendance In and Out section (single button, conditional)*/}
             <div className="flex items-center gap-2">
-              {/* In */}
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button variant="default" size="sm" className="rounded-full shadow-sm" disabled={isLoading}>
-                    <LogIn className="h-4 w-4 mr-1" /> In
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
-                  <div className="h-full overflow-y-auto p-4">
-                    <AttendanceInForm
-                      userId={user?.id}
-                      onSubmitted={(payload) => {
-                        setAttendanceStatus("in"); // from useAppStore
-                      }}
-                      onCancel={() => { }}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              {/* Out */}
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button variant="destructive" size="sm" className="rounded-full shadow-sm" disabled={isLoading}>
-                    <LogOut className="h-4 w-4 mr-1" /> Out
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
-                  <div className="h-full overflow-y-auto p-4">
-                    <AttendanceOutForm
-                      userId={user?.id}
-                      onSubmitted={(payload) => {
-                        setAttendanceStatus("out");
-                      }}
-                      onCancel={() => { }}
-                    />
-                  </div>
-                </DialogContent>
-              </Dialog>
-
-              <Button variant="outline" size="icon" className="rounded-full">
-                <Bell className="h-4 w-4" />
-              </Button>
+              {attendanceStatus !== "in" ? (
+                // Show "Attendance In"
+                <Dialog open={openIn} onOpenChange={setOpenIn}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="rounded-full shadow-sm"
+                      disabled={isLoading}
+                    >
+                      <LogIn className="h-4 w-4 mr-1" />
+                      Attendance In
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
+                    <div className="h-full overflow-y-auto p-4">
+                      <AttendanceInForm
+                        userId={user?.id}
+                        onSubmitted={() => {
+                          // 1) close dialog
+                          setOpenIn(false);
+                          // 2) clear focus so no residual click hits new elements
+                          (document.activeElement as HTMLElement | null)?.blur?.();
+                          // 3) defer the swap one frame to avoid click-through
+                          requestAnimationFrame(() => {
+                            setAttendanceStatus("in");
+                            localStorage.setItem("attendanceStatus", "in");
+                          });
+                        }}
+                        onCancel={() => setOpenIn(false)}
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              ) : (
+                // Show "Attendance Out"
+                <Dialog open={openOut} onOpenChange={setOpenOut}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="rounded-full shadow-sm"
+                      disabled={isLoading}
+                    >
+                      <LogOut className="h-4 w-4 mr-1" />
+                      Attendance Out
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
+                    <div className="h-full overflow-y-auto p-4">
+                      <AttendanceOutForm
+                        userId={user?.id}
+                        onSubmitted={() => {
+                          setOpenOut(false);
+                          (document.activeElement as HTMLElement | null)?.blur?.();
+                          requestAnimationFrame(() => {
+                            setAttendanceStatus("out");
+                            localStorage.setItem("attendanceStatus", "out");
+                          });
+                        }}
+                        onCancel={() => setOpenOut(false)}
+                      />
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
             </div>
+
           </div>
 
+          {/* User name + role (and company) */}
+          <div className="mt-4 text-center">
+            <h1 className="text-xl font-bold leading-tight">
+              {user?.firstName} {user?.lastName}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {user?.role ?? "User"}
+              {user?.company?.companyName ? ` • ${user.company.companyName}` : ""}
+            </p>
+          </div>
 
           {/* Stats Grid */}
           <div className="grid grid-cols-2 gap-3">
@@ -521,7 +614,7 @@ export default function HomePage() {
 
           <div className="grid grid-cols-2 gap-3">
             {/* DVR */}
-            <Dialog>
+            <Dialog  modal={false}>
               <DialogTrigger asChild>
                 <Button
                   variant="outline"
@@ -558,7 +651,7 @@ export default function HomePage() {
             </Dialog>
 
             {/* TVR */}
-            <Dialog>
+            <Dialog  modal={false}>
               <DialogTrigger asChild>
                 <Button
                   variant="outline"
@@ -770,7 +863,7 @@ export default function HomePage() {
         </Section>
 
         {/* One dialog to rule them all */}
-        <Dialog open={openDealer} onOpenChange={setOpenDealer}>
+        <Dialog  modal={false} open={openDealer} onOpenChange={setOpenDealer}>
           <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
             <DialogHeader className="px-4 pt-4 pb-2">
               <DialogTitle>Add Dealer / Sub-Dealer</DialogTitle>
