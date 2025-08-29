@@ -26,11 +26,7 @@ import {
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, Camera, X, RefreshCw } from "lucide-react";
 
-// ————————————————————————————————————————————
-// Options
-// ————————————————————————————————————————————
-const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
-const UNITS = ["MT", "KG", "Bags"] as const;
+import { UNITS, BRANDS } from "@/components/ReusableUI";
 
 const INFLUENCERS = [
   "Contractor",

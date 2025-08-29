@@ -20,22 +20,15 @@ import {
     CommandItem,
     CommandList,
 } from "@/components/ui/command";
-import { cn } from "@/lib/utils"; // if you have it; otherwise replace cn(...) with template strings
+import { cn } from "@/lib/utils";
+
+import { DEALER_TYPES, BRANDS } from "@/components/ReusableUI";
 
 type DVRFormProps = {
     userId?: number;                 // optional; pass from parent if you want
     onSubmitted?: (payload: any) => void;
     onCancel?: () => void;
 };
-
-const DEALER_TYPES = [
-    "Dealer-Best",
-    "Sub Dealer-Best",
-    "Dealer-Non Best",
-    "Sub Dealer-Non Best",
-] as const;
-
-const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
 
 const FEEDBACKS = ["Interested", "Not Interested"] as const;
 

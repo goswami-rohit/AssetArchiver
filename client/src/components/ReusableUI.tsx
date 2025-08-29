@@ -157,3 +157,14 @@ export const StatTile = ({ icon: Icon, value, label, tint }: { icon: any; value:
     </CardContent>
   </Card>
 )
+
+// Reusable constants in forms
+export const DEALER_TYPES = [ "Dealer-Best", "Sub Dealer-Best", "Dealer-Non Best", "Sub Dealer-Non Best",] as const;
+
+export const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
+
+export const UNITS = ["MT", "KG", "Bags"] as const;
+
+export const REGIONS = ["Kamrup M", "Kamrup", "Karbi Anglong", "Dehmaji"];
+
+export const AREAS = ["Guwahati", "Beltola", "Zoo Road", "Tezpur", "Diphu", "Nagaon", "Barpeta"];

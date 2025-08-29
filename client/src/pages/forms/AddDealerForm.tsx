@@ -14,11 +14,8 @@ import {
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, X } from "lucide-react";
 
-// hardcoded dropdown selectors
-const dealerTypes = ["Dealer-Best", "Sub Dealer-Best", "Dealer-Non Best", "Sub Dealer-Non Best"];
-const brands = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
-export const regions = ["Kamrup M", "Kamrup", "Karbi Anglong", "Dehmaji"];
-export const areas = ["Guwahati", "Beltola", "Zoo Road", "Tezpur", "Diphu", "Nagaon", "Barpeta"];
+import { DEALER_TYPES, REGIONS, AREAS, BRANDS } from "@/components/ReusableUI";
+
 
 type DealerLite = { id: string; name: string };
 
@@ -54,7 +51,7 @@ function BrandsMultiSelect({
           <CommandList>
             <CommandEmpty>No brand found.</CommandEmpty>
             <CommandGroup>
-              {brands.map(b => {
+              {BRANDS.map(b => {
                 const active = value.includes(b);
                 return (
                   <CommandItem
@@ -171,7 +168,7 @@ export default function AddDealerForm({
         <Select value={type} onValueChange={setType}>
           <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
           <SelectContent className="z-[60]">
-            {dealerTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+            {DEALER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -207,7 +204,7 @@ export default function AddDealerForm({
           <Select value={region} onValueChange={setRegion}>
             <SelectTrigger><SelectValue placeholder="Select region" /></SelectTrigger>
             <SelectContent className="z-[60]">
-              {regions.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+              {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
           </Select>
         </div>
         <div className="grid gap-2">
@@ -215,7 +212,7 @@ export default function AddDealerForm({
           <Select value={area} onValueChange={setArea}>
             <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
             <SelectContent className="z-[60]">
-              {areas.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
+              {AREAS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>

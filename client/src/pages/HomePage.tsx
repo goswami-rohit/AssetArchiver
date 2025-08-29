@@ -25,6 +25,8 @@ import {
   MapIcon,
   PhoneCall,
   Star,
+  ShoppingCart,
+  Route,
 } from "lucide-react";
 import {
   Dialog,
@@ -34,11 +36,16 @@ import {
   DialogTitle,
   DialogClose,
 } from "@/components/ui/dialog";
+
+//imported forms
 import DVRForm from "@/pages/forms/DVRForm";
 import TVRForm from "@/pages/forms/TVRForm";
 import AttendanceInForm from "@/pages/forms/AttendanceInForm";
 import AttendanceOutForm from "@/pages/forms/AttendanceOutForm";
 import AddDealerForm from "@/pages/forms/AddDealerForm";
+import SalesOrderForm from "@/pages/forms/SalesOrderForm";
+import PJPForm from "@/pages/forms/AddPJPForm";
+
 
 // shared bits you said you exported
 import { useAppStore, StatusBar, LoadingList, StatCard } from "@/components/ReusableUI";
@@ -612,9 +619,9 @@ export default function HomePage() {
             Quick Actions
           </h2>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {/* DVR */}
-            <Dialog  modal={false}>
+            <Dialog modal={false}>
               <DialogTrigger asChild>
                 <Button
                   variant="outline"
@@ -651,7 +658,7 @@ export default function HomePage() {
             </Dialog>
 
             {/* TVR */}
-            <Dialog  modal={false}>
+            <Dialog modal={false}>
               <DialogTrigger asChild>
                 <Button
                   variant="outline"
@@ -677,6 +684,65 @@ export default function HomePage() {
                 </div>
               </DialogContent>
             </Dialog>
+
+            {/* Sales Order */}
+            <Dialog modal={false}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
+                >
+                  <ShoppingCart className="h-5 w-5" />
+                  <span className="text-xs">Create Sales Order</span>
+                </Button>
+              </DialogTrigger>
+
+              <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
+                <DialogHeader className="px-4 pt-4 pb-2">
+                  <DialogTitle>Create Sales Order</DialogTitle>
+                </DialogHeader>
+                <div className="h-full sm:h-auto overflow-y-auto px-4 pb-4">
+                  <SalesOrderForm
+                    user={user}
+                    onSubmitted={(payload) => {
+                      // TODO: POST to /api/sales-order/send (SMS + Email)
+                      // e.g. await fetch('/api/sales-order/send', { method:'POST', body: JSON.stringify(payload) })
+                      // toast.success('Order sent!')
+                    }}
+                    onCancel={() => { }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* PJP (Self-create) */}
+            <Dialog modal={false}>
+              <DialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  className="h-16 flex-col gap-2 bg-card/50 border-0 shadow-sm"
+                >
+                  <Route className="h-5 w-5" />
+                  <span className="text-xs">Create PJP</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
+                <DialogHeader className="px-4 pt-4 pb-2">
+                  <DialogTitle>Permanent Journey Plan</DialogTitle>
+                </DialogHeader>
+                <div className="h-full sm:h-auto overflow-y-auto px-4 pb-4">
+                  <PJPForm
+                    user={user ?? null}
+                    onSubmitted={(payload) => {
+                      // TODO: call POST /api/pjp
+                      // then refresh dashboard lists if needed
+                    }}
+                    onCancel={() => { }}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+
           </div>
 
         </section>
@@ -863,7 +929,7 @@ export default function HomePage() {
         </Section>
 
         {/* One dialog to rule them all */}
-        <Dialog  modal={false} open={openDealer} onOpenChange={setOpenDealer}>
+        <Dialog modal={false} open={openDealer} onOpenChange={setOpenDealer}>
           <DialogContent className="p-0 sm:max-w-md w-[100vw] sm:w-auto h-[90vh] sm:h-auto overflow-hidden">
             <DialogHeader className="px-4 pt-4 pb-2">
               <DialogTitle>Add Dealer / Sub-Dealer</DialogTitle>
