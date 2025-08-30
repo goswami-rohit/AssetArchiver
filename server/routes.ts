@@ -46,6 +46,7 @@ import {
 import { eq, desc, asc, and, gte, lte, isNull, inArray, notInArray, like, ilike, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import multer from 'multer';
+import { randomUUID } from "crypto";
 import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
@@ -969,17 +970,18 @@ export function setupWebRoutes(app: Express) {
   });
 
   // 5. Daily Tasks - date field, auto taskDate and status
-  createAutoCRUD(app, {
-    endpoint: 'daily-tasks',
-    table: dailyTasks,
-    schema: insertDailyTaskSchema,
-    tableName: 'Daily Task',
-    dateField: 'taskDate',
-    autoFields: {
-      taskDate: () => new Date().toISOString().split('T')[0],
-      status: () => 'Assigned' // matches schema default
-    }
-  });
+ createAutoCRUD(app, {
+  endpoint: "daily-tasks",
+  table: dailyTasks,
+  schema: insertDailyTaskSchema,
+  tableName: "Daily Task",
+  dateField: "taskDate",
+  autoFields: {
+    id: () => randomUUID(), // <-- force-generate id
+    taskDate: () => new Date().toISOString().split("T")[0],
+    status: () => "Assigned",
+  },
+});
 
   // 6. Leave Applications - date field, auto status
   createAutoCRUD(app, {

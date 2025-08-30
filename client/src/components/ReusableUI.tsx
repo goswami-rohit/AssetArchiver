@@ -1,10 +1,13 @@
-import { Card, CardContent,} from "@/components/ui/card";
+// src/components/ReusableUI.tsx
+import React from 'react';
+import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { create } from "zustand";
 
 export interface Company { 
     companyName?: string 
 }
+
 export interface UserShape {
   id: number
   firstName?: string
@@ -14,6 +17,7 @@ export interface UserShape {
   company?: Company
   companyId?: number | null
 }
+
 export interface AppState {
   user: UserShape | null
   currentPage: "home" | "ai" | "journey" | "profile"
@@ -26,15 +30,25 @@ export interface AppState {
   pjps: any[]
   dealers: any[]
   reports: any[]
+  tvrReports: any[]
   salesReports: any[]
   collectionReports: any[]
+  clientReports: any[]
+  competitionReports: any[]
   dealerBrandMappings: any[]
   ddpReports: any[]
   leaveApplications: any[]
   brands: any[]
+  ratings: any[]
+  attendanceHistory: any[]
   userTargets: any[]
   dealerScores: any[]
-  dashboardStats: any
+  dashboardStats: {
+    todaysTasks: number;
+    activePJPs: number;
+    totalDealers: number;
+    totalReports: number;
+  }
 
   showCreateModal: boolean
   createType: "task" | "pjp" | "dealer" | "dvr" | "tvr" | "dealer-score" | "sales-report" | "collection-report" | "dealer-brand-mapping" | "ddp" | "leave-application"
@@ -47,13 +61,8 @@ export interface AppState {
   setLoading: (b: boolean) => void
   setOnlineStatus: (b: boolean) => void
   updateLastSync: () => void
-  setData: (k: keyof Pick<AppState,
-    | "dailyTasks" | "pjps" | "dealers" | "reports" | "salesReports" | "collectionReports"
-    | "dealerBrandMappings" | "ddpReports" | "leaveApplications" | "brands" | "userTargets" | "dealerScores" | "dashboardStats"
-  >, data: any) => void
-  setUIState: (k: keyof Pick<AppState,
-    | "showCreateModal" | "createType" | "selectedItem" | "showDetailModal"
-  >, v: any) => void
+  setData: (k: string, data: any) => void
+  setUIState: (k: string, v: any) => void
   resetModals: () => void
 }
 
@@ -69,15 +78,25 @@ export const useAppStore = create<AppState>((set) => ({
   pjps: [],
   dealers: [],
   reports: [],
+  tvrReports: [],
   salesReports: [],
   collectionReports: [],
+  clientReports: [],
+  competitionReports: [],
   dealerBrandMappings: [],
   ddpReports: [],
   leaveApplications: [],
   brands: [],
+  ratings: [],
+  attendanceHistory: [],
   userTargets: [],
   dealerScores: [],
-  dashboardStats: {},
+  dashboardStats: {
+    todaysTasks: 0,
+    activePJPs: 0,
+    totalDealers: 0,
+    totalReports: 0
+  },
 
   showCreateModal: false,
   createType: "task",
@@ -95,9 +114,8 @@ export const useAppStore = create<AppState>((set) => ({
   resetModals: () => set({ showCreateModal: false, showDetailModal: false, selectedItem: null }),
 }))
 
-
 // --------------------
-// Reusable UI
+// Reusable UI Components
 // --------------------
 export const StatusBar = () => {
   const { isOnline, lastSync } = useAppStore()

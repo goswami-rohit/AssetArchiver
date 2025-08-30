@@ -139,97 +139,6 @@ function IconBtn({ onClick, Icon, tooltip, disabled = false, variant = "ghost" }
   );
 }
 
-// Interactive PJP Card with tick/cross functionality
-function InteractivePJPCard({
-  pjp,
-  localStatus,
-  onStatusChange,
-  onView,
-  onEdit,
-  onDelete,
-  isUpdating = false,
-}: {
-  pjp: any;
-  localStatus?: 'completed' | 'skipped' | 'planned';
-  onStatusChange: (id: string, status: 'completed' | 'skipped' | 'planned') => void;
-  onView: (p: any) => void;
-  onEdit: (p: any) => void;
-  onDelete: (id: string) => void;
-  isUpdating?: boolean;
-}) {
-  const currentStatus = localStatus || pjp.status || 'planned';
-
-  return (
-    <Card className={`bg-card border shadow-sm hover:shadow-lg transition-all duration-300 ${
-      currentStatus === 'completed' ? 'ring-2 ring-green-500/20 bg-green-950/20' :
-      currentStatus === 'skipped' ? 'ring-2 ring-red-500/20 bg-red-950/20 opacity-75' : ''
-    } ${isUpdating ? 'animate-pulse' : ''}`}>
-      <CardContent className="p-6">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 cursor-pointer" onClick={() => onView(pjp)}>
-            <h3 className={`font-medium text-lg mb-2 text-foreground ${currentStatus === 'skipped' ? 'line-through text-muted-foreground' : ''}`}>
-              {pjp.objective}
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">{pjp.siteName || pjp.location}</p>
-            <div className="flex items-center flex-wrap gap-3">
-              <Badge
-                variant={
-                  currentStatus === 'completed' ? 'default' :
-                  currentStatus === 'skipped' ? 'destructive' : 'outline'
-                }
-                className="text-xs px-3 py-1"
-              >
-                {currentStatus}
-              </Badge>
-              {pjp.planDate && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  {new Date(pjp.planDate).toLocaleDateString()}
-                </span>
-              )}
-              {pjp.areaToBeVisited && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1">
-                  <MapIcon className="h-3 w-3" />
-                  {pjp.areaToBeVisited}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Status Control Buttons */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant={currentStatus === 'completed' ? 'default' : 'outline'}
-              size="icon"
-              className="h-9 w-9 rounded-full"
-              onClick={() => onStatusChange(pjp.id, currentStatus === 'completed' ? 'planned' : 'completed')}
-              title="Mark as completed"
-              disabled={isUpdating}
-            >
-              {isUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-            </Button>
-
-            <Button
-              variant={currentStatus === 'skipped' ? 'destructive' : 'outline'}
-              size="icon"
-              className="h-9 w-9 rounded-full"
-              onClick={() => onStatusChange(pjp.id, currentStatus === 'skipped' ? 'planned' : 'skipped')}
-              title="Mark as skipped"
-              disabled={isUpdating}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-
-            <IconBtn onClick={() => onView(pjp)} Icon={Eye} disabled={isUpdating} />
-            <IconBtn onClick={() => onEdit(pjp)} Icon={Edit} disabled={isUpdating} />
-            <IconBtn onClick={() => onDelete(String(pjp.id))} Icon={Trash2} disabled={isUpdating} variant="destructive" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function TaskCard({
   task,
   onEdit,
@@ -253,15 +162,23 @@ function TaskCard({
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1">
             <h3 className={`font-medium text-lg mb-2 text-foreground ${isCompleted ? 'line-through text-muted-foreground' : ''}`}>
-              {task.visitType || task.title || task.description}
+              {task.description || task.visitType || 'Daily Task'}
             </h3>
-            {task.description && task.title && (
-              <p className="text-sm text-muted-foreground mb-4 line-clamp-2">{task.description}</p>
+            {task.siteName && (
+              <p className="text-sm text-muted-foreground mb-2 flex items-center gap-1">
+                <MapIcon className="h-3 w-3" />
+                {task.siteName}
+              </p>
+            )}
+            {task.relatedDealerId && (
+              <p className="text-sm text-blue-400 mb-2">Dealer: {task.relatedDealerName || task.relatedDealerId}</p>
             )}
             <div className="flex items-center flex-wrap gap-3">
-              <Badge variant={task.priority === "high" ? "destructive" : "outline"} className="text-xs px-3 py-1">
-                {task.priority || "Normal"}
-              </Badge>
+              {task.visitType && (
+                <Badge variant="outline" className="text-xs px-3 py-1">
+                  {task.visitType}
+                </Badge>
+              )}
               <Badge
                 variant={isCompleted ? "default" : "secondary"}
                 className="text-xs px-3 py-1"
@@ -424,7 +341,6 @@ function ReportCard({
   );
 }
 
-// Simple TaskForm component
 function TaskForm({
   userId,
   initialData,
@@ -437,35 +353,67 @@ function TaskForm({
   onCancel: () => void;
 }) {
   const { toast } = useToast();
+  const { dealers, pjps } = useAppStore();
+  
   const [formData, setFormData] = useState({
-    title: initialData?.title || initialData?.description || '',
-    description: initialData?.description || '',
-    priority: initialData?.priority || 'normal',
     taskDate: initialData?.taskDate || new Date().toISOString().split('T')[0],
-    visitType: initialData?.visitType || '',
+    visitType: initialData?.visitType || 'Routine Visit',
+    relatedDealerId: initialData?.relatedDealerId || '',
+    siteName: initialData?.siteName || '',
+    description: initialData?.description || '',
+    status: initialData?.status || 'Assigned',
+    pjpId: initialData?.pjpId || '',
+    assignedByUserId: Number(userId),
   });
+  
+  const [isPjpEnabled, setIsPjpEnabled] = useState(!!initialData?.pjpId);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Visit types for cement industry in India
+  const visitTypes = [
+    'Collection',
+    'Reporting', 
+    'Routine Visit',
+    'Restocking',
+    'Quality Check',
+    'Market Survey',
+    'Customer Meeting',
+    'Payment Follow-up'
+  ];
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
 
+    // Using your exact createAutoCRUD endpoint format
     const endpoint = initialData ? `/api/daily-tasks/${initialData.id}` : '/api/daily-tasks';
     const method = initialData ? 'PUT' : 'POST';
 
     try {
+      console.log(`📝 Submitting task to ${endpoint}`, formData);
+      
+      const payload = {
+        ...formData,
+        userId: Number(userId),
+        assignedByUserId: Number(userId),
+        pjpId: isPjpEnabled ? formData.pjpId || null : null,
+        relatedDealerId: formData.relatedDealerId || null,
+        ...(initialData && { updatedAt: new Date().toISOString() })
+      };
+
       const response = await fetch(endpoint, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...formData, userId })
+        body: JSON.stringify(payload)
       });
 
       const result = await response.json();
+      console.log('📝 Task submission result:', result);
 
       if (response.ok && result.success) {
         toast({
           title: "Success",
-          description: `Task ${initialData ? 'updated' : 'created'} successfully`,
+          description: result.message || `Task ${initialData ? 'updated' : 'created'} successfully`,
         });
         onSubmitted();
       } else {
@@ -486,13 +434,57 @@ function TaskForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
-        <label className="text-sm font-medium text-foreground">Title</label>
+        <label className="text-sm font-medium text-foreground">Task Date</label>
         <input
-          type="text"
-          value={formData.title}
-          onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+          type="date"
+          value={formData.taskDate}
+          onChange={(e) => setFormData(prev => ({ ...prev, taskDate: e.target.value }))}
           className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
           required
+          disabled={isSubmitting}
+        />
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-foreground">Visit Type</label>
+        <select
+          value={formData.visitType}
+          onChange={(e) => setFormData(prev => ({ ...prev, visitType: e.target.value }))}
+          className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
+          required
+          disabled={isSubmitting}
+        >
+          {visitTypes.map(type => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-foreground">Select Dealer</label>
+        <select
+          value={formData.relatedDealerId}
+          onChange={(e) => setFormData(prev => ({ ...prev, relatedDealerId: e.target.value }))}
+          className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
+          disabled={isSubmitting}
+        >
+          <option value="">-- Select Dealer (Optional) --</option>
+          {(dealers || []).map((dealer: any) => (
+            <option key={dealer.id} value={dealer.id}>
+              {dealer.name} - {dealer.region}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="text-sm font-medium text-foreground">Site Name</label>
+        <input
+          type="text"
+          value={formData.siteName}
+          onChange={(e) => setFormData(prev => ({ ...prev, siteName: e.target.value }))}
+          className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
+          placeholder="Enter site/location name"
           disabled={isSubmitting}
         />
       </div>
@@ -504,32 +496,62 @@ function TaskForm({
           onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
           className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
           rows={3}
+          placeholder="Task details and notes"
           disabled={isSubmitting}
         />
       </div>
 
-      <div>
-        <label className="text-sm font-medium text-foreground">Visit Type</label>
+      <div className="flex items-center gap-3">
         <input
-          type="text"
-          value={formData.visitType}
-          onChange={(e) => setFormData(prev => ({ ...prev, visitType: e.target.value }))}
-          className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
+          type="checkbox"
+          id="pjp-toggle"
+          checked={isPjpEnabled}
+          onChange={(e) => {
+            setIsPjpEnabled(e.target.checked);
+            if (!e.target.checked) {
+              setFormData(prev => ({ ...prev, pjpId: '' }));
+            }
+          }}
+          className="rounded border-border"
           disabled={isSubmitting}
         />
+        <label htmlFor="pjp-toggle" className="text-sm font-medium text-foreground">
+          Link to Journey Plan (PJP)
+        </label>
       </div>
 
+      {isPjpEnabled && (
+        <div>
+          <label className="text-sm font-medium text-foreground">Select Journey Plan</label>
+          <select
+            value={formData.pjpId}
+            onChange={(e) => setFormData(prev => ({ ...prev, pjpId: e.target.value }))}
+            className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
+            disabled={isSubmitting}
+          >
+            <option value="">-- Select Journey Plan --</option>
+            {(pjps || []).map((pjp: any) => (
+              <option key={pjp.id} value={pjp.id}>
+                {pjp.objective} - {new Date(pjp.planDate).toLocaleDateString()}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div>
-        <label className="text-sm font-medium text-foreground">Priority</label>
+        <label className="text-sm font-medium text-foreground">Status</label>
         <select
-          value={formData.priority}
-          onChange={(e) => setFormData(prev => ({ ...prev, priority: e.target.value }))}
+          value={formData.status}
+          onChange={(e) => setFormData(prev => ({ ...prev, status: e.target.value }))}
           className="w-full mt-2 px-3 py-2 border border-border rounded-md bg-background text-foreground"
           disabled={isSubmitting}
         >
-          <option value="low">Low</option>
-          <option value="normal">Normal</option>
-          <option value="high">High</option>
+          <option value="Assigned">Assigned</option>
+          <option value="In Progress">In Progress</option>
+          <option value="Completed">Completed</option>
+          <option value="On Hold">On Hold</option>
+          <option value="Cancelled">Cancelled</option>
         </select>
       </div>
 
@@ -552,7 +574,7 @@ function TaskForm({
   );
 }
 
-/** FIXED API helpers with ALL endpoints and proper dashboard calculation **/
+/** API ACTIONS USING YOUR EXACT createAutoCRUD ENDPOINTS **/
 const useAPIActions = () => {
   const { setData, setLoading } = useAppStore();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -560,6 +582,8 @@ const useAPIActions = () => {
 
   const apiCall = useCallback(async (endpoint: string, options: RequestInit = {}) => {
     try {
+      console.log(`🔗 API Call: ${endpoint}`, options.method || 'GET');
+      
       const response = await fetch(endpoint, {
         headers: {
           'Content-Type': 'application/json',
@@ -569,24 +593,40 @@ const useAPIActions = () => {
       });
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
+        throw new Error(`API Error: ${response.status} - ${response.statusText}`);
       }
 
       const data = await response.json();
+      console.log(`✅ API Response from ${endpoint}:`, data);
       return data;
     } catch (error) {
-      console.error('API call failed:', error);
+      console.error(`❌ API call failed for ${endpoint}:`, error);
       throw error;
     }
   }, []);
 
-  // FIXED: Calculate dashboard stats directly from API responses
+  const fetchUserProfile = useCallback(async (userId: string) => {
+    try {
+      const response = await apiCall(`/api/user/${userId}`);
+      if (response?.user) {
+        return response.user;
+      }
+      throw new Error('User profile not found');
+    } catch (error) {
+      console.error('Fetch user profile failed:', error);
+      throw error;
+    }
+  }, [apiCall]);
+
   const fetchAllData = useCallback(async (userId: string) => {
     if (!userId) return;
 
     setIsRefreshing(true);
     try {
+      console.log(`🔄 Fetching all data for user ${userId}`);
+      
       const [
+        userProfileRes,
         tasksRes,
         pjpsRes,
         dealersRes,
@@ -595,16 +635,15 @@ const useAPIActions = () => {
         attendanceRes,
         salesRes,
         collectionRes,
-        // NEW ENDPOINTS:
         leaveRes,
         clientReportRes,
         competitionRes,
-        dealerScoresRes,
         brandsRes,
         ratingsRes,
         ddpRes,
         dealerBrandMappingRes
       ] = await Promise.allSettled([
+        apiCall(`/api/user/${userId}`),
         apiCall(`/api/daily-tasks/user/${userId}`),
         apiCall(`/api/pjp/user/${userId}`),
         apiCall(`/api/dealers/user/${userId}`),
@@ -613,11 +652,9 @@ const useAPIActions = () => {
         apiCall(`/api/attendance/user/${userId}`),
         apiCall(`/api/sales-reports/user/${userId}`),
         apiCall(`/api/collection-reports/user/${userId}`),
-        // NEW API CALLS:
         apiCall(`/api/leave-applications/user/${userId}`),
         apiCall(`/api/client-reports/user/${userId}`),
         apiCall(`/api/competition-reports/user/${userId}`),
-        apiCall(`/api/dealer-reports-scores/user/${userId}`),
         apiCall(`/api/brands/user/${userId}`),
         apiCall(`/api/ratings/user/${userId}`),
         apiCall(`/api/ddp/user/${userId}`),
@@ -625,6 +662,7 @@ const useAPIActions = () => {
       ]);
 
       // Extract data from responses
+      const userProfile = userProfileRes.status === 'fulfilled' ? userProfileRes.value.user || null : null;
       const dailyTasksData = tasksRes.status === 'fulfilled' ? tasksRes.value.data || [] : [];
       const pjpsData = pjpsRes.status === 'fulfilled' ? pjpsRes.value.data || [] : [];
       const dealersData = dealersRes.status === 'fulfilled' ? dealersRes.value.data || [] : [];
@@ -635,7 +673,23 @@ const useAPIActions = () => {
       const clientReportsData = clientReportRes.status === 'fulfilled' ? clientReportRes.value.data || [] : [];
       const competitionReportsData = competitionRes.status === 'fulfilled' ? competitionRes.value.data || [] : [];
 
-      // FIXED: Calculate dashboard stats directly from API data BEFORE setting state
+      // Log any failed requests for debugging
+      if (tasksRes.status === 'rejected') {
+        console.error('❌ Daily tasks fetch failed:', tasksRes.reason);
+      }
+      if (pjpsRes.status === 'rejected') {
+        console.error('❌ PJP fetch failed:', pjpsRes.reason);
+      }
+      if (dealersRes.status === 'rejected') {
+        console.error('❌ Dealers fetch failed:', dealersRes.reason);
+      }
+
+      // Update user profile
+      if (userProfile) {
+        useAppStore.getState().setUser(userProfile);
+      }
+
+      // CALCULATE DASHBOARD STATS FROM API DATA
       const today = new Date().toDateString();
       const todaysTasks = dailyTasksData.filter((task: any) => {
         const taskDate = task.taskDate ? new Date(task.taskDate).toDateString() : today;
@@ -658,11 +712,12 @@ const useAPIActions = () => {
         totalReports: totalReports
       };
 
-      console.log('📊 Calculated Dashboard Stats from API data:', dashboardStats);
-      console.log('📝 Daily tasks data:', dailyTasksData);
-      console.log('📝 Today\'s tasks:', todaysTasks);
+      console.log('📊 Calculated Dashboard Stats:', dashboardStats);
+      console.log('📋 Daily Tasks:', dailyTasksData.length, dailyTasksData);
+      console.log('🗺️ PJPs:', pjpsData.length, pjpsData);
+      console.log('🏢 Dealers:', dealersData.length, dealersData);
 
-      // NOW set all the data including the calculated stats
+      // SET ALL DATA IN ZUSTAND STORE
       setData('dailyTasks', dailyTasksData);
       setData('pjps', pjpsData);
       setData('dealers', dealersData);
@@ -674,16 +729,18 @@ const useAPIActions = () => {
       setData('leaveApplications', leaveRes.status === 'fulfilled' ? leaveRes.value.data || [] : []);
       setData('clientReports', clientReportsData);
       setData('competitionReports', competitionReportsData);
-      setData('dealerScores', dealerScoresRes.status === 'fulfilled' ? dealerScoresRes.value.data || [] : []);
       setData('brands', brandsRes.status === 'fulfilled' ? brandsRes.value.data || [] : []);
       setData('ratings', ratingsRes.status === 'fulfilled' ? ratingsRes.value.data || [] : []);
-      setData('ddp', ddpRes.status === 'fulfilled' ? ddpRes.value.data || [] : []);
-      setData('dealerBrandMapping', dealerBrandMappingRes.status === 'fulfilled' ? dealerBrandMappingRes.value.data || [] : []);
-      
-      // Set the calculated dashboard stats
+      setData('ddpReports', ddpRes.status === 'fulfilled' ? ddpRes.value.data || [] : []);
+      setData('dealerBrandMappings', dealerBrandMappingRes.status === 'fulfilled' ? dealerBrandMappingRes.value.data || [] : []);
+      setData('dealerScores', []);
       setData('dashboardStats', dashboardStats);
 
-      console.log('✅ All data and stats set successfully');
+      console.log('✅ All data loaded successfully');
+      toast({
+        title: "Data Updated",
+        description: "Successfully loaded latest data",
+      });
 
     } catch (error) {
       console.error('❌ Failed to fetch data:', error);
@@ -697,15 +754,9 @@ const useAPIActions = () => {
     }
   }, [apiCall, setData, toast]);
 
-  // SIMPLIFIED: Remove the separate fetchDashboardStats function since we calculate inline
-  const fetchDashboardStats = useCallback(async () => {
-    // This is now handled directly in fetchAllData
-    console.log('📊 Dashboard stats already calculated in fetchAllData');
-  }, []);
-
-  // Task operations
   const completeTask = useCallback(async (taskId: string) => {
     try {
+      console.log(`⏱️ Completing task ${taskId}`);
       const response = await apiCall(`/api/daily-tasks/${taskId}`, {
         method: 'PUT',
         body: JSON.stringify({ status: 'Completed', completedAt: new Date().toISOString() })
@@ -714,7 +765,7 @@ const useAPIActions = () => {
       if (response?.success) {
         const { user } = useAppStore.getState();
         if (user) {
-          await fetchAllData(user.id);
+          await fetchAllData(String(user.id));
         }
         toast({
           title: "Task Completed",
@@ -733,55 +784,24 @@ const useAPIActions = () => {
     }
   }, [apiCall, fetchAllData, toast]);
 
-  // PJP batch updates
-  const batchUpdatePJPs = useCallback(async (updates: Record<string, string>) => {
-    const { user, setLoading } = useAppStore.getState();
-    if (!user) return;
-
-    try {
-      setLoading(true);
-      const results = [];
-
-      for (const [pjpId, status] of Object.entries(updates)) {
-        const updatePromise = apiCall(`/api/pjp/${pjpId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ status, updatedAt: new Date().toISOString() })
-        });
-        results.push(updatePromise);
-      }
-
-      await Promise.all(results);
-      await fetchAllData(user.id);
-
-      toast({
-        title: "Batch Update Complete",
-        description: `Updated ${Object.keys(updates).length} journey plans successfully`,
-      });
-
-      return { success: true };
-    } catch (error) {
-      console.error('Batch update failed:', error);
-      toast({
-        title: "Batch Update Failed",
-        description: "Some updates may not have been saved. Please try again.",
-        variant: "destructive",
-      });
-      return { success: false, error };
-    } finally {
-      useAppStore.getState().setLoading(false);
-    }
-  }, [apiCall, fetchAllData, toast]);
-
-  // Dealer scoring
   const scoringDealer = useCallback(async (dealerId: string, scoreData: any) => {
     try {
+      console.log(`⭐ Scoring dealer ${dealerId}`);
       const resp = await apiCall('/api/dealer-reports-scores', {
         method: 'POST',
-        body: JSON.stringify({ dealerId, ...scoreData })
+        body: JSON.stringify({ 
+          dealerId, 
+          dealerScore: 5.0,
+          trustWorthinessScore: 4.5,
+          creditWorthinessScore: 4.0,
+          orderHistoryScore: 4.5,
+          visitFrequencyScore: 3.5,
+          ...scoreData 
+        })
       });
       if (resp?.success) {
         const { user } = useAppStore.getState();
-        if (user) await fetchAllData(user.id);
+        if (user) await fetchAllData(String(user.id));
         toast({
           title: "Dealer Scored",
           description: "Dealer score updated successfully",
@@ -798,22 +818,20 @@ const useAPIActions = () => {
     }
   }, [apiCall, fetchAllData, toast]);
 
-  // UPDATED: Delete operations with ALL endpoints
   const deleteRecord = useCallback(
     async (type: string, id: string) => {
+      // MAPPING TO YOUR EXACT createAutoCRUD ENDPOINT NAMES
       const endpoints: Record<string, (id: string) => string> = {
-        task: (id) => `/api/daily-tasks/${id}`,
-        pjp: (id) => `/api/pjp/${id}`,
-        dealer: (id) => `/api/dealers/${id}`,
+        task: (id) => `/api/daily-tasks/${id}`, // EXACT endpoint
+        pjp: (id) => `/api/pjp/${id}`, // EXACT endpoint
+        dealer: (id) => `/api/dealers/${id}`, // EXACT endpoint
         dvr: (id) => `/api/dvr/${id}`,
         tvr: (id) => `/api/tvr/${id}`,
         'sales-report': (id) => `/api/sales-reports/${id}`,
         'collection-report': (id) => `/api/collection-reports/${id}`,
-        // NEW ENDPOINTS:
         'leave-application': (id) => `/api/leave-applications/${id}`,
         'client-report': (id) => `/api/client-reports/${id}`,
         'competition-report': (id) => `/api/competition-reports/${id}`,
-        'dealer-score': (id) => `/api/dealer-reports-scores/${id}`,
         'brand': (id) => `/api/brands/${id}`,
         'rating': (id) => `/api/ratings/${id}`,
         'ddp': (id) => `/api/ddp/${id}`,
@@ -821,10 +839,11 @@ const useAPIActions = () => {
       };
 
       try {
+        console.log(`🗑️ Deleting ${type} with ID ${id}`);
         const resp = await apiCall(endpoints[type](id), { method: "DELETE" });
         if (resp?.success) {
           const { user } = useAppStore.getState();
-          if (user) await fetchAllData(user.id);
+          if (user) await fetchAllData(String(user.id));
           toast({
             title: "Deleted Successfully",
             description: `${type.charAt(0).toUpperCase() + type.slice(1)} deleted successfully`,
@@ -845,12 +864,11 @@ const useAPIActions = () => {
 
   return {
     fetchAllData,
-    fetchDashboardStats,
+    fetchUserProfile,
     completeTask,
-    batchUpdatePJPs,
     scoringDealer,
     deleteRecord,
-    isRefreshing,
+    isRefreshing
   };
 };
 
@@ -871,42 +889,25 @@ export default function HomePage() {
     tvrReports,
     salesReports,
     collectionReports,
-    // NEW DATA ARRAYS:
     leaveApplications,
     clientReports,
     competitionReports,
-    dealerScores,
-    brands,
-    ratings,
-    ddp,
-    dealerBrandMapping,
     dashboardStats,
-    uiState,
+    showCreateModal,
+    showDetailModal,
+    selectedItem,
     setUIState,
-    setData,
+    resetModals,
   } = useAppStore();
-
-  // Add fallback for uiState in case it's not initialized
-  const safeUIState = uiState || {
-    showCreateModal: false,
-    showDetailModal: false,
-    createType: null,
-    selectedItem: null,
-  };
 
   const {
     fetchAllData,
-    fetchDashboardStats,
+    fetchUserProfile,
     completeTask,
-    batchUpdatePJPs,
     scoringDealer,
     deleteRecord,
     isRefreshing
   } = useAPIActions();
-
-  // Local state for PJP status changes
-  const [pjpStatusChanges, setPjpStatusChanges] = useState<Record<string, 'completed' | 'skipped' | 'planned'>>({});
-  const [isSubmittingPJPs, setIsSubmittingPJPs] = useState(false);
 
   // Dialog states for quick actions
   const [openDvr, setOpenDvr] = useState(false);
@@ -917,7 +918,7 @@ export default function HomePage() {
   const [openOut, setOpenOut] = useState(false);
   const [openSales, setOpenSales] = useState(false);
 
-  // FIXED: Use the EXACT same user initialization pattern as your working CRM
+  // USER INITIALIZATION USING YOUR EXACT PATTERN
   useEffect(() => {
     const initializeApp = async () => {
       const storedUser = localStorage.getItem("user");
@@ -926,14 +927,17 @@ export default function HomePage() {
       if (storedUser && storedUserId) {
         try {
           const parsedUser = JSON.parse(storedUser);
-          setUser(parsedUser);
+          
+          // Fetch fresh user profile from your API
+          const freshUser = await fetchUserProfile(storedUserId);
+          setUser(freshUser);
 
-          // Fetch data first, then calculate stats
+          // Fetch all data using the user ID
           await fetchAllData(storedUserId);
 
-          console.log("✅ App initialized with user:", parsedUser.firstName);
+          console.log("✅ App initialized with user:", freshUser.firstName);
         } catch (error) {
-          console.error("❌ Failed to parse stored user");
+          console.error("❌ Failed to initialize user");
           localStorage.clear();
           navigate("/login");
         }
@@ -946,7 +950,7 @@ export default function HomePage() {
     if (!user) {
       initializeApp();
     }
-  }, [user, setUser, navigate, fetchAllData]);
+  }, [user, setUser, navigate, fetchAllData, fetchUserProfile]);
 
   // Modal handlers
   const openCreateModal = (type: any) => {
@@ -959,16 +963,10 @@ export default function HomePage() {
     setUIState('showDetailModal', true);
   };
 
-  const closeModals = () => {
-    setUIState('showCreateModal', false);
-    setUIState('showDetailModal', false);
-    setUIState('selectedItem', null);
-  };
-
   // Refresh all data
   const refreshAllData = useCallback(async () => {
     if (user) {
-      await fetchAllData(user.id);
+      await fetchAllData(String(user.id));
     }
   }, [user, fetchAllData]);
 
@@ -979,23 +977,7 @@ export default function HomePage() {
     navigate('/login');
   };
 
-  // PJP Status change handlers
-  const handlePJPStatusChange = (id: string, status: 'completed' | 'skipped' | 'planned') => {
-    setPjpStatusChanges(prev => ({ ...prev, [id]: status }));
-  };
-
-  const submitPJPChanges = async () => {
-    if (Object.keys(pjpStatusChanges).length === 0) return;
-
-    setIsSubmittingPJPs(true);
-    await batchUpdatePJPs(pjpStatusChanges);
-    setPjpStatusChanges({});
-    setIsSubmittingPJPs(false);
-  };
-
-  const hasUnsavedChanges = Object.keys(pjpStatusChanges).length > 0;
-
-  // Calculate today's data - using the EXACT same logic as working version
+  // Calculate today's data
   const todaysTasks = useMemo(() => {
     const today = new Date().toDateString();
     return (dailyTasks || []).filter((task: any) => {
@@ -1004,12 +986,7 @@ export default function HomePage() {
     });
   }, [dailyTasks]);
 
-  const activePJPs = useMemo(() =>
-    (pjps || []).filter((pjp: any) => pjp.status === 'planned' || !pjp.status),
-    [pjps]
-  );
-
-  // UPDATED: Include all report types
+  // Include all report types
   const allReports = useMemo(() => [
     ...(reports || []).map((r: any) => ({ ...r, type: 'dvr' })),
     ...(tvrReports || []).map((r: any) => ({ ...r, type: 'tvr' })),
@@ -1063,7 +1040,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* FIXED Stats Grid - Use calculated dashboardStats */}
+      {/* Stats Grid */}
       <div className="px-6 py-4 bg-background/95">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
@@ -1150,35 +1127,6 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* PJP Changes Banner */}
-      {hasUnsavedChanges && (
-        <div className="mx-6 mb-4">
-          <div className="bg-amber-950/50 border border-amber-800/50 rounded-lg p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 bg-amber-400 rounded-full animate-pulse" />
-              <span className="text-sm text-amber-200">
-                You have {Object.keys(pjpStatusChanges).length} unsaved PJP changes
-              </span>
-            </div>
-            <Button
-              onClick={submitPJPChanges}
-              size="sm"
-              disabled={isSubmittingPJPs}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              {isSubmittingPJPs ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                'Save Changes'
-              )}
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Main Content */}
       <div className="flex-1 px-6 pb-6">
         <Tabs defaultValue="today" className="w-full">
@@ -1191,6 +1139,7 @@ export default function HomePage() {
           </TabsList>
 
           <TabsContent value="today" className="space-y-6">
+            {/* ENHANCED DAILY TASKS SECTION - REMOVED ACTIVE JOURNEY PLANS */}
             <Section
               title="Today's Tasks"
               Icon={Target}
@@ -1216,35 +1165,6 @@ export default function HomePage() {
                 <Empty icon={Target} label="No tasks scheduled for today" />
               )}
             </Section>
-
-            <Section
-              title="Active Journey Plans"
-              Icon={Route}
-              onAdd={() => openCreateModal('pjp')}
-              isRefreshing={isRefreshing}
-              onRefresh={refreshAllData}
-            >
-              {isLoading ? (
-                <LoadingList />
-              ) : activePJPs.length > 0 ? (
-                <div className="space-y-3">
-                  {activePJPs.map((pjp: any) => (
-                    <InteractivePJPCard
-                      key={pjp.id}
-                      pjp={pjp}
-                      localStatus={pjpStatusChanges[pjp.id]}
-                      onStatusChange={handlePJPStatusChange}
-                      onView={openDetailModal}
-                      onEdit={openDetailModal}
-                      onDelete={(id) => deleteRecord('pjp', id)}
-                      isUpdating={isSubmittingPJPs}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <Empty icon={Route} label="No active journey plans" />
-              )}
-            </Section>
           </TabsContent>
 
           <TabsContent value="pjps" className="space-y-6">
@@ -1260,16 +1180,40 @@ export default function HomePage() {
               ) : (pjps || []).length > 0 ? (
                 <div className="space-y-3">
                   {(pjps || []).map((pjp: any) => (
-                    <InteractivePJPCard
-                      key={pjp.id}
-                      pjp={pjp}
-                      localStatus={pjpStatusChanges[pjp.id]}
-                      onStatusChange={handlePJPStatusChange}
-                      onView={openDetailModal}
-                      onEdit={openDetailModal}
-                      onDelete={(id) => deleteRecord('pjp', id)}
-                      isUpdating={isSubmittingPJPs}
-                    />
+                    <Card key={pjp.id} className="bg-card border shadow-sm hover:shadow-lg transition-all duration-300">
+                      <CardContent className="p-6">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1 cursor-pointer" onClick={() => openDetailModal(pjp)}>
+                            <h3 className="font-medium text-lg mb-2 text-foreground">
+                              {pjp.objective}
+                            </h3>
+                            <p className="text-sm text-muted-foreground mb-4">{pjp.siteName || pjp.location}</p>
+                            <div className="flex items-center flex-wrap gap-3">
+                              <Badge variant="outline" className="text-xs px-3 py-1">
+                                {pjp.status || 'planned'}
+                              </Badge>
+                              {pjp.planDate && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  {new Date(pjp.planDate).toLocaleDateString()}
+                                </span>
+                              )}
+                              {pjp.areaToBeVisited && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <MapIcon className="h-3 w-3" />
+                                  {pjp.areaToBeVisited}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <IconBtn onClick={() => openDetailModal(pjp)} Icon={Eye} />
+                            <IconBtn onClick={() => openDetailModal(pjp)} Icon={Edit} />
+                            <IconBtn onClick={() => deleteRecord('pjp', String(pjp.id))} Icon={Trash2} variant="destructive" />
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
                   ))}
                 </div>
               ) : (
@@ -1338,7 +1282,6 @@ export default function HomePage() {
 
           <TabsContent value="chat" className="space-y-6">
             <div className="h-[600px] border border-border rounded-lg bg-card">
-              {/* Replace with your actual ChatInterface component */}
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 <div className="text-center">
                   <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-40" />
@@ -1357,7 +1300,7 @@ export default function HomePage() {
             <DialogTitle>Daily Visit Report</DialogTitle>
           </DialogHeader>
           <DVRForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenDvr(false);
               refreshAllData();
@@ -1373,7 +1316,7 @@ export default function HomePage() {
             <DialogTitle>Technical Visit Report</DialogTitle>
           </DialogHeader>
           <TVRForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenTvr(false);
               refreshAllData();
@@ -1389,7 +1332,7 @@ export default function HomePage() {
             <DialogTitle>Add New Dealer</DialogTitle>
           </DialogHeader>
           <AddDealerForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenDealer(false);
               refreshAllData();
@@ -1405,7 +1348,7 @@ export default function HomePage() {
             <DialogTitle>Plan New Journey</DialogTitle>
           </DialogHeader>
           <PJPForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenPjp(false);
               refreshAllData();
@@ -1421,7 +1364,7 @@ export default function HomePage() {
             <DialogTitle>Punch In</DialogTitle>
           </DialogHeader>
           <AttendanceInForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenIn(false);
               setAttendanceStatus("in");
@@ -1438,7 +1381,7 @@ export default function HomePage() {
             <DialogTitle>Punch Out</DialogTitle>
           </DialogHeader>
           <AttendanceOutForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenOut(false);
               setAttendanceStatus("out");
@@ -1455,7 +1398,7 @@ export default function HomePage() {
             <DialogTitle>Create Sales Order</DialogTitle>
           </DialogHeader>
           <SalesOrderForm
-            userId={user?.id}
+            userId={String(user?.id)}
             onSubmitted={() => {
               setOpenSales(false);
               refreshAllData();
@@ -1466,38 +1409,31 @@ export default function HomePage() {
       </Dialog>
 
       {/* Create/Edit Modal */}
-      <Dialog open={safeUIState.showCreateModal} onOpenChange={closeModals}>
+      <Dialog open={showCreateModal} onOpenChange={resetModals}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>
-              {safeUIState.createType === 'task' && 'Create Task'}
-              {safeUIState.createType === 'pjp' && 'Create Journey Plan'}
-              {safeUIState.createType === 'dealer' && 'Create Dealer'}
-            </DialogTitle>
+            <DialogTitle>Create Task</DialogTitle>
           </DialogHeader>
-
-          {safeUIState.createType === 'task' && (
-            <TaskForm
-              userId={user?.id}
-              onSubmitted={() => {
-                closeModals();
-                refreshAllData();
-              }}
-              onCancel={closeModals}
-            />
-          )}
+          <TaskForm
+            userId={String(user?.id)}
+            onSubmitted={() => {
+              resetModals();
+              refreshAllData();
+            }}
+            onCancel={resetModals}
+          />
         </DialogContent>
       </Dialog>
 
       {/* Detail Modal */}
-      <Dialog open={safeUIState.showDetailModal} onOpenChange={closeModals}>
+      <Dialog open={showDetailModal} onOpenChange={resetModals}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Details</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <pre className="whitespace-pre-wrap text-sm bg-muted p-4 rounded-lg overflow-auto text-foreground">
-              {JSON.stringify(safeUIState.selectedItem, null, 2)}
+              {JSON.stringify(selectedItem, null, 2)}
             </pre>
           </div>
         </DialogContent>
