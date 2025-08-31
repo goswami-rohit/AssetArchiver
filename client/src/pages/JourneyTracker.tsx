@@ -1,575 +1,342 @@
-// src/pages/JourneyTracker.tsx
-import React, { useState, useEffect } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import {
-  Play,
-  Square,
-  Trash2,
-  Edit3,
-  Check,
-  X,
-  ArrowLeft,
-  Calculator,
-  MapPin,
-  Trophy,
-  Star,
-  Target,
-  Award,
-  Zap
-} from 'lucide-react';
+// src/pages/JourneyTracker.tsx - SIMPLIFIED with contained map
+import React, { useState, useEffect, useRef } from 'react';
+import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
+
+// Import the modern UI components
+import { 
+  ModernJourneyHeader,
+  ModernTripPlanningCard,
+  ModernActiveTripCard,
+  ModernCompletedTripCard,
+  ModernMessageCard
+} from '@/components/ReusableUI';
 
 interface JourneyTrackerProps {
   userId: number;
   onBack?: () => void;
-  onJourneyEnd?: () => void;
 }
 
-interface Journey {
-  externalId?: string;
-  status?: string;
-  meters: number;
-  startedAt?: string;
-  updatedAt?: string;
+interface Dealer {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+interface Location {
+  lat: number;
+  lng: number;
+  address?: string;
+}
+
+interface TripData {
+  journeyId: string;
+  dbJourneyId: number;
+  dealer: Dealer;
+  radarTrip: any;
 }
 
 export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) {
-  const [isActive, setIsActive] = useState(false);
-  const [currentJourneyId, setCurrentJourneyId] = useState<string | null>(null);
-  const [journeys, setJourneys] = useState<Journey[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  // State management (same as before)
+  const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
+  const [selectedDealer, setSelectedDealer] = useState<Dealer | null>(null);
+  const [dealers, setDealers] = useState<Dealer[]>([]);
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [tripStatus, setTripStatus] = useState<'idle' | 'active' | 'completed'>('idle');
+  const [activeTripData, setActiveTripData] = useState<TripData | null>(null);
+  const [distance, setDistance] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [wakeLock, setWakeLock] = useState<WakeLockSentinel | null>(null);
-  const [editingJourney, setEditingJourney] = useState<string | null>(null);
-  const [editDistance, setEditDistance] = useState('');
-  const [showAchievement, setShowAchievement] = useState(false);
+  const [showDestinationChange, setShowDestinationChange] = useState(false);
+  const [routePolyline, setRoutePolyline] = useState<[number, number][]>([]);
+  
+  const mapRef = useRef<JourneyMapRef>(null);
+  const trackingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Achievement system
-  const getAchievement = (count: number) => {
-    if (count >= 50) return { title: "Journey Master", icon: Trophy, color: "bg-purple-500", message: "50+ journeys! You're unstoppable!" };
-    if (count >= 25) return { title: "Travel Expert", icon: Award, color: "bg-yellow-500", message: "25+ journeys! Amazing dedication!" };
-    if (count >= 15) return { title: "Explorer Pro", icon: Star, color: "bg-blue-500", message: "15+ journeys! You're a pro!" };
-    if (count >= 10) return { title: "Journey Hero", icon: Target, color: "bg-green-500", message: "10+ journeys! You're a hero!" };
-    if (count >= 5) return { title: "Rising Star", icon: Zap, color: "bg-orange-500", message: "5+ journeys! Keep it up!" };
-    return { title: "Beginner", icon: MapPin, color: "bg-gray-500", message: "Start your journey!" };
-  };
-
-  // Wake lock management
-  const requestWakeLock = async () => {
-    if ('wakeLock' in navigator && !wakeLock) {
+  // All your existing functions remain the same...
+  // Fetch dealers
+  useEffect(() => {
+    const fetchDealers = async () => {
       try {
-        const lock = await (navigator as any).wakeLock.request('screen');
-        setWakeLock(lock);
-        lock.addEventListener('release', () => setWakeLock(null));
-      } catch (err) {
-        console.warn('Wake lock failed:', err);
-      }
-    }
-  };
-
-  const releaseWakeLock = async () => {
-    if (wakeLock) {
-      await wakeLock.release();
-      setWakeLock(null);
-    }
-  };
-
-  // Journey control - single switching function
-  const toggleJourney = async () => {
-    if (isActive) {
-      // End journey
-      if (!currentJourneyId) return;
-
-      setIsLoading(true);
-      try {
-        const response = await fetch('/api/geo/finish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId,
-            journeyId: currentJourneyId
-          })
-        });
+        const response = await fetch(`/api/dealers/user/${userId}`);
 
         const data = await response.json();
         if (data.success) {
-          setIsActive(false);
-          setCurrentJourneyId(null);
-          setSuccess('Journey completed! 🎉');
-          await releaseWakeLock();
-
-          // Stop location updates
-          if ((window as any)._journeyInterval) {
-            clearInterval((window as any)._journeyInterval);
-            (window as any)._journeyInterval = null;
-          }
-
-          // Auto-calculate distance after completion
-          setTimeout(() => {
-            calculateJourneyDistance(data.data.journeyId);
-          }, 1000);
-
-          fetchJourneys();
-        } else {
-          setError(data.error || 'Failed to end journey');
+          setDealers(data.data || []);
         }
       } catch (err) {
-        setError('Network error: Failed to end journey');
-      } finally {
-        setIsLoading(false);
+        setError('Failed to load dealers');
       }
-    } else {
-      // Start journey
-      setIsLoading(true);
-      setError('');
+    };
+    fetchDealers();
+  }, []);
 
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            const response = await fetch('/api/geo/start', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                userId,
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-                mode: 'car'
-              })
-            });
-
-            const data = await response.json();
-            if (data.success) {
-              setCurrentJourneyId(data.data.journeyId);
-              setIsActive(true);
-              setSuccess('Journey started! 🚀');
-              await requestWakeLock();
-
-              // Kick off location updates every 30s
-              (window as any)._journeyInterval = setInterval(() => {
-                navigator.geolocation.getCurrentPosition(
-                  async (pos) => {
-                    try {
-                      await fetch('/api/geo/start', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          userId,
-                          journeyId: data.data.journeyId,
-                          lat: pos.coords.latitude,
-                          lng: pos.coords.longitude,
-                          mode: 'car'
-                        })
-                      });
-                    } catch (err) {
-                      console.error('Failed to send periodic coords', err);
-                    }
-                  },
-                  (err) => console.warn('Geolocation error', err),
-                  { enableHighAccuracy: true, timeout: 10000 }
-                );
-              }, 30_000);
-            } else {
-              setError(data.error || 'Failed to start journey');
-            }
-          } catch (err) {
-            setError('Network error: Failed to start journey');
-          } finally {
-            setIsLoading(false);
-          }
-        },
-        (error) => {
-          setError('Location access required to start journey');
-          setIsLoading(false);
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
-      );
-    }
-  };
-
-
-  // CRUD functions
-  const fetchJourneys = async () => {
+  // Get current location
+  const getCurrentLocation = async () => {
+    setIsLoadingLocation(true);
     try {
-      const response = await fetch(`/api/geo/list?userId=${userId}`);
-      const data = await response.json();
-      if (data.success) {
-        const newJourneys = data.data.breakdown || [];
-        const oldCount = journeys.length;
-        const newCount = newJourneys.length;
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
+      });
 
-        setJourneys(newJourneys);
+      const location = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        address: 'Current Location'
+      };
 
-        // Show achievement if milestone reached
-        if (newCount > oldCount && [5, 10, 15, 25, 50].includes(newCount)) {
-          setShowAchievement(true);
-          setTimeout(() => setShowAchievement(false), 4000);
-        }
+      setCurrentLocation(location);
+      
+      if (mapRef.current) {
+        mapRef.current.setView(location.lat, location.lng, 15);
       }
     } catch (err) {
-      console.error('Failed to fetch journeys:', err);
+      setError('Unable to get location. Please enable GPS.');
+    } finally {
+      setIsLoadingLocation(false);
     }
   };
 
-  const calculateJourneyDistance = async (journeyId: string) => {
+  // Start trip
+  const startTrip = async () => {
+    if (!currentLocation || !selectedDealer) {
+      setError('Please select location and destination');
+      return;
+    }
+
     try {
-      const response = await fetch('/api/geo/list', {
+      const response = await fetch('/api/geo/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId,
-          journeyId,
-          limit: 500
+          dealerId: selectedDealer.id,
+          lat: currentLocation.lat,
+          lng: currentLocation.lng
         })
       });
 
       const data = await response.json();
       if (data.success) {
-        setSuccess(`Distance calculated: ${data.data.totalKm}km`);
-        fetchJourneys();
+        setActiveTripData({
+          journeyId: data.data.radarTrip._id,
+          dbJourneyId: data.data.dbJourneyId,
+          dealer: data.data.dealer,
+          radarTrip: data.data.radarTrip
+        });
+        setTripStatus('active');
+        setSuccess('Journey started! 🚗');
+        startLocationTracking(data.data.radarTrip._id);
       } else {
-        setError(data.error || 'Failed to calculate distance');
+        setError(data.error || 'Failed to start trip');
       }
     } catch (err) {
-      setError('Failed to calculate journey distance');
+      setError('Network error');
     }
   };
 
-  const updateJourney = async (journeyId: string, newDistance: number) => {
+  // Location tracking every 27 seconds
+  const startLocationTracking = (journeyId: string) => {
+    trackingIntervalRef.current = setInterval(async () => {
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 5000
+          });
+        });
+
+        const newLocation = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        };
+
+        setCurrentLocation(newLocation);
+
+        // Fetch updated trip data
+        const response = await fetch(`/api/geo/trips/${journeyId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+          const trip = data.data.radarTrip;
+          
+          if (trip.distance && trip.duration) {
+            setDistance(trip.distance.value || 0);
+            setDuration(trip.duration.value || 0);
+          }
+
+          if (trip.locations && trip.locations.length > 0) {
+            const polylinePoints = trip.locations.map((loc: any) => [
+              loc.coordinates[1],
+              loc.coordinates[0]
+            ]);
+            setRoutePolyline(polylinePoints);
+          }
+        }
+      } catch (err) {
+        console.error('Tracking error:', err);
+      }
+    }, 27000);
+  };
+
+  // Change destination
+  const changeDestination = async (newDealerId: string) => {
+    if (!activeTripData) return;
+
     try {
-      const response = await fetch('/api/geo/list', {
+      const response = await fetch(`/api/geo/trips/${activeTripData.journeyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          journeyId,
-          totalDistanceTravelled: newDistance
+          destinationGeofenceExternalId: newDealerId,
+          status: "destination_updated"
         })
       });
 
-      if (response.ok) {
-        setSuccess('Journey updated');
-        setEditingJourney(null);
-        setEditDistance('');
-        fetchJourneys();
+      const data = await response.json();
+      if (data.success) {
+        const newDealer = dealers.find(d => d.id === newDealerId);
+        if (newDealer) {
+          setSelectedDealer(newDealer);
+          setActiveTripData(prev => prev ? { 
+            ...prev, 
+            dealer: newDealer,
+            radarTrip: data.data
+          } : null);
+          setSuccess('Destination updated! 🎯');
+          setShowDestinationChange(false);
+          setRoutePolyline([]);
+        }
       } else {
-        setError('Failed to update journey');
+        setError(data.error || 'Failed to update');
       }
     } catch (err) {
-      setError('Failed to update journey');
+      setError('Failed to change destination');
     }
   };
 
-  const deleteJourney = async (journeyId: string) => {
+  // Complete trip
+  const completeTrip = async () => {
+    if (!activeTripData) return;
+
     try {
-      const response = await fetch('/api/geo/list', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ journeyId })
+      const response = await fetch(`/api/geo/finish/${activeTripData.journeyId}`, {
+        method: 'POST'
       });
 
-      if (response.ok) {
-        setSuccess('Journey deleted');
-        fetchJourneys();
+      const data = await response.json();
+      if (data.success) {
+        setTripStatus('completed');
+        setSuccess('Journey completed! 🎉');
+        
+        if (trackingIntervalRef.current) {
+          clearInterval(trackingIntervalRef.current);
+          trackingIntervalRef.current = null;
+        }
       } else {
-        setError('Failed to delete journey');
+        setError('Failed to complete trip');
       }
     } catch (err) {
-      setError('Failed to delete journey');
+      setError('Failed to complete trip');
     }
   };
 
-  const formatDistance = (km: number) => {
-    return km < 1 ? `${(km * 1000).toFixed(0)}m` : `${km.toFixed(2)}km`;
+  // Reset for new journey
+  const startNewJourney = () => {
+    setTripStatus('idle');
+    setActiveTripData(null);
+    setSelectedDealer(null);
+    setDistance(0);
+    setDuration(0);
+    setRoutePolyline([]);
+    setShowDestinationChange(false);
   };
 
-
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return 'Unknown';
-    return new Date(dateString).toLocaleDateString();
-  };
-
+  // Auto-hide messages
   useEffect(() => {
     if (success || error) {
       const timer = setTimeout(() => {
         setSuccess('');
         setError('');
-      }, 3000);
+      }, 4000);
       return () => clearTimeout(timer);
     }
   }, [success, error]);
 
+  // Initialize
   useEffect(() => {
-    fetchJourneys();
-  }, [userId]);
-
-  const achievement = getAchievement(journeys.length);
-  const AchievementIcon = achievement.icon;
+    getCurrentLocation();
+    
+    return () => {
+      if (trackingIntervalRef.current) {
+        clearInterval(trackingIntervalRef.current);
+      }
+    };
+  }, []);
 
   return (
-    <div className="h-screen bg-gray-50 dark:bg-gray-900 flex flex-col">
-      {/* Native Header */}
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center justify-between">
-        {onBack && (
-          <Button
-            onClick={onBack}
-            variant="ghost"
-            size="sm"
-            className="p-2"
-            data-testid="button-back"
-          >
-            <ArrowLeft className="w-5 h-5" />
-          </Button>
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <ModernJourneyHeader status={tripStatus} onBack={onBack} />
+
+      {/* Messages */}
+      {success && <ModernMessageCard type="success" message={success} />}
+      {error && <ModernMessageCard type="error" message={error} />}
+
+      {/* Main Content - Clean Layout */}
+      <div className="container max-w-md mx-auto p-4 space-y-4">
+        {/* Contained Map */}
+        <JourneyMap
+          ref={mapRef}
+          currentLocation={currentLocation}
+          selectedDealer={selectedDealer}
+          routePolyline={routePolyline}
+          className="w-full"
+        />
+
+        {/* Trip UI Cards */}
+        {tripStatus === 'idle' && (
+          <ModernTripPlanningCard
+            currentLocation={currentLocation?.address}
+            selectedDealer={selectedDealer}
+            dealers={dealers}
+            isLoadingLocation={isLoadingLocation}
+            onGetCurrentLocation={getCurrentLocation}
+            onDealerSelect={(dealerId) => {
+              const dealer = dealers.find(d => d.id === dealerId);
+              setSelectedDealer(dealer || null);
+            }}
+            onStartTrip={startTrip}
+          />
         )}
-        <h1 className="text-lg font-semibold text-gray-900 dark:text-white">Journey Tracker</h1>
-        <Badge className={`${achievement.color} text-white px-2 py-1 text-xs`}>
-          {achievement.title}
-        </Badge>
-      </div>
 
-      {/* Achievement Celebration */}
-      {showAchievement && (
-        <div className="absolute top-20 left-4 right-4 z-50">
-          <Card className={`${achievement.color} text-white border-0 shadow-2xl animate-pulse`}>
-            <CardContent className="p-4 text-center">
-              <AchievementIcon className="w-12 h-12 mx-auto mb-2" />
-              <h3 className="font-bold text-lg">{achievement.title} Unlocked!</h3>
-              <p className="text-sm">{achievement.message}</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+        {tripStatus === 'active' && activeTripData && (
+          <ModernActiveTripCard
+            dealer={activeTripData.dealer}
+            distance={distance}
+            duration={duration}
+            onChangeDestination={() => setShowDestinationChange(true)}
+            onCompleteTrip={completeTrip}
+            showDestinationChange={showDestinationChange}
+            dealers={dealers}
+            onDestinationChange={changeDestination}
+            onCancelChange={() => setShowDestinationChange(false)}
+          />
+        )}
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-4 space-y-4">
-          {/* Messages */}
-          {success && (
-            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-3" data-testid="message-success">
-              <p className="text-green-800 dark:text-green-200 text-sm font-medium">{success}</p>
-            </div>
-          )}
-
-          {error && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3" data-testid="message-error">
-              <p className="text-red-800 dark:text-red-200 text-sm font-medium">{error}</p>
-            </div>
-          )}
-
-          {/* Main Journey Control */}
-          <Card className="bg-white dark:bg-gray-800 border-0 shadow-lg">
-            <CardContent className="p-8">
-              <div className="text-center space-y-6">
-                {/* Status Indicator */}
-                <div className="relative">
-                  <div className={`w-24 h-24 mx-auto rounded-full flex items-center justify-center transition-all duration-300 ${isActive
-                    ? 'bg-green-100 dark:bg-green-900/30 ring-4 ring-green-500/20'
-                    : 'bg-blue-100 dark:bg-blue-900/30'
-                    }`}>
-                    {isActive ? (
-                      <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse" />
-                    ) : (
-                      <MapPin className="w-12 h-12 text-blue-600 dark:text-blue-400" />
-                    )}
-                  </div>
-                  {wakeLock && (
-                    <div className="absolute -top-1 -right-1 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center">
-                      <span className="text-xs">🔒</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Status Text */}
-                <div>
-                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-1">
-                    {isActive ? 'Journey in Progress' : 'Ready to Start'}
-                  </h2>
-                  <p className="text-gray-500 dark:text-gray-400 text-sm">
-                    {isActive ? 'Tracking your adventure...' : 'Begin your next adventure'}
-                  </p>
-                </div>
-
-                {/* Single Switching Button */}
-                <Button
-                  onClick={toggleJourney}
-                  disabled={isLoading}
-                  className={`w-full h-14 text-lg font-semibold rounded-xl transition-all duration-300 ${isActive
-                    ? 'bg-red-600 hover:bg-red-700 text-white'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                    }`}
-                  data-testid={isActive ? "button-end-journey" : "button-start-journey"}
-                >
-                  {isLoading ? (
-                    <div className="flex items-center space-x-3">
-                      <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>{isActive ? 'Ending Journey...' : 'Starting Journey...'}</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center space-x-3">
-                      {isActive ? (
-                        <>
-                          <Square className="w-6 h-6" />
-                          <span>End Journey</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-6 h-6" />
-                          <span>Start Journey</span>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Achievement Progress */}
-          <Card className="bg-white dark:bg-gray-800 border-0 shadow-sm">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-medium text-gray-900 dark:text-white">{journeys.length} Journeys Completed</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {journeys.length >= 50 ? 'You\'re a legend!' :
-                      journeys.length >= 25 ? `${50 - journeys.length} more to become a legend` :
-                        journeys.length >= 15 ? `${25 - journeys.length} more to become an expert` :
-                          journeys.length >= 10 ? `${15 - journeys.length} more to become a pro` :
-                            journeys.length >= 5 ? `${10 - journeys.length} more to become a hero` :
-                              `${5 - journeys.length} more to become a rising star`}
-                  </p>
-                </div>
-                <AchievementIcon className={`w-8 h-8 text-white p-1.5 ${achievement.color} rounded-full`} />
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 10+ Journey Celebration */}
-          {journeys.length >= 10 && (
-            <Card className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white border-0 shadow-lg">
-              <CardContent className="p-4 text-center">
-                <Trophy className="w-10 h-10 mx-auto mb-2" />
-                <h3 className="font-bold text-lg">🎉 Incredible Achievement!</h3>
-                <p className="text-sm opacity-90">
-                  {journeys.length} journeys completed! You're absolutely crushing it!
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Journey List */}
-          <div className="space-y-3">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Recent Journeys ({journeys.length})
-            </h2>
-
-            {journeys.length === 0 ? (
-              <Card className="bg-white dark:bg-gray-800 border-0 shadow-sm">
-                <CardContent className="p-6 text-center">
-                  <MapPin className="w-12 h-12 mx-auto mb-3 text-gray-300 dark:text-gray-600" />
-                  <p className="text-gray-500 dark:text-gray-400">No journeys yet</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500">Start your first journey above</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="space-y-2">
-                {journeys.map((journey, index) => (
-                  <Card
-                    key={journey.externalId || index}
-                    className="bg-white dark:bg-gray-800 border-0 shadow-sm"
-                    data-testid={`journey-item-${index}`}
-                  >
-                    <CardContent className="p-4">
-                      {editingJourney === journey.externalId ? (
-                        <div className="flex items-center space-x-2">
-                          <Input
-                            type="number"
-                            step="0.001"
-                            value={editDistance}
-                            onChange={(e) => setEditDistance(e.target.value)}
-                            className="flex-1"
-                            placeholder="Distance (KM)"
-                            data-testid={`input-edit-distance-${index}`}
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => updateJourney(journey.externalId!, parseFloat(editDistance))}
-                            className="bg-green-600 hover:bg-green-700 px-3"
-                            data-testid={`button-save-${index}`}
-                          >
-                            <Check className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              setEditingJourney(null);
-                              setEditDistance('');
-                            }}
-                            className="px-3"
-                            data-testid={`button-cancel-${index}`}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center text-blue-600 dark:text-blue-400 font-semibold text-sm">
-                              {index + 1}
-                            </div>
-                            <div>
-                              <p className="font-medium text-gray-900 dark:text-white">
-                                {formatDistance(journey.meters)}
-                              </p>
-                              <p className="text-sm text-gray-500 dark:text-gray-400">
-                                {formatDate(journey.startedAt)}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center space-x-1">
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => calculateJourneyDistance(journey.externalId!)}
-                              className="p-2"
-                              data-testid={`button-calculate-${index}`}
-                            >
-                              <Calculator className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setEditingJourney(journey.externalId!);
-                                setEditDistance((journey.meters / 1000).toString());
-                              }}
-                              className="p-2"
-                              data-testid={`button-edit-${index}`}
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => deleteJourney(journey.externalId!)}
-                              className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50"
-                              data-testid={`button-delete-${index}`}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        {tripStatus === 'completed' && (
+          <ModernCompletedTripCard
+            distance={distance}
+            duration={duration}
+            onStartNew={startNewJourney}
+          />
+        )}
       </div>
     </div>
   );

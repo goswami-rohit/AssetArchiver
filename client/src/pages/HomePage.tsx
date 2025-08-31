@@ -1132,7 +1132,7 @@ export default function HomePage() {
         <Tabs defaultValue="today" className="w-full">
           <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="today">Today</TabsTrigger>
-            <TabsTrigger value="pjps">Journey Plans</TabsTrigger>
+            <TabsTrigger value="pjps">PJP</TabsTrigger>
             <TabsTrigger value="dealers">Dealers</TabsTrigger>
             <TabsTrigger value="reports">Reports</TabsTrigger>
             <TabsTrigger value="chat">Chat AI</TabsTrigger>

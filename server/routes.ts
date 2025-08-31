@@ -1,6 +1,7 @@
 // routes.ts - COMPLETE IMPLEMENTATION WITH AUTO-CRUD
 // two major functions: createAutoCRUD ->>> for AI ChatInterface && setupWebRoutes ->>> for manual endpoint fixing
 import { Express, Request, Response } from 'express';
+import { radar } from "server/integrations/radar"
 import { db } from 'server/db';
 import {
   companies,
@@ -970,18 +971,18 @@ export function setupWebRoutes(app: Express) {
   });
 
   // 5. Daily Tasks - date field, auto taskDate and status
- createAutoCRUD(app, {
-  endpoint: "daily-tasks",
-  table: dailyTasks,
-  schema: insertDailyTaskSchema,
-  tableName: "Daily Task",
-  dateField: "taskDate",
-  autoFields: {
-    id: () => randomUUID(), // <-- force-generate id
-    taskDate: () => new Date().toISOString().split("T")[0],
-    status: () => "Assigned",
-  },
-});
+  createAutoCRUD(app, {
+    endpoint: "daily-tasks",
+    table: dailyTasks,
+    schema: insertDailyTaskSchema,
+    tableName: "Daily Task",
+    dateField: "taskDate",
+    autoFields: {
+      id: () => randomUUID(), // <-- force-generate id
+      taskDate: () => new Date().toISOString().split("T")[0],
+      status: () => "Assigned",
+    },
+  });
 
   // 6. Leave Applications - date field, auto status
   createAutoCRUD(app, {
@@ -1291,342 +1292,173 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Punch out failed' });
     }
   });
-  // ===========================================
-  // GEO TRACKING
-  //============================================
-  // ========================= THREE ENDPOINTS =========================
-  // geo/start  -> DB row + create & start Radar trip (PUBLISHABLE auth)
-  // geo/finish -> ONLY end today's Radar trip + close DB row (PUBLISHABLE auth)
-  // geo/list   -> List trips (date window), filter by external userId,
-  //               sum distance, write KM to DB (SECRET auth per Radar docs)
-  // ===================================================================
-
-  // --------------------------- geo/start -----------------------------
-  // keep in-memory accumulator
-  // In-memory state
-  const journeyMap = new Map<string, { totalKm: number; lastLat: string; lastLng: string; timer: NodeJS.Timeout }>();
-
-  app.post('/api/geo/start', async (req: Request, res: Response) => {
+  /**
+   * 1. START TRIP
+   * Dealer.id in your DB == Radar geofence externalId
+   */
+  app.post("/api/geo/start", async (req: Request, res: Response) => {
     try {
-      const { userId, lat, lng, journeyId } = req.body ?? {};
-      if (!Number.isFinite(asNum(userId)) || !Number.isFinite(asNum(lat)) || !Number.isFinite(asNum(lng))) {
-        return res.status(400).json({ success: false, error: 'userId, lat, lng are required numbers' });
+      const { userId, dealerId, lat, lng } = req.body;
+      if (!userId || !dealerId || !lat || !lng) {
+        return res.status(400).json({ error: "userId, dealerId, lat, lng required" });
       }
 
-      const now = new Date();
+      const tag = "dealer";
 
-      // ---------- UPDATE existing journey ----------
-      if (journeyId) {
-        const jd = journeyMap.get(String(journeyId));
-        if (!jd) return res.status(404).json({ success: false, error: 'Journey not found' });
-
-        const origin = `${jd.lastLat},${jd.lastLng}`;
-        const destination = `${lat},${lng}`;
-
-        const radarRes = await fetch(
-          `https://api.radar.io/v1/route/distance?origin=${origin}&destination=${destination}&modes=car&units=metric`,
-          { headers: { Authorization: process.env.RADAR_PUBLISHABLE_KEY as string } }
-        );
-        const data = await radarRes.json();
-        const meters = data?.routes?.car?.distance?.value ?? 0;
-        const km = meters / 1000;
-
-        jd.totalKm += km;
-        jd.lastLat = String(lat);
-        jd.lastLng = String(lng);
-
-        return res.json({ success: true, data: { journeyId, addedKm: km, totalKm: jd.totalKm } });
+      // Validate dealer exists in your DB
+      const [dealerRow] = await db.select().from(dealers).where(eq(dealers.id, dealerId)).limit(1);
+      if (!dealerRow) {
+        return res.status(404).json({ error: "Dealer not found" });
       }
 
-      // ---------- START new journey ----------
+      // Optional: verify Radar geofence
+      const geofence = await radar.geofences.getGeofence(tag, dealerId);
+
+      // Create Radar trip
+      const trip = await radar.trips.createTrip({
+        externalId: `${userId}-${Date.now()}`,
+        userId: String(userId),
+        destinationGeofenceTag: tag,
+        destinationGeofenceExternalId: dealerId,
+        mode: "car",
+      });
+
+      // Insert into geo_tracking
       const [row] = await db.insert(geoTracking).values({
-        userId: asNum(userId),
-        latitude: toStrDec(lat, 7),
-        longitude: toStrDec(lng, 7),
-        recordedAt: now,
-        checkInTime: now,
-        appState: 'in_progress',
-        locationType: 'start',
-        createdAt: now,
-        updatedAt: now
+        userId,
+        latitude: lat,
+        longitude: lng,
+        journeyId: trip.trip._id,
+        destLat: geofence.geofence.geometry?.coordinates?.[1],
+        destLng: geofence.geofence.geometry?.coordinates?.[0],
+        checkInTime: new Date(),
+        appState: "started",
+        isActive: true,
       }).returning({ id: geoTracking.id });
 
-      // Create interval just as a safety (keeps journey alive),
-      // but real coords must come from client updates
-      const timer = setInterval(() => {
-        // noop, kept to show journey is active
-      }, 30_000);
-
-      journeyMap.set(row.id, { totalKm: 0, lastLat: String(lat), lastLng: String(lng), timer });
-
-      return res.json({ success: true, data: { journeyId: row.id } });
-    } catch (err) {
-      console.error('[geo/start] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to start/update journey' });
+      res.json({ success: true, data: { dbJourneyId: row.id, dealer: dealerRow, radarTrip: trip.trip } });
+    } catch (err: any) {
+      console.error("[geo/start] error", err.message);
+      res.status(500).json({ error: "Failed to start trip" });
     }
   });
 
-  app.post('/api/geo/finish', async (req: Request, res: Response) => {
+  /**
+   * 2. GET TRIP
+   * Return Radar trip + DB info + dealer info
+   */
+  app.get("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
     try {
-      const { userId, journeyId } = req.body ?? {};
-      if (!Number.isFinite(asNum(userId))) return res.status(400).json({ success: false, error: 'userId is required number' });
-      if (!journeyId) return res.status(400).json({ success: false, error: 'journeyId is required' });
+      const { journeyId } = req.params;
 
-      const jd = journeyMap.get(String(journeyId));
-      const totalKm = jd?.totalKm ?? 0;
+      const radarTrip = await radar.trips.getTrip(journeyId, true);
+      const [row] = await db.select().from(geoTracking).where(eq(geoTracking.journeyId, journeyId)).limit(1);
 
-      if (jd?.timer) clearInterval(jd.timer);
-      journeyMap.delete(String(journeyId));
+      let dealerRow = null;
+      if (radarTrip.trip.destinationGeofenceExternalId) {
+        const [dealer] = await db.select().from(dealers)
+          .where(eq(dealers.id, radarTrip.trip.destinationGeofenceExternalId))
+          .limit(1);
+        dealerRow = dealer || null;
+      }
 
-      const now = new Date();
+      res.json({ success: true, data: { radarTrip: radarTrip.trip, db: row, dealer: dealerRow } });
+    } catch (err: any) {
+      console.error("[geo/trips/:id] error", err.message);
+      res.status(500).json({ error: "Failed to fetch trip" });
+    }
+  });
+
+  /**
+   * 3. LIST ACTIVE TRIPS (Admin Dashboard)
+   * Includes Radar trip + DB info + Dealer name
+   */
+  app.get("/api/geo/trips", async (_req: Request, res: Response) => {
+    try {
+      const radarTrips = await radar.trips.listTrips({ status: "started", includeLocations: true });
+      const dbRows = await db.select().from(geoTracking).where(eq(geoTracking.isActive, true));
+
+      // Join with dealers for nicer admin payload
+      const enriched = await Promise.all(
+        radarTrips.trips.map(async (trip: any) => {
+          let dealerRow = null;
+          if (trip.destinationGeofenceExternalId) {
+            const [dealer] = await db.select().from(dealers)
+              .where(eq(dealers.id, trip.destinationGeofenceExternalId))
+              .limit(1);
+            dealerRow = dealer || null;
+          }
+          const dbRow = dbRows.find(r => r.journeyId === trip._id);
+          return { radarTrip: trip, db: dbRow, dealer: dealerRow };
+        })
+      );
+
+      res.json({ success: true, data: enriched });
+    } catch (err: any) {
+      console.error("[geo/trips] error", err.message);
+      res.status(500).json({ error: "Failed to list trips" });
+    }
+  });
+
+  /**
+   * 4. UPDATE TRIP (status / metadata)
+   */
+  app.patch("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
+    try {
+      const { journeyId } = req.params;
+      const radarUpdate = await radar.trips.updateTrip(journeyId, req.body);
 
       await db.update(geoTracking).set({
-        checkOutTime: now,
-        appState: 'stopped',
-        locationType: 'end',
-        updatedAt: now,
-        totalDistanceTravelled: toStrDec(totalKm, 3) // store km with 3 decimals
-      }).where(eq(geoTracking.id, String(journeyId)));
+        appState: req.body.status || "updated",
+        updatedAt: new Date(),
+      }).where(eq(geoTracking.journeyId, journeyId));
 
-      return res.json({ success: true, data: { journeyId, totalKm } });
-    } catch (err) {
-      console.error('[geo/finish] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to finish journey' });
+      res.json({ success: true, data: radarUpdate.trip });
+    } catch (err: any) {
+      console.error("[geo/trips/:id][PATCH] error", err.message);
+      res.status(500).json({ error: "Failed to update trip" });
     }
   });
 
-
-  // ====================== geo/list with CRUD ======================
-  // GET    /api/geo/list    -> READ: fetch trips (Radar, SECRET), filter by userId & time window. No DB writes.
-  // POST   /api/geo/list    -> CREATE summary: list trips (Radar, SECRET), sum distance, write totalDistanceTravelled (KM) to journeyId.
-  // PATCH  /api/geo/list    -> UPDATE: update allowed fields on geo_tracking for journeyId.
-  // DELETE /api/geo/list    -> DELETE: remove geo_tracking row (journeyId).
-  // ===============================================================
-
-  // ---------- READ (no DB writes) ----------
-  app.get('/api/geo/list', async (req: Request, res: Response) => {
+  /**
+   * 5. FINISH TRIP (delete in Radar + update DB)
+   */
+  app.post("/api/geo/finish/:journeyId", async (req: Request, res: Response) => {
     try {
-      const userId = req.query.userId as string;
-      const createdAfter = req.query.createdAfter as string | undefined;
-      const createdBefore = req.query.createdBefore as string | undefined;
-      const limit = Number(req.query.limit ?? 500);
+      const { journeyId } = req.params;
 
-      if (!Number.isFinite(Number(userId))) {
-        return res.status(400).json({ success: false, error: 'userId is required number' });
-      }
+      await radar.trips.deleteTrip(journeyId); // delete in Radar
 
-      const now = new Date();
-      const yyyyMmDd = now.toISOString().slice(0, 10);
-      const startIso = createdAfter || new Date(`${yyyyMmDd}T00:00:00.000Z`).toISOString();
-      const endIso = createdBefore || new Date(new Date(`${yyyyMmDd}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000).toISOString();
+      await db.update(geoTracking).set({
+        checkOutTime: new Date(),
+        appState: "completed",
+        isActive: false,
+      }).where(eq(geoTracking.journeyId, journeyId));
 
-      // Query DB
-      const rows = await db
-        .select({
-          id: geoTracking.id,
-          userId: geoTracking.userId,
-          meters: geoTracking.totalDistanceTravelled,
-          checkInTime: geoTracking.checkInTime,
-          checkOutTime: geoTracking.checkOutTime,
-          appState: geoTracking.appState,
-          updatedAt: geoTracking.updatedAt
-        })
-        .from(geoTracking)
-        .where(and(
-          eq(geoTracking.userId, Number(userId)),
-          gte(geoTracking.createdAt, new Date(startIso)),
-          lte(geoTracking.createdAt, new Date(endIso))
-        ))
-        .limit(Math.min(limit, 500));
-
-      // Aggregate
-      let totalMeters = 0;
-      const breakdown: Array<{ journeyId: string; status?: string; meters: number; startedAt?: string; updatedAt?: string; }> = [];
-
-      for (const r of rows) {
-        const meters = r.meters ? Number(r.meters) : 0;
-        totalMeters += meters;
-        breakdown.push({
-          journeyId: r.id,
-          status: r.appState,
-          meters,
-          startedAt: r.checkInTime ? new Date(r.checkInTime).toISOString() : undefined,
-          updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined
-        });
-      }
-
-      const totalKm = totalMeters / 1000;
-
-      return res.json({
-        success: true,
-        data: {
-          window: { createdAfter: startIso, createdBefore: endIso },
-          tripsCount: rows.length,
-          totalKm: Number(totalKm.toFixed(3)),
-          breakdown
-        }
-      });
-    } catch (err) {
-      console.error('[geo/list][GET] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to list journeys' });
+      res.json({ success: true, data: { journeyId, deleted: true } });
+    } catch (err: any) {
+      console.error("[geo/finish] error", err.message);
+      res.status(500).json({ error: "Failed to finish trip" });
     }
   });
 
-
-  // ---------- CREATE summary (list + sum + WRITE to DB) ----------
-  // ---------- CREATE/AGGREGATE & SAVE DISTANCE ----------
-  app.post('/api/geo/list', async (req: Request, res: Response) => {
+  /**
+   * 6. GET TRIP ROUTE (distance + polyline)
+   */
+  app.get("/api/geo/trips/:journeyId/route", async (req: Request, res: Response) => {
     try {
-      const { userId, journeyId, createdAfter, createdBefore, limit = 500 } = req.body ?? {};
-      if (!Number.isFinite(asNum(userId))) {
-        return res.status(400).json({ success: false, error: 'userId is required number' });
-      }
-      if (!journeyId) {
-        return res.status(400).json({ success: false, error: 'journeyId is required' });
-      }
+      const { journeyId } = req.params;
+      const route = await radar.trips.getTripRoute(journeyId);
 
-      const now = new Date();
-      const yyyyMmDd = now.toISOString().slice(0, 10);
-      const startIso = createdAfter || new Date(`${yyyyMmDd}T00:00:00.000Z`).toISOString();
-      const endIso =
-        createdBefore ||
-        new Date(new Date(`${yyyyMmDd}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000).toISOString();
+      await db.update(geoTracking).set({
+        totalDistanceTravelled: (route.distance.value / 1000).toFixed(3),
+        updatedAt: new Date(),
+      }).where(eq(geoTracking.journeyId, journeyId));
 
-      // Query journeys from DB in that window
-      const rows = await db
-        .select({
-          id: geoTracking.id,
-          total: geoTracking.totalDistanceTravelled,
-          checkInTime: geoTracking.checkInTime,
-          checkOutTime: geoTracking.checkOutTime,
-          appState: geoTracking.appState,
-          updatedAt: geoTracking.updatedAt
-        })
-        .from(geoTracking)
-        .where(
-          and(
-            eq(geoTracking.userId, asNum(userId)),
-            gte(geoTracking.createdAt, new Date(startIso)),
-            lte(geoTracking.createdAt, new Date(endIso))
-          )
-        )
-        .limit(Math.min(Number(limit) || 500, 500));
-
-      let totalMeters = 0;
-      const breakdown: Array<{ journeyId: string; status?: string; meters: number; startedAt?: string; updatedAt?: string }> =
-        [];
-
-      for (const r of rows) {
-        const meters = r.total ? Number(r.total) * 1000 : 0; // convert km -> meters if you stored km
-        totalMeters += meters;
-        breakdown.push({
-          journeyId: r.id,
-          status: r.appState,
-          meters,
-          startedAt: r.checkInTime ? new Date(r.checkInTime).toISOString() : undefined,
-          updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined
-        });
-      }
-
-      const totalKm = totalMeters / 1000;
-
-      // Update the given journeyId’s totalDistance
-      await db
-        .update(geoTracking)
-        .set({
-          totalDistanceTravelled: totalKm.toFixed(3),
-          updatedAt: new Date()
-        })
-        .where(eq(geoTracking.id, String(journeyId)));
-
-      return res.json({
-        success: true,
-        data: {
-          journeyId,
-          window: { createdAfter: startIso, createdBefore: endIso },
-          tripsCount: rows.length,
-          totalKm: Number(totalKm.toFixed(3)),
-          breakdown
-        }
-      });
-    } catch (err) {
-      console.error('[geo/list][POST] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to aggregate and update DB' });
-    }
-  });
-
-  // ---------- UPDATE (PATCH) ----------
-  app.patch('/api/geo/list', async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.body ?? {};
-      if (!journeyId) {
-        return res.status(400).json({ success: false, error: 'journeyId is required' });
-      }
-
-      const {
-        totalDistanceTravelled,
-        checkInTime,
-        checkOutTime,
-        appState,
-        locationType,
-        siteName,
-        activityType,
-        latitude,
-        longitude,
-        accuracy,
-        speed,
-        heading,
-        altitude,
-        batteryLevel,
-        isCharging,
-        networkStatus,
-        ipAddress
-      } = req.body ?? {};
-
-      const patch: any = { updatedAt: new Date() };
-
-      if (totalDistanceTravelled != null)
-        patch.totalDistanceTravelled = Number(totalDistanceTravelled).toFixed(3);
-      if (checkInTime) patch.checkInTime = new Date(checkInTime);
-      if (checkOutTime) patch.checkOutTime = new Date(checkOutTime);
-      if (appState) patch.appState = String(appState).slice(0, 50);
-      if (locationType) patch.locationType = String(locationType).slice(0, 50);
-      if (siteName) patch.siteName = String(siteName).slice(0, 255);
-      if (activityType) patch.activityType = String(activityType).slice(0, 50);
-      if (latitude != null) patch.latitude = toStrDec(latitude, 7);
-      if (longitude != null) patch.longitude = toStrDec(longitude, 7);
-      if (accuracy != null) patch.accuracy = toStrDec(accuracy, 2);
-      if (speed != null) patch.speed = toStrDec(speed, 2);
-      if (heading != null) patch.heading = toStrDec(heading, 2);
-      if (altitude != null) patch.altitude = toStrDec(altitude, 2);
-      if (batteryLevel != null) patch.batteryLevel = toStrDec(batteryLevel, 2);
-      if (typeof isCharging === 'boolean') patch.isCharging = !!isCharging;
-      if (networkStatus) patch.networkStatus = String(networkStatus).slice(0, 50);
-      if (ipAddress) patch.ipAddress = String(ipAddress).slice(0, 45);
-
-      await db.update(geoTracking).set(patch).where(eq(geoTracking.id, String(journeyId)));
-
-      return res.json({ success: true, data: { journeyId, updated: Object.keys(patch) } });
-    } catch (err) {
-      console.error('[geo/list][PATCH] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to update geo_tracking' });
-    }
-  });
-
-  // ---------- DELETE ----------
-  app.delete('/api/geo/list', async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.body ?? {};
-      if (!journeyId) {
-        return res.status(400).json({ success: false, error: 'journeyId is required' });
-      }
-
-      await db.delete(geoTracking).where(eq(geoTracking.id, String(journeyId)));
-
-      return res.json({ success: true, data: { journeyId, deleted: true } });
-    } catch (err) {
-      console.error('[geo/list][DELETE] error', err);
-      return res.status(500).json({ success: false, error: 'Failed to delete geo_tracking row' });
+      res.json({ success: true, data: route });
+    } catch (err: any) {
+      console.error("[geo/trips/:id/route] error", err.message);
+      res.status(500).json({ error: "Failed to fetch trip route" });
     }
   });
 
