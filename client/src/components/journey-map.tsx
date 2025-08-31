@@ -1,4 +1,4 @@
-// src/components/ui/journey-map.tsx
+// src/components/journey-map.tsx
 import React, { useRef, useImperativeHandle, forwardRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import { Card } from "@/components/ui/card";
@@ -40,6 +40,7 @@ export interface JourneyMapRef {
   setView: (lat: number, lng: number, zoom?: number) => void;
   getZoom: () => number;
   setZoom: (zoom: number) => void;
+  getCurrentLocation: () => Promise<Location | null>;
 }
 
 const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
@@ -51,6 +52,7 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
   const mapRef = useRef<any>(null);
 
   // Expose map methods to parent
+  // UPDATE the useImperativeHandle to include getCurrentLocation:
   useImperativeHandle(ref, () => ({
     setView: (lat: number, lng: number, zoom = 13) => {
       if (mapRef.current) {
@@ -63,6 +65,33 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
     setZoom: (zoom: number) => {
       if (mapRef.current) {
         mapRef.current.setZoom(zoom);
+      }
+    },
+    // ADD THIS METHOD:
+    getCurrentLocation: async (): Promise<Location | null> => {
+      try {
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 60000
+          });
+        });
+
+        const location = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          address: 'Current Location'
+        };
+
+        if (mapRef.current) {
+          mapRef.current.setView([location.lat, location.lng], 15);
+        }
+
+        return location;
+      } catch (err) {
+        console.error('Location error:', err);
+        return null;
       }
     }
   }));
@@ -127,40 +156,48 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          
-          {/* Current Location Marker */}
-          {currentLocation && (
-            <Marker position={[currentLocation.lat, currentLocation.lng]} icon={userIcon}>
-              <Popup>
-                <div className="text-center p-1">
-                  <div className="text-blue-600 font-semibold text-sm">📍 Your Location</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+
+          {/* Current Location Marker - ADD NULL CHECKS */}
+          {currentLocation &&
+            currentLocation.lat !== undefined &&
+            currentLocation.lng !== undefined &&
+            !isNaN(currentLocation.lat) &&
+            !isNaN(currentLocation.lng) && (
+              <Marker position={[currentLocation.lat, currentLocation.lng]} icon={userIcon}>
+                <Popup>
+                  <div className="text-center p-1">
+                    <div className="text-blue-600 font-semibold text-sm">📍 Your Location</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {currentLocation.lat.toFixed(4)}, {currentLocation.lng.toFixed(4)}
+                    </div>
                   </div>
-                </div>
-              </Popup>
-            </Marker>
-          )}
-          
-          {/* Destination Marker */}
-          {selectedDealer && (
-            <Marker 
-              position={[selectedDealer.latitude, selectedDealer.longitude]} 
-              icon={dealerIcon}
-            >
-              <Popup>
-                <div className="text-center p-1">
-                  <div className="text-red-600 font-semibold text-sm">🏢 {selectedDealer.name}</div>
-                  <div className="text-xs text-gray-500 mt-1">{selectedDealer.address}</div>
-                </div>
-              </Popup>
-            </Marker>
-          )}
-          
+                </Popup>
+              </Marker>
+            )}
+
+          {/* Destination Marker - ADD NULL CHECKS */}
+          {selectedDealer &&
+            selectedDealer.latitude !== undefined &&
+            selectedDealer.longitude !== undefined &&
+            !isNaN(selectedDealer.latitude) &&
+            !isNaN(selectedDealer.longitude) && (
+              <Marker
+                position={[selectedDealer.latitude, selectedDealer.longitude]}
+                icon={dealerIcon}
+              >
+                <Popup>
+                  <div className="text-center p-1">
+                    <div className="text-red-600 font-semibold text-sm">🏢 {selectedDealer.name}</div>
+                    <div className="text-xs text-gray-500 mt-1">{selectedDealer.address}</div>
+                  </div>
+                </Popup>
+              </Marker>
+            )}
+
           {/* Route Polyline */}
           {routePolyline.length > 0 && (
-            <Polyline 
-              positions={routePolyline} 
+            <Polyline
+              positions={routePolyline}
               pathOptions={{
                 color: '#3B82F6',
                 weight: 4,
@@ -173,7 +210,7 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
 
         {/* Map Controls - Inside the map container */}
         <div className="absolute top-3 right-3 z-[1000] flex flex-col gap-2">
-          <Button 
+          <Button
             onClick={handleZoomIn}
             size="icon"
             variant="secondary"
@@ -181,7 +218,7 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
           >
             <Plus className="h-4 w-4" />
           </Button>
-          <Button 
+          <Button
             onClick={handleZoomOut}
             size="icon"
             variant="secondary"
@@ -190,7 +227,7 @@ const JourneyMap = forwardRef<JourneyMapRef, JourneyMapProps>(({
             <Minus className="h-4 w-4" />
           </Button>
           {currentLocation && (
-            <Button 
+            <Button
               onClick={handleLocate}
               size="icon"
               variant="secondary"

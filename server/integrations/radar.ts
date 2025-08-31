@@ -30,7 +30,7 @@ async function createTrip(data: {
   metadata?: Record<string, any>;
 }) {
   const res = await axios.post("https://api.radar.io/v1/trips", data, {
-    headers: { Authorization: `Bearer ${RADAR_PUBLISHABLE_KEY}` },
+    headers: { Authorization: `Bearer ${process.env.RADAR_SECRET_KEY}` },
   });
   return res.data;
 }
