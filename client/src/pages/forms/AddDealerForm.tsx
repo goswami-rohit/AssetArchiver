@@ -96,8 +96,8 @@ export default function AddDealerForm({
   const [brandSelling, setBrandSelling] = React.useState<string[]>([]);
   const [feedbacks, setFeedbacks] = React.useState("");
   const [remarks, setRemarks] = React.useState("");
+  const [isSubDealer, setIsSubDealer] = React.useState(false);
 
-  const requiresParent = React.useMemo(() => type.startsWith("Sub Dealer-"), [type]);
 
   // fetch parent dealers from backend
   React.useEffect(() => {
@@ -117,7 +117,7 @@ export default function AddDealerForm({
 
   const validate = (): string | null => {
     if (!type) return "Type is required.";
-    if (requiresParent && !parentDealerId) return "Select parent dealer.";
+    if (isSubDealer && !parentDealerId) return "Select parent dealer.";
     if (!name) return "Name is required.";
     if (!region) return "Region is required.";
     if (!area) return "Area is required.";
@@ -133,7 +133,7 @@ export default function AddDealerForm({
   const payload = React.useMemo(() => ({
     userId: userId ?? null,
     type,
-    parentDealerId: requiresParent ? parentDealerId || null : null,
+    parentDealerId: isSubDealer ? parentDealerId || null : null,
     name,
     region,
     area,
@@ -144,7 +144,7 @@ export default function AddDealerForm({
     brandSelling,
     feedbacks,
     remarks: remarks || null,
-  }), [userId, type, requiresParent, parentDealerId, name, region, area, phoneNo, address, totalPotential, bestPotential, brandSelling, feedbacks, remarks]);
+  }), [userId, type, isSubDealer, parentDealerId, name, region, area, phoneNo, address, totalPotential, bestPotential, brandSelling, feedbacks, remarks]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -161,6 +161,17 @@ export default function AddDealerForm({
           <X className="h-4 w-4" />
         </Button>
       </div>
+      {/* Dealer or Sub-Dealer toggle */}
+      <div className="flex items-center gap-2">
+        <input
+          id="isSubDealer"
+          type="checkbox"
+          checked={isSubDealer}
+          onChange={(e) => setIsSubDealer(e.target.checked)}
+          className="h-4 w-4"
+        />
+        <Label htmlFor="isSubDealer">Is Sub-Dealer?</Label>
+      </div>
 
       {/* Type */}
       <div className="grid gap-2">
@@ -174,7 +185,7 @@ export default function AddDealerForm({
       </div>
 
       {/* Parent Dealer */}
-      {requiresParent && (
+      {isSubDealer && (
         <div className="grid gap-2">
           <Label>Parent Dealer</Label>
           <Select value={parentDealerId} onValueChange={setParentDealerId}>
@@ -182,8 +193,8 @@ export default function AddDealerForm({
             <SelectContent className="z-[60]">
               {parentDealers.length
                 ? parentDealers.map(d => (
-                    <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                  ))
+                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                ))
                 : <div className="px-3 py-2 text-sm text-muted-foreground">No dealers available</div>}
             </SelectContent>
           </Select>
