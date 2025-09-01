@@ -18,15 +18,15 @@ type UserLite = {
 };
 
 type Props = {
-    /** logged-in user; used for both `userId` (assignee) and `createdById` */
     user?: UserLite | null;
+    dealers?: { id: string; name: string; address?: string }[];  // 👈 new prop
     onSubmitted?: (payload: any) => void;
     onCancel?: () => void;
 };
 
 const STATUS = ["planned", "active", "completed", "cancelled"] as const;
 
-export default function PJPForm({ user, onSubmitted, onCancel }: Props) {
+export default function PJPForm({ user, dealers, onSubmitted, onCancel }: Props) {
     const [planDate, setPlanDate] = React.useState<Date>(new Date());
     const [areaToBeVisited, setAreaToBeVisited] = React.useState("");
     const [description, setDescription] = React.useState("");
@@ -49,10 +49,9 @@ export default function PJPForm({ user, onSubmitted, onCancel }: Props) {
         if (err) return alert(err);
 
         const payload = {
-            // DB-aligned payload (you’ll POST this later)
-            userId: user!.id,          // assignee = self
-            createdById: user!.id,     // creator = self
-            planDate: planDate.toISOString().slice(0, 10), // yyyy-mm-dd
+            userId: user!.id,
+            createdById: user!.id,
+            planDate: planDate.toISOString().slice(0, 10),
             areaToBeVisited: areaToBeVisited.trim(),
             description: description.trim() || null,
             status,
@@ -107,13 +106,19 @@ export default function PJPForm({ user, onSubmitted, onCancel }: Props) {
 
             {/* Area */}
             <div className="grid gap-2">
-                <Label>Area to be visited</Label>
-                <Input
-                    placeholder="e.g., Beltola → Zoo Road → Dispur"
-                    value={areaToBeVisited}
-                    onChange={(e) => setAreaToBeVisited(e.target.value)}
-                    required
-                />
+                <Label>Destination Dealer</Label>
+                <Select value={areaToBeVisited} onValueChange={setAreaToBeVisited}>
+                    <SelectTrigger>
+                        <SelectValue placeholder="Select dealer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {(dealers || []).map((d) => (
+                            <SelectItem key={d.id} value={String(d.id)}>
+                                {d.name} {d.address ? `– ${d.address}` : ""}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
             </div>
 
             {/* Description (optional) */}

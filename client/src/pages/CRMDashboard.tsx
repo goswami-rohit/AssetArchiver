@@ -77,7 +77,7 @@ const useAPI = () => {
         ddpReports, leaveApplications, brands
       ] = await Promise.all([
         apiCall(`/api/daily-tasks/user/${user.id}`),
-        apiCall(`/api/pjp/user/${user.id}`),
+        apiCall(`/api/pjp/${user.id}`),
         apiCall(`/api/dealers/user/${user.id}`),
         apiCall(`/api/dvr/user/${user.id}?limit=20`),
         apiCall(`/api/sales-reports/user/${user.id}`),

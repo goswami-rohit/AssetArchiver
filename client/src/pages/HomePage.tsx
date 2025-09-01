@@ -645,7 +645,7 @@ const useAPIActions = () => {
       ] = await Promise.allSettled([
         apiCall(`/api/user/${userId}`),
         apiCall(`/api/daily-tasks/user/${userId}`),
-        apiCall(`/api/pjp/user/${userId}`),
+        apiCall(`/api/pjp/${userId}`),
         apiCall(`/api/dealers/user/${userId}`),
         apiCall(`/api/dvr/user/${userId}?limit=20`),
         apiCall(`/api/tvr/user/${userId}`),
