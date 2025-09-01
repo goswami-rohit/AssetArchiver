@@ -215,7 +215,7 @@ export default function CRMDashboard() {
             exit={{ opacity: 0, scale: 0.95 }}
           >
             <JourneyTracker
-              userId={user?.id || 1}
+              userId={user.id}
               onBack={() => setCurrentPage("home")}
               onJourneyEnd={() => {
                 fetchAllData();

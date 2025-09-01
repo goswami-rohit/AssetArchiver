@@ -1,8 +1,8 @@
-// src/pages/JourneyTracker.tsx - SIMPLIFIED with contained map
+// src/pages/JourneyTracker.tsx - FIXED to use global user
 import React, { useState, useEffect, useRef } from 'react';
+import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
 
-// Import the modern UI components
 import { 
   ModernJourneyHeader,
   ModernTripPlanningCard,
@@ -10,11 +10,6 @@ import {
   ModernCompletedTripCard,
   ModernMessageCard
 } from '@/components/ReusableUI';
-
-interface JourneyTrackerProps {
-  userId: number;
-  onBack?: () => void;
-}
 
 interface Dealer {
   id: string;
@@ -37,8 +32,11 @@ interface TripData {
   radarTrip: any;
 }
 
-export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) {
-  // State management (same as before)
+export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
+  // 👇 global user from Zustand
+  const { user } = useAppStore();
+  const userId = user?.id;
+
   const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
   const [selectedDealer, setSelectedDealer] = useState<Dealer | null>(null);
   const [dealers, setDealers] = useState<Dealer[]>([]);
@@ -51,27 +49,25 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
   const [success, setSuccess] = useState('');
   const [showDestinationChange, setShowDestinationChange] = useState(false);
   const [routePolyline, setRoutePolyline] = useState<[number, number][]>([]);
-  
+
   const mapRef = useRef<JourneyMapRef>(null);
   const trackingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // All your existing functions remain the same...
-  // Fetch dealers
+  // Fetch dealers only when userId is ready
   useEffect(() => {
+    if (!userId) return;
     const fetchDealers = async () => {
       try {
         const response = await fetch(`/api/dealers/user/${userId}`);
-
         const data = await response.json();
-        if (data.success) {
-          setDealers(data.data || []);
-        }
-      } catch (err) {
+        if (data.success) setDealers(data.data || []);
+      } catch {
         setError('Failed to load dealers');
       }
     };
     fetchDealers();
-  }, []);
+  }, [userId]);
+
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -92,7 +88,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
       };
 
       setCurrentLocation(location);
-      
+
       if (mapRef.current) {
         mapRef.current.setView(location.lat, location.lng, 15);
       }
@@ -162,10 +158,10 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
         // Fetch updated trip data
         const response = await fetch(`/api/geo/trips/${journeyId}`);
         const data = await response.json();
-        
+
         if (data.success) {
           const trip = data.data.radarTrip;
-          
+
           if (trip.distance && trip.duration) {
             setDistance(trip.distance.value || 0);
             setDuration(trip.duration.value || 0);
@@ -204,8 +200,8 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
         const newDealer = dealers.find(d => d.id === newDealerId);
         if (newDealer) {
           setSelectedDealer(newDealer);
-          setActiveTripData(prev => prev ? { 
-            ...prev, 
+          setActiveTripData(prev => prev ? {
+            ...prev,
             dealer: newDealer,
             radarTrip: data.data
           } : null);
@@ -234,7 +230,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
       if (data.success) {
         setTripStatus('completed');
         setSuccess('Journey completed! 🎉');
-        
+
         if (trackingIntervalRef.current) {
           clearInterval(trackingIntervalRef.current);
           trackingIntervalRef.current = null;
@@ -272,7 +268,7 @@ export default function JourneyTracker({ userId, onBack }: JourneyTrackerProps) 
   // Initialize
   useEffect(() => {
     getCurrentLocation();
-    
+
     return () => {
       if (trackingIntervalRef.current) {
         clearInterval(trackingIntervalRef.current);
