@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
+import Radar from "radar-sdk-js";
 
 
-import { 
+import {
   ModernJourneyHeader,
   ModernTripPlanningCard,
   ModernActiveTripCard,
@@ -32,6 +33,21 @@ interface TripData {
   dealer: Dealer;
   radarTrip: any;
 }
+
+// Radar types (to avoid TS confusing with window.Location)
+interface RadarLocation {
+  coordinates: [number, number];
+  address?: {
+    formattedAddress?: string;
+  };
+}
+
+interface RadarTrackResponse {
+  location?: RadarLocation;
+  user?: any;
+  events?: any[];
+}
+
 
 export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   // 👇 global user from Zustand
@@ -69,23 +85,32 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     fetchDealers();
   }, [userId]);
 
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      // Use your publishable key in frontend
+      Radar.initialize(import.meta.env.VITE_RADAR_PUBLISHABLE_KEY as string);
+      Radar.setUserId(String(userId));
+    } catch (err) {
+      console.error("Radar init failed:", err);
+    }
+  }, [userId]);
+
 
   // Get current location
   const getCurrentLocation = async () => {
     setIsLoadingLocation(true);
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 60000
-        });
-      });
+      const result = (await Radar.trackOnce()) as RadarTrackResponse;
+
+      if (!result.location) {
+        throw new Error("No location returned from Radar");
+      }
 
       const location = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        address: 'Current Location'
+        lat: result.location.coordinates[1],
+        lng: result.location.coordinates[0],
+        address: result.location.address?.formattedAddress || "Current Location",
       };
 
       setCurrentLocation(location);
@@ -94,7 +119,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         mapRef.current.setView(location.lat, location.lng, 15);
       }
     } catch (err) {
-      setError('Unable to get location. Please enable GPS.');
+      setError("Unable to get location. Please enable GPS.");
     } finally {
       setIsLoadingLocation(false);
     }
@@ -142,16 +167,12 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const startLocationTracking = (journeyId: string) => {
     trackingIntervalRef.current = setInterval(async () => {
       try {
-        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 5000
-          });
-        });
+        const result = (await Radar.trackOnce()) as RadarTrackResponse;
+        if (!result.location) return;
 
         const newLocation = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude
+          lat: result.location.coordinates[1],
+          lng: result.location.coordinates[0],
         };
 
         setCurrentLocation(newLocation);
@@ -171,16 +192,18 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           if (trip.locations && trip.locations.length > 0) {
             const polylinePoints = trip.locations.map((loc: any) => [
               loc.coordinates[1],
-              loc.coordinates[0]
+              loc.coordinates[0],
             ]);
             setRoutePolyline(polylinePoints);
           }
         }
       } catch (err) {
-        console.error('Tracking error:', err);
+        console.error("Tracking error:", err);
       }
     }, 27000);
   };
+
+
 
   // Change destination
   const changeDestination = async (newDealerId: string) => {

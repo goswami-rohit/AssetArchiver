@@ -1,31 +1,24 @@
 // src/integrations/radar.ts
 import axios from "axios";
 
-// Backend key (safe to use in server-side context)
 const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY!;
-
-// Publishable key (browser only)
-const RADAR_PUBLISHABLE_KEY = process.env.RADAR_PUBLISHABLE_KEY!;
-
-// Lazy-loaded Radar SDK (so Node won’t crash)
-let Radar: any = null;
-if (typeof window !== "undefined") {
-  import("radar-sdk-js")
-    .then((mod) => {
-      Radar = mod.default || mod;
-      if (RADAR_PUBLISHABLE_KEY) {
-        Radar.initialize(RADAR_PUBLISHABLE_KEY);
-      }
-    })
-    .catch((err) => {
-      console.error("Failed to load radar-sdk-js in browser:", err);
-    });
+if (!RADAR_SECRET_KEY) {
+  throw new Error("RADAR_SECRET_KEY is missing in environment variables");
 }
 
 /**
- * BACKEND API FUNCTIONS (axios + secret key)
+ * BACKEND API FUNCTIONS (REST, using secret key)
  */
-async function createTrip(data: any) {
+async function createTrip(data: {
+  externalId: string;
+  destinationGeofenceTag?: string;
+  destinationGeofenceExternalId?: string;
+  userId?: string;
+  mode?: "foot" | "bike" | "car";
+  approachingThreshold?: number;
+  scheduledArrivalAt?: string;
+  metadata?: Record<string, any>;
+}) {
   const res = await axios.post("https://api.radar.io/v1/trips", data, {
     headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
   });
@@ -47,71 +40,70 @@ async function deleteTrip(idOrExternalId: string) {
   return res.data;
 }
 
-async function updateTrip(idOrExternalId: string, data: any) {
+async function updateTrip(
+  idOrExternalId: string,
+  data: {
+    status?:
+      | "pending"
+      | "started"
+      | "approaching"
+      | "arrived"
+      | "completed"
+      | "canceled"
+      | string; // allow custom appState strings
+    mode?: "foot" | "bike" | "car";
+    destinationGeofenceTag?: string;
+    destinationGeofenceExternalId?: string;
+    approachingThreshold?: number;
+    scheduledArrivalAt?: string;
+    metadata?: Record<string, any>;
+  }
+) {
   const res = await axios.patch(
     `https://api.radar.io/v1/trips/${idOrExternalId}/update`,
     data,
-    { headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` } }
+    {
+      headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+    }
   );
   return res.data;
 }
 
-/**
- * FRONTEND WEB SDK FUNCTIONS (wrapped in runtime checks)
- */
-export const initializeRadar = () => {
-  if (Radar) Radar.initialize(RADAR_PUBLISHABLE_KEY);
-};
+async function listTrips(params: { status?: string; includeLocations?: boolean }) {
+  const res = await axios.get("https://api.radar.io/v1/trips", {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+    params,
+  });
+  return res.data;
+}
 
-export const setUserId = (userId: string) => {
-  if (Radar) Radar.setUserId(userId);
-};
+async function getTripRoute(idOrExternalId: string) {
+  const res = await axios.get(`https://api.radar.io/v1/trips/${idOrExternalId}/route`, {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+  });
+  return res.data;
+}
 
-export const trackLocationOnce = async () => {
-  if (!Radar) throw new Error("Radar SDK not available (Node env?)");
-  const result = await Radar.trackOnce();
-  return {
-    latitude: result.location.coordinates[1],
-    longitude: result.location.coordinates[0],
-    location: result.location,
-    user: result.user,
-    events: result.events,
-  };
-};
-
-export const startLocationTracking = (
-  onLocationUpdate: (coords: { latitude: number; longitude: number }) => void
-) => {
-  const trackingInterval = setInterval(async () => {
-    try {
-      const { latitude, longitude } = await trackLocationOnce();
-      onLocationUpdate({ latitude, longitude });
-    } catch (error) {
-      console.error("Tracking error:", error);
-    }
-  }, 30000);
-  return trackingInterval;
-};
-
-export const stopLocationTracking = (intervalId: NodeJS.Timeout) => {
-  clearInterval(intervalId);
-};
+async function getGeofence(tag: string, externalId: string) {
+  const res = await axios.get(`https://api.radar.io/v1/geofences/${tag}/${externalId}`, {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+  });
+  return res.data;
+}
 
 /**
- * COMPLETE EXPORT
+ * EXPORT (backend-only)
  */
 export const radar = {
-  initialize: initializeRadar,
   trips: {
     createTrip,
     getTrip,
     deleteTrip,
     updateTrip,
+    listTrips,
+    getTripRoute,
   },
-  location: {
-    setUserId,
-    trackOnce: trackLocationOnce,
-    startTracking: startLocationTracking,
-    stopTracking: stopLocationTracking,
+  geofences: {
+    getGeofence,
   },
 };

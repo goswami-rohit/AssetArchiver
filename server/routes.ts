@@ -1293,257 +1293,254 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ success: false, error: 'Punch out failed' });
     }
   });
-  /**
-  * 1. START TRIP
-  */
-  app.post("/api/geo/start", async (req: Request, res: Response) => {
+/**
+ * 1. START TRIP
+ */
+app.post("/api/geo/start", async (req: Request, res: Response) => {
+  try {
+    const { userId, dealerId, lat, lng } = req.body;
+    if (!userId || !dealerId || !lat || !lng) {
+      return res.status(400).json({ error: "userId, dealerId, lat, lng required" });
+    }
+
+    const tag = "dealer";
+
+    // Validate dealer exists in your DB
+    const [dealerRow] = await db.select().from(dealers).where(eq(dealers.id, dealerId)).limit(1);
+    if (!dealerRow) {
+      return res.status(404).json({ error: "Dealer not found" });
+    }
+
+    // Optional: verify Radar geofence
+    let destLat: string | null = null;
+    let destLng: string | null = null;
     try {
-      const { userId, dealerId, lat, lng } = req.body;
-      if (!userId || !dealerId || !lat || !lng) {
-        return res.status(400).json({ error: "userId, dealerId, lat, lng required" });
-      }
-
-      const tag = "dealer";
-
-      // Validate dealer exists in your DB
-      const [dealerRow] = await db.select().from(dealers).where(eq(dealers.id, dealerId)).limit(1);
-      if (!dealerRow) {
-        return res.status(404).json({ error: "Dealer not found" });
-      }
-
-      // Optional: verify Radar geofence
       const geofence = await radar.geofences.getGeofence(tag, dealerId);
+      destLat = geofence?.geofence?.geometry?.coordinates?.[1]?.toString() ?? null;
+      destLng = geofence?.geofence?.geometry?.coordinates?.[0]?.toString() ?? null;
+    } catch {
+      console.warn("[geo/start] geofence lookup failed");
+    }
 
-      // Create Radar trip using new integration
-      const trip = await radar.trips.createTrip({
-        externalId: `${userId}-${Date.now()}`,
-        userId: String(userId),
-        destinationGeofenceTag: tag,
-        destinationGeofenceExternalId: dealerId,
-        mode: "car",
-      });
+    // Create Radar trip
+    const trip = await radar.trips.createTrip({
+      externalId: `${userId}-${Date.now()}`,
+      userId: String(userId),
+      destinationGeofenceTag: tag,
+      destinationGeofenceExternalId: dealerId,
+      mode: "car",
+    });
 
-      // Insert into geo_tracking
-      const [row] = await db.insert(geoTracking).values({
-        userId,
-        latitude: lat,
-        longitude: lng,
-        journeyId: trip.trip._id,
-        destLat: geofence.geofence.geometry?.coordinates?.[1],
-        destLng: geofence.geofence.geometry?.coordinates?.[0],
-        checkInTime: new Date(),
-        appState: "started",
-        isActive: true,
-      }).returning({ id: geoTracking.id });
+    // Insert into geo_tracking
+    const [row] = await db.insert(geoTracking).values({
+      userId,
+      latitude: lat,
+      longitude: lng,
+      journeyId: trip.trip._id,
+      destLat,
+      destLng,
+      checkInTime: new Date(),
+      appState: "started",
+      isActive: true,
+    }).returning({ id: geoTracking.id });
 
-      res.json({
-        success: true,
-        data: {
-          dbJourneyId: row.id,
-          dealer: dealerRow,
-          radarTrip: trip.trip,
-          // Return tracking instructions for frontend
-          trackingInstructions: {
-            message: "Trip started! Keep this tab open for location tracking.",
-            intervalSeconds: 30
-          }
+    res.json({
+      success: true,
+      data: {
+        dbJourneyId: row.id,
+        dealer: dealerRow,
+        radarTrip: trip.trip,
+        trackingInstructions: {
+          message: "Trip started! Keep this tab open for location tracking.",
+          intervalSeconds: 30,
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error("[geo/start] error", err.message);
+    res.status(500).json({ error: "Failed to start trip" });
+  }
+});
+
+/**
+ * 2. GET TRIP (with location updates)
+ */
+app.get("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
+
+    const radarTrip = await radar.trips.getTrip(journeyId, true);
+    const [row] = await db.select().from(geoTracking).where(eq(geoTracking.journeyId, journeyId)).limit(1);
+
+    let dealerRow = null;
+    if (radarTrip.trip.destinationGeofenceExternalId) {
+      const [dealer] = await db.select().from(dealers)
+        .where(eq(dealers.id, radarTrip.trip.destinationGeofenceExternalId))
+        .limit(1);
+      dealerRow = dealer || null;
+    }
+
+    const lastLoc = radarTrip.trip.locations?.at(-1);
+    const currentLocation = lastLoc
+      ? {
+          latitude: lastLoc.coordinates[1],
+          longitude: lastLoc.coordinates[0],
+          timestamp: lastLoc.timestamp,
         }
-      });
-    } catch (err: any) {
-      console.error("[geo/start] error", err.message);
-      res.status(500).json({ error: "Failed to start trip" });
-    }
-  });
+      : null;
 
-  /**
-   * 2. GET TRIP (with location updates)
-   */
-  app.get("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.params;
+    const locationData = {
+      currentLocation,
+      allLocations: radarTrip.trip.locations?.map((loc: any) => ({
+        latitude: loc.coordinates[1],
+        longitude: loc.coordinates[0],
+        timestamp: loc.timestamp,
+      })) || [],
+      eta: radarTrip.trip.eta,
+      status: radarTrip.trip.status,
+    };
 
-      // Get trip with locations using new integration
-      const radarTrip = await radar.trips.getTrip(journeyId, true);
-      const [row] = await db.select().from(geoTracking).where(eq(geoTracking.journeyId, journeyId)).limit(1);
+    res.json({
+      success: true,
+      data: {
+        radarTrip: radarTrip.trip,
+        db: row,
+        dealer: dealerRow,
+        locationData,
+      },
+    });
+  } catch (err: any) {
+    console.error("[geo/trips/:id] error", err.message);
+    res.status(500).json({ error: "Failed to fetch trip" });
+  }
+});
 
-      let dealerRow = null;
-      if (radarTrip.trip.destinationGeofenceExternalId) {
-        const [dealer] = await db.select().from(dealers)
-          .where(eq(dealers.id, radarTrip.trip.destinationGeofenceExternalId))
-          .limit(1);
-        dealerRow = dealer || null;
-      }
+/**
+ * 3. LIST ACTIVE TRIPS
+ */
+app.get("/api/geo/trips", async (_req: Request, res: Response) => {
+  try {
+    const radarTrips = await radar.trips.listTrips({
+      status: "started",
+      includeLocations: true,
+    });
 
-      // Extract location data for map updates
-      const locationData = {
-        currentLocation: radarTrip.trip.locations?.length > 0
-          ? {
-            latitude: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].coordinates[1],
-            longitude: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].coordinates[0],
-            timestamp: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].timestamp
-          }
-          : null,
-        allLocations: radarTrip.trip.locations?.map((loc: any) => ({
-          latitude: loc.coordinates[1],
-          longitude: loc.coordinates[0],
-          timestamp: loc.timestamp
-        })) || [],
-        eta: radarTrip.trip.eta,
-        status: radarTrip.trip.status
-      };
+    const dbRows = await db.select().from(geoTracking).where(eq(geoTracking.isActive, true));
 
-      res.json({
-        success: true,
-        data: {
-          radarTrip: radarTrip.trip,
-          db: row,
-          dealer: dealerRow,
-          locationData
+    const enriched = await Promise.all(
+      radarTrips.trips.map(async (trip: any) => {
+        let dealerRow = null;
+        if (trip.destinationGeofenceExternalId) {
+          const [dealer] = await db.select().from(dealers)
+            .where(eq(dealers.id, trip.destinationGeofenceExternalId))
+            .limit(1);
+          dealerRow = dealer || null;
         }
-      });
-    } catch (err: any) {
-      console.error("[geo/trips/:id] error", err.message);
-      res.status(500).json({ error: "Failed to fetch trip" });
-    }
-  });
+        const dbRow = dbRows.find((r) => r.journeyId === trip._id);
 
-  /**
-   * 3. LIST ACTIVE TRIPS (Admin Dashboard)
-   */
-  app.get("/api/geo/trips", async (_req: Request, res: Response) => {
-    try {
-      // Use new integration to list trips
-      const radarTrips = await radar.trips.listTrips({
-        status: "started",
-        includeLocations: true
-      });
+        const lastLoc = trip.locations?.at(-1);
+        const locationSummary = {
+          totalLocations: trip.locations?.length || 0,
+          lastUpdate: lastLoc?.timestamp || null,
+          currentStatus: trip.status,
+        };
 
-      const dbRows = await db.select().from(geoTracking).where(eq(geoTracking.isActive, true));
+        return { radarTrip: trip, db: dbRow, dealer: dealerRow, locationSummary };
+      })
+    );
 
-      // Join with dealers for admin dashboard
-      const enriched = await Promise.all(
-        radarTrips.trips.map(async (trip: any) => {
-          let dealerRow = null;
-          if (trip.destinationGeofenceExternalId) {
-            const [dealer] = await db.select().from(dealers)
-              .where(eq(dealers.id, trip.destinationGeofenceExternalId))
-              .limit(1);
-            dealerRow = dealer || null;
-          }
-          const dbRow = dbRows.find(r => r.journeyId === trip._id);
+    res.json({ success: true, data: enriched });
+  } catch (err: any) {
+    console.error("[geo/trips] error", err.message);
+    res.status(500).json({ error: "Failed to list trips" });
+  }
+});
 
-          // Add location summary for admin view
-          const locationSummary = {
-            totalLocations: trip.locations?.length || 0,
-            lastUpdate: trip.locations?.length > 0
-              ? trip.locations[trip.locations.length - 1].timestamp
-              : null,
-            currentStatus: trip.status
-          };
+/**
+ * 4. UPDATE TRIP
+ */
+app.patch("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
 
-          return {
-            radarTrip: trip,
-            db: dbRow,
-            dealer: dealerRow,
-            locationSummary
-          };
-        })
-      );
+    const radarUpdate = await radar.trips.updateTrip(journeyId, req.body);
 
-      res.json({ success: true, data: enriched });
-    } catch (err: any) {
-      console.error("[geo/trips] error", err.message);
-      res.status(500).json({ error: "Failed to list trips" });
-    }
-  });
+    await db.update(geoTracking).set({
+      appState: req.body.status || "updated",
+      updatedAt: new Date(),
+    }).where(eq(geoTracking.journeyId, journeyId));
 
-  /**
-   * 4. UPDATE TRIP (status / metadata)
-   */
-  app.patch("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.params;
+    res.json({ success: true, data: radarUpdate.trip });
+  } catch (err: any) {
+    console.error("[geo/trips/:id][PATCH] error", err.message);
+    res.status(500).json({ error: "Failed to update trip" });
+  }
+});
 
-      // Use new integration to update trip
-      const radarUpdate = await radar.trips.updateTrip(journeyId, req.body);
+/**
+ * 5. FINISH TRIP
+ */
+app.post("/api/geo/finish/:journeyId", async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
 
-      await db.update(geoTracking).set({
-        appState: req.body.status || "updated",
-        updatedAt: new Date(),
-      }).where(eq(geoTracking.journeyId, journeyId));
+    const finalTrip = await radar.trips.getTrip(journeyId, true);
 
-      res.json({ success: true, data: radarUpdate.trip });
-    } catch (err: any) {
-      console.error("[geo/trips/:id][PATCH] error", err.message);
-      res.status(500).json({ error: "Failed to update trip" });
-    }
-  });
+    const totalLocations = finalTrip.trip.locations?.length || 0;
+    const finalDistance =
+      finalTrip.trip.distance?.value ??
+      finalTrip.trip.eta?.distance ??
+      0;
 
-  /**
-   * 5. FINISH TRIP (delete in Radar + update DB + get final stats)
-   */
-  app.post("/api/geo/finish/:journeyId", async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.params;
+    await radar.trips.deleteTrip(journeyId);
 
-      // Get final trip data before deletion
-      const finalTrip = await radar.trips.getTrip(journeyId, true);
+    await db.update(geoTracking).set({
+      checkOutTime: new Date(),
+      appState: "completed",
+      isActive: false,
+      totalDistanceTravelled: (finalDistance / 1000).toFixed(3), // string
+    }).where(eq(geoTracking.journeyId, journeyId));
 
-      // Calculate final stats
-      const totalLocations = finalTrip.trip.locations?.length || 0;
-      const finalDistance = finalTrip.trip.eta?.distance || 0;
+    res.json({
+      success: true,
+      data: {
+        journeyId,
+        deleted: true,
+        finalStats: {
+          totalLocations,
+          finalDistance: (finalDistance / 1000).toFixed(3) + " km",
+          duration: finalTrip.trip.eta?.duration || 0,
+        },
+      },
+    });
+  } catch (err: any) {
+    console.error("[geo/finish] error", err.message);
+    res.status(500).json({ error: "Failed to finish trip" });
+  }
+});
 
-      // Delete trip in Radar using new integration
-      await radar.trips.deleteTrip(journeyId);
+/**
+ * 6. GET TRIP ROUTE
+ */
+app.get("/api/geo/trips/:journeyId/route", async (req: Request, res: Response) => {
+  try {
+    const { journeyId } = req.params;
 
-      // Update DB with final stats
-      await db.update(geoTracking).set({
-        checkOutTime: new Date(),
-        appState: "completed",
-        isActive: false,
-        totalDistanceTravelled: (finalDistance / 1000).toFixed(3), // Convert to km
-      }).where(eq(geoTracking.journeyId, journeyId));
+    const route = await radar.trips.getTripRoute(journeyId);
 
-      res.json({
-        success: true,
-        data: {
-          journeyId,
-          deleted: true,
-          finalStats: {
-            totalLocations,
-            finalDistance: (finalDistance / 1000).toFixed(3) + " km",
-            duration: finalTrip.trip.eta?.duration || 0
-          }
-        }
-      });
-    } catch (err: any) {
-      console.error("[geo/finish] error", err.message);
-      res.status(500).json({ error: "Failed to finish trip" });
-    }
-  });
+    await db.update(geoTracking).set({
+      totalDistanceTravelled: (route.distance.value / 1000).toFixed(3), // string
+      updatedAt: new Date(),
+    }).where(eq(geoTracking.journeyId, journeyId));
 
-  /**
-   * 6. GET TRIP ROUTE (distance + polyline)
-   */
-  app.get("/api/geo/trips/:journeyId/route", async (req: Request, res: Response) => {
-    try {
-      const { journeyId } = req.params;
+    res.json({ success: true, data: route });
+  } catch (err: any) {
+    console.error("[geo/trips/:id/route] error", err.message);
+    res.status(500).json({ error: "Failed to fetch trip route" });
+  }
+});
 
-      // Use new integration to get route
-      const route = await radar.trips.getTripRoute(journeyId);
 
-      // Update DB with distance
-      await db.update(geoTracking).set({
-        totalDistanceTravelled: (route.distance.value / 1000).toFixed(3),
-        updatedAt: new Date(),
-      }).where(eq(geoTracking.journeyId, journeyId));
-
-      res.json({ success: true, data: route });
-    } catch (err: any) {
-      console.error("[geo/trips/:id/route] error", err.message);
-      res.status(500).json({ error: "Failed to fetch trip route" });
-    }
-  });
   // ============================================
   // DASHBOARD STATS (with proper type handling)
   // ============================================
