@@ -13,13 +13,11 @@ import {
   Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem,
 } from "@/components/ui/command";
 import { Check, ChevronsUpDown, X } from "lucide-react";
-
 import { DEALER_TYPES, REGIONS, AREAS, BRANDS } from "@/components/ReusableUI";
-
 
 type DealerLite = { id: string; name: string };
 
-// add dealer form mutilselect
+// Multi-select component for brands
 function BrandsMultiSelect({
   value, onChange, placeholder = "Select brands",
 }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
@@ -31,7 +29,7 @@ function BrandsMultiSelect({
     <Popover modal={false} open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
-          type="button"                           // ✅ don’t submit the form
+          type="button"
           variant="outline"
           role="combobox"
           aria-expanded={open}
@@ -42,7 +40,7 @@ function BrandsMultiSelect({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]" // ✅ above dialog
+        className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]"
         align="start"
         sideOffset={8}
       >
@@ -56,7 +54,7 @@ function BrandsMultiSelect({
                 return (
                   <CommandItem
                     key={b}
-                    onSelect={() => toggle(b)}           // keep open for multi-pick
+                    onSelect={() => toggle(b)}
                     className="cursor-pointer"
                   >
                     <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
@@ -72,19 +70,17 @@ function BrandsMultiSelect({
   );
 }
 
-
 export default function AddDealerForm({
   userId,
-  onSubmitted,
   onCancel,
 }: {
   userId?: number;
-  onSubmitted?: (payload: any) => void;
   onCancel?: () => void;
 }) {
   const [type, setType] = React.useState<string>("");
   const [parentDealerId, setParentDealerId] = React.useState<string>("");
   const [parentDealers, setParentDealers] = React.useState<DealerLite[]>([]);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const [name, setName] = React.useState("");
   const [region, setRegion] = React.useState("");
@@ -97,24 +93,66 @@ export default function AddDealerForm({
   const [feedbacks, setFeedbacks] = React.useState("");
   const [remarks, setRemarks] = React.useState("");
   const [isSubDealer, setIsSubDealer] = React.useState(false);
+  const [latitude, setLatitude] = React.useState("");
+  const [longitude, setLongitude] = React.useState("");
+  const [formattedAddress, setFormattedAddress] = React.useState("");
 
-
-  // fetch parent dealers from backend
+  // Fetch parent dealers from backend
   React.useEffect(() => {
     async function fetchDealers() {
       try {
-        // TODO: replace `/api/dealers` with your real Express/Next route
-        const res = await fetch("/api/dealers");
+        const res = await fetch(`/api/dealers/user/${userId}`);
         if (!res.ok) throw new Error("Failed to fetch dealers");
         const data = await res.json();
-        setParentDealers(data); // expecting [{ id, name }, ...]
+        setParentDealers(data.data || []); // Use data.data from your API response
       } catch (err) {
         console.error("Error loading dealers:", err);
       }
     }
-    fetchDealers();
-  }, []);
+    if (userId) {
+      fetchDealers();
+    }
+  }, [userId]);
 
+  // Forward geocoding: address -> coords
+  async function forwardGeocode(address: string) {
+    try {
+      const res = await fetch(
+        `https://api.radar.io/v1/geocode/forward?query=${encodeURIComponent(address)}`,
+        { headers: { Authorization: "prj_live_pk_4762150b92e059b7c1855256d8b9cd8b79cfde46" } }
+      );
+      const data = await res.json();
+      if (data.addresses?.length) {
+        const addr = data.addresses[0];
+        setLatitude(String(addr.latitude));
+        setLongitude(String(addr.longitude));
+        setFormattedAddress(addr.formattedAddress);
+        setRegion(addr.state || "");
+        setArea(addr.city || addr.neighborhood || "");
+      }
+    } catch (err) {
+      console.error("Forward geocode failed:", err);
+    }
+  }
+
+  // Reverse geocoding: coords -> address
+  async function reverseGeocode(lat: string, lon: string) {
+    try {
+      const res = await fetch(
+        `https://api.radar.io/v1/geocode/reverse?coordinates=${lat},${lon}`,
+        { headers: { Authorization: "prj_live_pk_4762150b92e059b7c1855256d8b9cd8b79cfde46" } }
+      );
+      const data = await res.json();
+      if (data.addresses?.length) {
+        const addr = data.addresses[0];
+        setFormattedAddress(addr.formattedAddress);
+        setRegion(addr.state || "");
+        setArea(addr.city || addr.neighborhood || "");
+      }
+    } catch (err) {
+      console.error("Reverse geocode failed:", err);
+    }
+  }
   const validate = (): string | null => {
     if (!type) return "Type is required.";
     if (isSubDealer && !parentDealerId) return "Select parent dealer.";
@@ -122,37 +160,98 @@ export default function AddDealerForm({
     if (!region) return "Region is required.";
     if (!area) return "Area is required.";
     if (!phoneNo) return "Phone number is required.";
-    if (!address) return "Address is required.";
+    if (!address && !formattedAddress) return "Address is required."; // ← FIX THIS LINE
     if (!totalPotential || Number.isNaN(Number(totalPotential))) return "Total potential must be a number.";
     if (!bestPotential || Number.isNaN(Number(bestPotential))) return "Best potential must be a number.";
     if (!brandSelling.length) return "Select at least one brand.";
     if (!feedbacks) return "Feedbacks is required.";
+    if (!latitude || !longitude) return "Latitude and longitude are required for geofencing.";
     return null;
   };
-
-  const payload = React.useMemo(() => ({
-    userId: userId ?? null,
-    type,
-    parentDealerId: isSubDealer ? parentDealerId || null : null,
-    name,
-    region,
-    area,
-    phoneNo,
-    address,
-    totalPotential: Number(totalPotential),
-    bestPotential: Number(bestPotential),
-    brandSelling,
-    feedbacks,
-    remarks: remarks || null,
-  }), [userId, type, isSubDealer, parentDealerId, name, region, area, phoneNo, address, totalPotential, bestPotential, brandSelling, feedbacks, remarks]);
-
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const err = validate();
-    if (err) return alert(err);
-    onSubmitted?.(payload);
-  };
 
+    const err = validate();
+    if (err) {
+      alert(err);
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Build payload
+      let payload: any = {
+        userId: userId ?? null,
+        type,
+        parentDealerId: isSubDealer ? parentDealerId || null : null,
+        name,
+        region,
+        area,
+        phoneNo,
+        address: formattedAddress || address,
+        totalPotential,
+        bestPotential,
+        brandSelling,
+        feedbacks,
+        remarks: remarks || null,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+      };
+
+      // 🔥 Ensure we never send id/createdAt/updatedAt (remove if present)
+      delete payload.id;
+      delete payload.createdAt;
+      delete payload.updatedAt;
+
+      console.log("Sending payload:", payload);
+
+      const response = await fetch("/api/dealers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      console.log("Backend response:", result);
+
+      if (result.success) {
+        alert(`✅ Dealer created successfully! 
+Dealer ID: ${result.data.id}
+Geofence ID: ${result.geofenceRef?.id}
+Radius: ${result.geofenceRef?.radiusMeters}m`);
+
+        // Reset form
+        setType("");
+        setParentDealerId("");
+        setName("");
+        setRegion("");
+        setArea("");
+        setPhoneNo("");
+        setAddress("");
+        setTotalPotential("");
+        setBestPotential("");
+        setBrandSelling([]);
+        setFeedbacks("");
+        setRemarks("");
+        setLatitude("");
+        setLongitude("");
+        setFormattedAddress("");
+        setIsSubDealer(false);
+
+        onCancel?.();
+      } else {
+        alert(`❌ Error: ${result.error}`);
+        if (result.details) {
+          console.error("Validation details:", result.details);
+        }
+      }
+    } catch (error: any) {
+      alert(`❌ Failed to create dealer: ${error.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   return (
     <form className="space-y-4" onSubmit={submit}>
       <div className="flex items-center justify-between">
@@ -161,6 +260,7 @@ export default function AddDealerForm({
           <X className="h-4 w-4" />
         </Button>
       </div>
+
       {/* Dealer or Sub-Dealer toggle */}
       <div className="flex items-center gap-2">
         <input
@@ -201,9 +301,6 @@ export default function AddDealerForm({
         </div>
       )}
 
-      {/* Other fields... (same as before) */}
-      {/* Name, region, area, phone, address, potentials, brands, feedbacks, remarks */}
-
       <div className="grid gap-2">
         <Label>Dealer/Sub-Dealer Name</Label>
         <Input value={name} onChange={e => setName(e.target.value)} required />
@@ -215,27 +312,92 @@ export default function AddDealerForm({
           <Select value={region} onValueChange={setRegion}>
             <SelectTrigger><SelectValue placeholder="Select region" /></SelectTrigger>
             <SelectContent className="z-[60]">
-              {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
+              {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+            </SelectContent>
           </Select>
         </div>
         <div className="grid gap-2">
           <Label>Area</Label>
-          <Select value={area} onValueChange={setArea}>
-            <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
-            <SelectContent className="z-[60]">
-              {AREAS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
-          </Select>
+          <Input
+            placeholder="Type area / locality"
+            value={area}
+            onChange={e => setArea(e.target.value)}
+            required
+          />
         </div>
+      </div>
+
+      <div className="grid gap-2">
+        <Label>Address</Label>
+        <Textarea
+          rows={2}
+          value={formattedAddress || address}
+          onChange={e => setAddress(e.target.value)}
+          placeholder="Type dealer address"
+          required
+        />
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => forwardGeocode(address)}
+          >
+            Geocode Address
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="grid gap-2">
+          <Label>Latitude</Label>
+          <Input value={latitude} readOnly />
+        </div>
+        <div className="grid gap-2">
+          <Label>Longitude</Label>
+          <Input value={longitude} readOnly />
+        </div>
+      </div>
+
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={async () => {
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                  const lat = String(pos.coords.latitude);
+                  const lon = String(pos.coords.longitude);
+                  setLatitude(lat);
+                  setLongitude(lon);
+                  // Automatically reverse geocode to get address
+                  await reverseGeocode(lat, lon);
+                },
+                (err) => {
+                  alert("Failed to get location: " + err.message);
+                }
+              );
+            } else {
+              alert("Geolocation not supported in this browser.");
+            }
+          }}
+        >
+          Use My Location
+        </Button>
+
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => reverseGeocode(latitude, longitude)}
+          disabled={!latitude || !longitude}
+        >
+          Reverse Geocode
+        </Button>
       </div>
 
       <div className="grid gap-2">
         <Label>Phone No</Label>
         <Input inputMode="tel" value={phoneNo} onChange={e => setPhoneNo(e.target.value)} required />
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Address</Label>
-        <Textarea rows={2} value={address} onChange={e => setAddress(e.target.value)} required />
       </div>
 
       <div className="grid grid-cols-2 gap-2">
@@ -271,8 +433,12 @@ export default function AddDealerForm({
       </div>
 
       <div className="flex justify-end gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit">Save Dealer</Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Creating..." : "Save Dealer"}
+        </Button>
       </div>
     </form>
   );

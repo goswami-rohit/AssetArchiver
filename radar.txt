@@ -1,0 +1,191 @@
+// src/integrations/radar.ts
+import axios from "axios";
+import Radar from "radar-sdk-js";
+
+// Load both keys from env
+const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY!;
+const RADAR_PUBLISHABLE_KEY = process.env.RADAR_PUBLISHABLE_KEY!;
+
+// Initialize Radar Web SDK (call this once in your app)
+export const initializeRadar = () => {
+  Radar.initialize(RADAR_PUBLISHABLE_KEY);
+};
+
+/**
+ * BACKEND API FUNCTIONS (using secret key)
+ */
+
+async function createTrip(data: {
+  externalId: string;
+  destinationGeofenceTag?: string;
+  destinationGeofenceExternalId?: string;
+  userId?: string;
+  mode?: "foot" | "bike" | "car";
+  approachingThreshold?: number;
+  scheduledArrivalAt?: string;
+  metadata?: Record<string, any>;
+}) {
+  const res = await axios.post("https://api.radar.io/v1/trips", data, {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+  });
+  return res.data;
+}
+
+async function getTrip(idOrExternalId: string, includeLocations = true) {
+  const res = await axios.get(`https://api.radar.io/v1/trips/${idOrExternalId}`, {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+    params: { includeLocations },
+  });
+  return res.data;
+}
+
+async function deleteTrip(idOrExternalId: string) {
+  const res = await axios.delete(`https://api.radar.io/v1/trips/${idOrExternalId}`, {
+    headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` },
+  });
+  return res.data;
+}
+
+async function updateTrip(
+  idOrExternalId: string,
+  data: {
+    status: "pending" | "started" | "approaching" | "arrived" | "completed" | "canceled";
+    mode?: "foot" | "bike" | "car";
+    destinationGeofenceTag?: string;
+    destinationGeofenceExternalId?: string;
+    approachingThreshold?: number;
+    scheduledArrivalAt?: string;
+    metadata?: Record<string, any>;
+  }
+) {
+  const res = await axios.patch(
+    `https://api.radar.io/v1/trips/${idOrExternalId}/update`,
+    data,
+    {
+      headers: { Authorization: `Bearer ${RADAR_SECRET_KEY}` }, // Fixed: use secret key
+    }
+  );
+  return res.data;
+}
+
+/**
+ * FRONTEND WEB SDK FUNCTIONS
+ */
+
+// Set user ID for tracking
+export const setUserId = (userId: string) => {
+  Radar.setUserId(userId);
+};
+
+// Track location once and update Radar
+export const trackLocationOnce = async () => {
+  try {
+    const result = await Radar.trackOnce();
+    const { location, user, events } = result;
+    return {
+      latitude: location.coordinates[1], // Radar returns [lng, lat]
+      longitude: location.coordinates[0],
+      location,
+      user,
+      events
+    };
+  } catch (error) {
+    console.error('Location tracking error:', error);
+    throw error;
+  }
+};
+
+// Start continuous location tracking every 30 seconds
+export const startLocationTracking = (onLocationUpdate: (coords: { latitude: number; longitude: number }) => void) => {
+  const trackingInterval = setInterval(async () => {
+    try {
+      const result = await trackLocationOnce();
+      onLocationUpdate({
+        latitude: result.latitude,
+        longitude: result.longitude
+      });
+    } catch (error) {
+      console.error('Tracking error:', error);
+    }
+  }, 30000); // Every 30 seconds
+
+  return trackingInterval; // Return interval ID to clear later
+};
+
+// Stop location tracking
+export const stopLocationTracking = (intervalId: NodeJS.Timeout) => {
+  clearInterval(intervalId);
+};
+
+/**
+ * COMPLETE TRIP WORKFLOW
+ */
+
+export const tripWorkflow = {
+  // 1. Start a trip
+  async startTrip(tripData: {
+    externalId: string;
+    userId: string;
+    mode?: "foot" | "bike" | "car";
+    destinationGeofenceTag?: string;
+    destinationGeofenceExternalId?: string;
+  }) {
+    // Set user ID for Web SDK
+    setUserId(tripData.userId);
+    
+    // Create trip via backend
+    const trip = await createTrip(tripData);
+    
+    // Start location tracking
+    const trackingInterval = startLocationTracking((coords) => {
+      console.log('Location updated:', coords);
+      // You can update your Leaflet map here
+      // updateMapMarker(coords.latitude, coords.longitude);
+    });
+    
+    return { trip, trackingInterval };
+  },
+
+  // 2. Get trip updates (call every 30s to get latest data)
+  async getTripUpdates(externalId: string) {
+    return await getTrip(externalId, true); // Include locations
+  },
+
+  // 3. End trip
+  async endTrip(externalId: string, trackingInterval: NodeJS.Timeout) {
+    // Stop location tracking
+    stopLocationTracking(trackingInterval);
+    
+    // Delete trip
+    const result = await deleteTrip(externalId);
+    
+    return result;
+  }
+};
+
+/**
+ * Export everything you need
+ */
+export const radar = {
+  // Initialize
+  initialize: initializeRadar,
+  
+  // Trip management
+  trips: {
+    createTrip,
+    getTrip,
+    deleteTrip,
+    updateTrip,
+  },
+  
+  // Location tracking
+  location: {
+    setUserId,
+    trackOnce: trackLocationOnce,
+    startTracking: startLocationTracking,
+    stopTracking: stopLocationTracking,
+  },
+  
+  // Complete workflow
+  workflow: tripWorkflow,
+};

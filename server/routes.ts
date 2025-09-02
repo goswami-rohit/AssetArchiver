@@ -52,6 +52,7 @@ import { getDistance } from 'geolib';
 import * as turf from '@turf/turf';
 import { ChatMessage } from 'server/bot/aiService';
 import EnhancedRAGService from 'server/bot/aiService';
+import Radar from 'radar-sdk-js';
 import { telegramBot } from './bot/telegram';
 
 // Fix multer typing
@@ -1293,9 +1294,8 @@ export function setupWebRoutes(app: Express) {
     }
   });
   /**
-   * 1. START TRIP
-   * Dealer.id in your DB == Radar geofence externalId
-   */
+  * 1. START TRIP
+  */
   app.post("/api/geo/start", async (req: Request, res: Response) => {
     try {
       const { userId, dealerId, lat, lng } = req.body;
@@ -1314,7 +1314,7 @@ export function setupWebRoutes(app: Express) {
       // Optional: verify Radar geofence
       const geofence = await radar.geofences.getGeofence(tag, dealerId);
 
-      // Create Radar trip
+      // Create Radar trip using new integration
       const trip = await radar.trips.createTrip({
         externalId: `${userId}-${Date.now()}`,
         userId: String(userId),
@@ -1336,7 +1336,19 @@ export function setupWebRoutes(app: Express) {
         isActive: true,
       }).returning({ id: geoTracking.id });
 
-      res.json({ success: true, data: { dbJourneyId: row.id, dealer: dealerRow, radarTrip: trip.trip } });
+      res.json({
+        success: true,
+        data: {
+          dbJourneyId: row.id,
+          dealer: dealerRow,
+          radarTrip: trip.trip,
+          // Return tracking instructions for frontend
+          trackingInstructions: {
+            message: "Trip started! Keep this tab open for location tracking.",
+            intervalSeconds: 30
+          }
+        }
+      });
     } catch (err: any) {
       console.error("[geo/start] error", err.message);
       res.status(500).json({ error: "Failed to start trip" });
@@ -1344,13 +1356,13 @@ export function setupWebRoutes(app: Express) {
   });
 
   /**
-   * 2. GET TRIP
-   * Return Radar trip + DB info + dealer info
+   * 2. GET TRIP (with location updates)
    */
   app.get("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
     try {
       const { journeyId } = req.params;
 
+      // Get trip with locations using new integration
       const radarTrip = await radar.trips.getTrip(journeyId, true);
       const [row] = await db.select().from(geoTracking).where(eq(geoTracking.journeyId, journeyId)).limit(1);
 
@@ -1362,7 +1374,33 @@ export function setupWebRoutes(app: Express) {
         dealerRow = dealer || null;
       }
 
-      res.json({ success: true, data: { radarTrip: radarTrip.trip, db: row, dealer: dealerRow } });
+      // Extract location data for map updates
+      const locationData = {
+        currentLocation: radarTrip.trip.locations?.length > 0
+          ? {
+            latitude: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].coordinates[1],
+            longitude: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].coordinates[0],
+            timestamp: radarTrip.trip.locations[radarTrip.trip.locations.length - 1].timestamp
+          }
+          : null,
+        allLocations: radarTrip.trip.locations?.map((loc: any) => ({
+          latitude: loc.coordinates[1],
+          longitude: loc.coordinates[0],
+          timestamp: loc.timestamp
+        })) || [],
+        eta: radarTrip.trip.eta,
+        status: radarTrip.trip.status
+      };
+
+      res.json({
+        success: true,
+        data: {
+          radarTrip: radarTrip.trip,
+          db: row,
+          dealer: dealerRow,
+          locationData
+        }
+      });
     } catch (err: any) {
       console.error("[geo/trips/:id] error", err.message);
       res.status(500).json({ error: "Failed to fetch trip" });
@@ -1371,14 +1409,18 @@ export function setupWebRoutes(app: Express) {
 
   /**
    * 3. LIST ACTIVE TRIPS (Admin Dashboard)
-   * Includes Radar trip + DB info + Dealer name
    */
   app.get("/api/geo/trips", async (_req: Request, res: Response) => {
     try {
-      const radarTrips = await radar.trips.listTrips({ status: "started", includeLocations: true });
+      // Use new integration to list trips
+      const radarTrips = await radar.trips.listTrips({
+        status: "started",
+        includeLocations: true
+      });
+
       const dbRows = await db.select().from(geoTracking).where(eq(geoTracking.isActive, true));
 
-      // Join with dealers for nicer admin payload
+      // Join with dealers for admin dashboard
       const enriched = await Promise.all(
         radarTrips.trips.map(async (trip: any) => {
           let dealerRow = null;
@@ -1389,7 +1431,22 @@ export function setupWebRoutes(app: Express) {
             dealerRow = dealer || null;
           }
           const dbRow = dbRows.find(r => r.journeyId === trip._id);
-          return { radarTrip: trip, db: dbRow, dealer: dealerRow };
+
+          // Add location summary for admin view
+          const locationSummary = {
+            totalLocations: trip.locations?.length || 0,
+            lastUpdate: trip.locations?.length > 0
+              ? trip.locations[trip.locations.length - 1].timestamp
+              : null,
+            currentStatus: trip.status
+          };
+
+          return {
+            radarTrip: trip,
+            db: dbRow,
+            dealer: dealerRow,
+            locationSummary
+          };
         })
       );
 
@@ -1406,6 +1463,8 @@ export function setupWebRoutes(app: Express) {
   app.patch("/api/geo/trips/:journeyId", async (req: Request, res: Response) => {
     try {
       const { journeyId } = req.params;
+
+      // Use new integration to update trip
       const radarUpdate = await radar.trips.updateTrip(journeyId, req.body);
 
       await db.update(geoTracking).set({
@@ -1421,21 +1480,42 @@ export function setupWebRoutes(app: Express) {
   });
 
   /**
-   * 5. FINISH TRIP (delete in Radar + update DB)
+   * 5. FINISH TRIP (delete in Radar + update DB + get final stats)
    */
   app.post("/api/geo/finish/:journeyId", async (req: Request, res: Response) => {
     try {
       const { journeyId } = req.params;
 
-      await radar.trips.deleteTrip(journeyId); // delete in Radar
+      // Get final trip data before deletion
+      const finalTrip = await radar.trips.getTrip(journeyId, true);
 
+      // Calculate final stats
+      const totalLocations = finalTrip.trip.locations?.length || 0;
+      const finalDistance = finalTrip.trip.eta?.distance || 0;
+
+      // Delete trip in Radar using new integration
+      await radar.trips.deleteTrip(journeyId);
+
+      // Update DB with final stats
       await db.update(geoTracking).set({
         checkOutTime: new Date(),
         appState: "completed",
         isActive: false,
+        totalDistanceTravelled: (finalDistance / 1000).toFixed(3), // Convert to km
       }).where(eq(geoTracking.journeyId, journeyId));
 
-      res.json({ success: true, data: { journeyId, deleted: true } });
+      res.json({
+        success: true,
+        data: {
+          journeyId,
+          deleted: true,
+          finalStats: {
+            totalLocations,
+            finalDistance: (finalDistance / 1000).toFixed(3) + " km",
+            duration: finalTrip.trip.eta?.duration || 0
+          }
+        }
+      });
     } catch (err: any) {
       console.error("[geo/finish] error", err.message);
       res.status(500).json({ error: "Failed to finish trip" });
@@ -1448,8 +1528,11 @@ export function setupWebRoutes(app: Express) {
   app.get("/api/geo/trips/:journeyId/route", async (req: Request, res: Response) => {
     try {
       const { journeyId } = req.params;
+
+      // Use new integration to get route
       const route = await radar.trips.getTripRoute(journeyId);
 
+      // Update DB with distance
       await db.update(geoTracking).set({
         totalDistanceTravelled: (route.distance.value / 1000).toFixed(3),
         updatedAt: new Date(),
@@ -1461,7 +1544,6 @@ export function setupWebRoutes(app: Express) {
       res.status(500).json({ error: "Failed to fetch trip route" });
     }
   });
-
   // ============================================
   // DASHBOARD STATS (with proper type handling)
   // ============================================

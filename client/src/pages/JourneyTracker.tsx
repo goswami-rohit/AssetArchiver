@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
 
+
 import { 
   ModernJourneyHeader,
   ModernTripPlanningCard,

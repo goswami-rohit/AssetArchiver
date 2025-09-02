@@ -77,7 +77,7 @@ const useAPI = () => {
         ddpReports, leaveApplications, brands
       ] = await Promise.all([
         apiCall(`/api/daily-tasks/user/${user.id}`),
-        apiCall(`/api/pjp/${user.id}`),
+        apiCall(`/api/pjp/user/${user.id}`), // FIXED: Added /user/
         apiCall(`/api/dealers/user/${user.id}`),
         apiCall(`/api/dvr/user/${user.id}?limit=20`),
         apiCall(`/api/sales-reports/user/${user.id}`),
@@ -85,7 +85,7 @@ const useAPI = () => {
         apiCall(`/api/dealer-brand-mapping/user/${user.id}`),
         apiCall(`/api/ddp/user/${user.id}`),
         apiCall(`/api/leave-applications/user/${user.id}`),
-        apiCall(`/api/brands`),
+        apiCall(`/api/brands/user/${user.id}`), // FIXED: Added /user/ + userId
       ]);
 
       // Set fetched data to the global state
@@ -113,17 +113,17 @@ const useAPI = () => {
   const createRecord = useCallback(async (type: string, payload: any) => {
     if (!user) return;
     const endpoints: Record<string, string> = {
-      task: "/api/daily-tasks",
-      pjp: "/api/pjp",
-      dealer: "/api/dealers",
-      dvr: "/api/dvr",
-      tvr: "/api/tvr",
-      "dealer-score": "/api/dealer-reports-scores",
-      "sales-report": "/api/sales-reports",
-      "collection-report": "/api/collection-reports",
-      "dealer-brand-mapping": "/api/dealer-brand-mapping",
-      ddp: "/api/ddp",
-      "leave-application": "/api/leave-applications",
+      task: "/api/daily-tasks",                    // ✅ POST endpoints are correct
+      pjp: "/api/pjp",                            // ✅ POST endpoints are correct
+      dealer: "/api/dealers",                     // ✅ POST endpoints are correct
+      dvr: "/api/dvr",                           // ✅ POST endpoints are correct
+      tvr: "/api/tvr",                           // ✅ POST endpoints are correct
+      "dealer-score": "/api/dealer-reports-scores", // ✅ POST endpoints are correct
+      "sales-report": "/api/sales-reports",       // ✅ POST endpoints are correct
+      "collection-report": "/api/collection-reports", // ✅ POST endpoints are correct
+      "dealer-brand-mapping": "/api/dealer-brand-mapping", // ✅ POST endpoints are correct
+      ddp: "/api/ddp",                           // ✅ POST endpoints are correct
+      "leave-application": "/api/leave-applications", // ✅ POST endpoints are correct
     };
     const resp = await apiCall(endpoints[type], { method: "POST", body: JSON.stringify({ ...payload, userId: user.id }) });
     if (resp?.success) await fetchAllData();
@@ -243,7 +243,7 @@ function CreateModal({ type, onClose, onCreate }: {
 }) {
   const [form, setForm] = useState<any>({})
   const [submitting, setSubmitting] = useState(false)
-  const { pjps, dealers, brands, selectedItem } = useAppStore()
+  const { pjps, dealers, brands, selectedItem, user } = useAppStore()
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -326,6 +326,7 @@ function CreateModal({ type, onClose, onCreate }: {
 
       if (type === "dealer") {
         payload = {
+          userId: user?.id || 1,   // 👈 ADD THIS
           name: form.name,
           type: form.type,
           region: form.region,
@@ -335,7 +336,10 @@ function CreateModal({ type, onClose, onCreate }: {
           totalPotential: Number(form.totalPotential || 0),
           bestPotential: Number(form.bestPotential || 0),
           brandSelling: form.brandSelling || [],
+          feedbacks: form.feedbacks || "Interested",
           remarks: form.remarks || null,
+          latitude: Number(form.latitude || 0),
+          longitude: Number(form.longitude || 0),
         }
       }
 
@@ -690,44 +694,129 @@ function CreateModal({ type, onClose, onCreate }: {
                 </Field>
               </>
             )}
-
             {type === "dealer" && (
               <>
-                <Field label="Dealer Name">
-                  <Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-                </Field>
-                <Field label="Type">
+                <div className="grid gap-2">
+                  <Label>Dealer Name *</Label>
+                  <Input
+                    value={form.name || ""}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Type *</Label>
                   <Select value={form.type || ""} onValueChange={(v) => setForm({ ...form, type: v })}>
-                    <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Dealer-Best">Dealer-Best</SelectItem>
-                      <SelectItem value="Sub-Dealer-Best">Sub Dealer-Best</SelectItem>
-                      <SelectItem value="Dealer-Non-Best">Dealer-Non Best</SelectItem>
-                      <SelectItem value="Sub-Dealer-Non-Best">Sub Dealer-Non Best</SelectItem>
+                      <SelectItem value="Premium">Premium</SelectItem>
+                      <SelectItem value="Standard">Standard</SelectItem>
+                      <SelectItem value="Basic">Basic</SelectItem>
+                      <SelectItem value="Distributor">Distributor</SelectItem>
+                      <SelectItem value="Retailer">Retailer</SelectItem>
                     </SelectContent>
                   </Select>
-                </Field>
-                <Field label="Phone Number">
-                  <Input value={form.phoneNo || ""} onChange={(e) => setForm({ ...form, phoneNo: e.target.value })} required />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Region">
-                    <Input value={form.region || ""} onChange={(e) => setForm({ ...form, region: e.target.value })} required />
-                  </Field>
-                  <Field label="Area">
-                    <Input value={form.area || ""} onChange={(e) => setForm({ ...form, area: e.target.value })} required />
-                  </Field>
                 </div>
-                <Field label="Full Address">
-                  <Textarea value={form.address || ""} onChange={(e) => setForm({ ...form, address: e.target.value })} required rows={2} />
-                </Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Total Potential (₹)">
-                    <Input type="number" value={form.totalPotential || ""} onChange={(e) => setForm({ ...form, totalPotential: e.target.value })} />
-                  </Field>
-                  <Field label="Best Potential (₹)">
-                    <Input type="number" value={form.bestPotential || ""} onChange={(e) => setForm({ ...form, bestPotential: e.target.value })} />
-                  </Field>
+
+                <div className="grid gap-2">
+                  <Label>Phone Number *</Label>
+                  <Input
+                    value={form.phoneNo || ""}
+                    onChange={(e) => setForm({ ...form, phoneNo: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Region *</Label>
+                  <Input
+                    value={form.region || ""}
+                    onChange={(e) => setForm({ ...form, region: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Area *</Label>
+                  <Input
+                    value={form.area || ""}
+                    onChange={(e) => setForm({ ...form, area: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Address *</Label>
+                  <Textarea
+                    value={form.address || ""}
+                    onChange={(e) => setForm({ ...form, address: e.target.value })}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label>Total Potential (₹) *</Label>
+                    <Input
+                      type="number"
+                      value={form.totalPotential || ""}
+                      onChange={(e) => setForm({ ...form, totalPotential: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <Label>Best Potential (₹) *</Label>
+                    <Input
+                      type="number"
+                      value={form.bestPotential || ""}
+                      onChange={(e) => setForm({ ...form, bestPotential: e.target.value })}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Feedbacks *</Label>
+                  <Select value={form.feedbacks || ""} onValueChange={(v) => setForm({ ...form, feedbacks: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select feedback" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Interested">Interested</SelectItem>
+                      <SelectItem value="Not Interested">Not Interested</SelectItem>
+                      <SelectItem value="Needs Follow-up">Needs Follow-up</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Get Current Location for Geofencing</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                          setForm({
+                            ...form,
+                            latitude: pos.coords.latitude,
+                            longitude: pos.coords.longitude
+                          });
+                        },
+                        (err) => alert("Failed to get location: " + err.message)
+                      );
+                    }}
+                  >
+                    📍 Use My Location
+                  </Button>
+                  {form.latitude && form.longitude && (
+                    <p className="text-xs text-green-400">
+                      ✅ Location captured: {form.latitude.toFixed(4)}, {form.longitude.toFixed(4)}
+                    </p>
+                  )}
                 </div>
               </>
             )}

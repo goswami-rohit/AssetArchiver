@@ -645,7 +645,7 @@ const useAPIActions = () => {
       ] = await Promise.allSettled([
         apiCall(`/api/user/${userId}`),
         apiCall(`/api/daily-tasks/user/${userId}`),
-        apiCall(`/api/pjp/${userId}`),
+        apiCall(`/api/pjp/user/${userId}`),
         apiCall(`/api/dealers/user/${userId}`),
         apiCall(`/api/dvr/user/${userId}?limit=20`),
         apiCall(`/api/tvr/user/${userId}`),
@@ -820,11 +820,11 @@ const useAPIActions = () => {
 
   const deleteRecord = useCallback(
     async (type: string, id: string) => {
-      // MAPPING TO YOUR EXACT createAutoCRUD ENDPOINT NAMES
+      // FIXED: CORRECT DELETE ENDPOINT PATHS (NO /user/)
       const endpoints: Record<string, (id: string) => string> = {
-        task: (id) => `/api/daily-tasks/${id}`, // EXACT endpoint
-        pjp: (id) => `/api/pjp/${id}`, // EXACT endpoint
-        dealer: (id) => `/api/dealers/${id}`, // EXACT endpoint
+        task: (id) => `/api/daily-tasks/${id}`,
+        pjp: (id) => `/api/pjp/${id}`,
+        dealer: (id) => `/api/dealers/${id}`,
         dvr: (id) => `/api/dvr/${id}`,
         tvr: (id) => `/api/tvr/${id}`,
         'sales-report': (id) => `/api/sales-reports/${id}`,
@@ -1332,11 +1332,7 @@ export default function HomePage() {
             <DialogTitle>Add New Dealer</DialogTitle>
           </DialogHeader>
           <AddDealerForm
-            userId={String(user?.id)}
-            onSubmitted={() => {
-              setOpenDealer(false);
-              refreshAllData();
-            }}
+            userId={Number(user?.id)}
             onCancel={() => setOpenDealer(false)}
           />
         </DialogContent>

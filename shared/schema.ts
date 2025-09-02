@@ -131,7 +131,7 @@ export const permanentJourneyPlans = pgTable("permanent_journey_plans", {
 
 // ------------------------- dealers -------------------------
 export const dealers = pgTable("dealers", {
-  id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
   userId: integer("user_id").references(() => users.id, { onDelete: "cascade" }),
   type: varchar("type", { length: 50 }).notNull(),
   parentDealerId: varchar("parent_dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
