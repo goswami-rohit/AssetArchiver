@@ -145,7 +145,7 @@ function useCamera() {
   const streamRef = useRef<MediaStream | null>(null);
   const start = async (videoEl: HTMLVideoElement) => {
     streamRef.current = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
+      video: { facingMode: "user" },
       audio: false,
     });
     videoEl.srcObject = streamRef.current;
@@ -261,6 +261,27 @@ export default function TVRForm({
     return null;
   };
 
+  const uploadImage = async (dataUrl: string, prefix: string) => {
+    // turn base64 into blob
+    const blob = await (await fetch(dataUrl)).blob();
+
+    // ask backend for presigned URL
+    const res = await fetch("/api/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: `${prefix}-${Date.now()}.jpg`,
+        fileType: "image/jpeg",
+      }),
+    });
+    const { uploadUrl, publicUrl } = await res.json();
+
+    // upload directly to R2
+    await fetch(uploadUrl, { method: "PUT", body: blob });
+
+    return publicUrl;
+  };
+
   const payload = useMemo(() => {
     const num = (v: string) => Number(v);
     return {
@@ -274,22 +295,19 @@ export default function TVRForm({
       salespersonRemarks,
       checkInTime,
       checkOutTime,
-      inTimeImageUrl: null,  // TODO: upload inPhoto -> URL
-      outTimeImageUrl: null, // TODO: upload outPhoto -> URL
-      //siteVisitBrandInUse,  // text[] //Removed from payload as they are directly pushed from UI using multiselect helpers above
-      siteVisitStage,              
-      conversionFromBrand,        
+      inTimeImageUrl: null,   // will be filled after upload
+      outTimeImageUrl: null,  // will be filled after upload
+      siteVisitBrandInUse,    // required array
+      siteVisitStage,
+      conversionFromBrand,
       conversionQuantityValue: num(conversionQuantityValue),
-      conversionQuantityUnit,      
+      conversionQuantityUnit,
       associatedPartyName,
-      //influencerType,  // text[] //Removed from payload as they are directly pushed from UI using multiselect helpers above
+      influencerType,         // required array
       serviceType,
       qualityComplaint,
       promotionalActivity,
       channelPartnerVisit,
-      // client-side only for future upload:
-      _checkInPhotoDataUrl: inPhoto,
-      _checkOutPhotoDataUrl: outPhoto,
     };
   }, [
     userId, reportDate, visitType, siteNameConcernedPerson, phoneNo, emailId,
@@ -297,7 +315,7 @@ export default function TVRForm({
     siteVisitBrandInUse, siteVisitStage, conversionFromBrand,
     conversionQuantityValue, conversionQuantityUnit, associatedPartyName,
     influencerType, serviceType, qualityComplaint, promotionalActivity,
-    channelPartnerVisit, inPhoto, outPhoto
+    channelPartnerVisit
   ]);
 
   const handleSubmit = async () => {
@@ -305,12 +323,22 @@ export default function TVRForm({
     if (err) { alert(err); return; }
     try {
       setSubmitting(true);
-      // TODO: upload inPhoto/outPhoto, set URLs in payload before POST
-      onSubmitted?.(payload);
+
+      // upload photos to R2
+      const inUrl = inPhoto ? await uploadImage(inPhoto, "checkin") : null;
+      const outUrl = outPhoto ? await uploadImage(outPhoto, "checkout") : null;
+
+      // final payload with R2 URLs
+      onSubmitted?.({
+        ...payload,
+        inTimeImageUrl: inUrl,
+        outTimeImageUrl: outUrl,
+      });
     } finally {
       setSubmitting(false);
     }
   };
+
 
   // ————————————————————————————————————————————
   // UI

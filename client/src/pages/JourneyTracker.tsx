@@ -2,8 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
-import Radar from "radar-sdk-js";
-
 
 import {
   ModernJourneyHeader,
@@ -12,6 +10,10 @@ import {
   ModernCompletedTripCard,
   ModernMessageCard
 } from '@/components/ReusableUI';
+
+/* Radar Web SDK */
+import Radar from 'radar-sdk-js';
+import 'radar-sdk-js/dist/radar.css';
 
 interface Dealer {
   id: string;
@@ -34,20 +36,54 @@ interface TripData {
   radarTrip: any;
 }
 
-// Radar types (to avoid TS confusing with window.Location)
-interface RadarLocation {
-  coordinates: [number, number];
-  address?: {
-    formattedAddress?: string;
-  };
+/* ===============================
+   Minimal Radar helpers (Web SDK)
+   =============================== */
+
+let RADAR_INITIALIZED = false;
+
+function ensureRadarInitialized() {
+  if (RADAR_INITIALIZED) return;
+  const pk = import.meta.env.VITE_RADAR_PUBLISHABLE_KEY as string;
+  if (!pk) throw new Error("VITE_RADAR_PUBLISHABLE_KEY missing");
+  Radar.initialize(pk);
+  RADAR_INITIALIZED = true;
 }
 
-interface RadarTrackResponse {
-  location?: RadarLocation;
-  user?: any;
-  events?: any[];
+async function radarStartTrip(options: {
+  externalId: string;
+  destinationGeofenceTag?: string;
+  destinationGeofenceExternalId?: string;
+  mode?: "foot" | "bike" | "car";
+  metadata?: Record<string, any>;
+}) {
+  ensureRadarInitialized();
+  // Web SDK handles auth with the publishable key set in initialize()
+  // Expect shape: { status, trip, events }
+  const result = await Radar.startTrip(options as any);
+  return result; // return { trip, ... }
 }
 
+async function radarUpdateTrip(options: {
+  destinationGeofenceTag?: string;
+  destinationGeofenceExternalId?: string;
+  mode?: "foot" | "bike" | "car";
+  metadata?: Record<string, any>;
+}) {
+  ensureRadarInitialized();
+  // Web SDK signature: Radar.updateTrip(options, status?)
+  const result = await Radar.updateTrip(options as any);
+  return result; // { trip, ... }
+}
+
+/* Server-side route proxy for route polyline (uses secret on backend) */
+async function radarGetTripRouteViaBackend(journeyId: string) {
+  const res = await fetch(`/api/geo/trips/${journeyId}/route`);
+  if (!res.ok) throw new Error(`Backend route fetch failed: ${res.status}`);
+  const json = await res.json();
+  if (!json.success) throw new Error(json.error || "Failed to fetch route");
+  return json.data; // mirrors Radar route response shape
+}
 
 export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   // 👇 global user from Zustand
@@ -70,6 +106,19 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const mapRef = useRef<JourneyMapRef>(null);
   const trackingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Initialize Radar + identify user when available
+  useEffect(() => {
+    try {
+      ensureRadarInitialized();
+      if (userId) {
+        Radar.setUserId(String(userId));
+      }
+    } catch (e) {
+      // swallow init errors into UI message like the rest of your code
+      setError((e as Error).message || 'Radar init failed');
+    }
+  }, [userId]);
+
   // Fetch dealers only when userId is ready
   useEffect(() => {
     if (!userId) return;
@@ -85,32 +134,22 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     fetchDealers();
   }, [userId]);
 
-  useEffect(() => {
-    if (!userId) return;
-    try {
-      // Use your publishable key in frontend
-      Radar.initialize(import.meta.env.VITE_RADAR_PUBLISHABLE_KEY as string);
-      Radar.setUserId(String(userId));
-    } catch (err) {
-      console.error("Radar init failed:", err);
-    }
-  }, [userId]);
-
-
   // Get current location
   const getCurrentLocation = async () => {
     setIsLoadingLocation(true);
     try {
-      const result = (await Radar.trackOnce()) as RadarTrackResponse;
-
-      if (!result.location) {
-        throw new Error("No location returned from Radar");
-      }
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 60000
+        });
+      });
 
       const location = {
-        lat: result.location.coordinates[1],
-        lng: result.location.coordinates[0],
-        address: result.location.address?.formattedAddress || "Current Location",
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        address: 'Current Location'
       };
 
       setCurrentLocation(location);
@@ -119,7 +158,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         mapRef.current.setView(location.lat, location.lng, 15);
       }
     } catch (err) {
-      setError("Unable to get location. Please enable GPS.");
+      setError('Unable to get location. Please enable GPS.');
     } finally {
       setIsLoadingLocation(false);
     }
@@ -127,12 +166,25 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   // Start trip
   const startTrip = async () => {
-    if (!currentLocation || !selectedDealer) {
+    if (!currentLocation || !selectedDealer || !userId) {
       setError('Please select location and destination');
       return;
     }
 
     try {
+      // Start trip with Web SDK (publishable key already initialized)
+      const { trip } = await radarStartTrip({
+        externalId: `${userId}-${Date.now()}`,
+        destinationGeofenceTag: "dealer",
+        destinationGeofenceExternalId: selectedDealer.id,
+        mode: "car",
+        metadata: {
+          originLatitude: currentLocation.lat,
+          originLongitude: currentLocation.lng
+        }
+      });
+
+      // Create DB record via your backend
       const response = await fetch('/api/geo/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -140,26 +192,28 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           userId,
           dealerId: selectedDealer.id,
           lat: currentLocation.lat,
-          lng: currentLocation.lng
+          lng: currentLocation.lng,
+          radarTripId: trip._id
         })
       });
 
       const data = await response.json();
       if (data.success) {
         setActiveTripData({
-          journeyId: data.data.radarTrip._id,
+          journeyId: trip._id,
           dbJourneyId: data.data.dbJourneyId,
-          dealer: data.data.dealer,
-          radarTrip: data.data.radarTrip
+          dealer: selectedDealer,
+          radarTrip: trip
         });
         setTripStatus('active');
         setSuccess('Journey started! 🚗');
-        startLocationTracking(data.data.radarTrip._id);
+        startLocationTracking(trip._id);
       } else {
         setError(data.error || 'Failed to start trip');
       }
-    } catch (err) {
-      setError('Network error');
+    } catch (err: any) {
+      console.error('Start trip error:', err);
+      setError(`Failed to start trip: ${err.message}`);
     }
   };
 
@@ -167,49 +221,70 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const startLocationTracking = (journeyId: string) => {
     trackingIntervalRef.current = setInterval(async () => {
       try {
-        const result = (await Radar.trackOnce()) as RadarTrackResponse;
-        if (!result.location) return;
+        const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            enableHighAccuracy: true,
+            timeout: 5000
+          });
+        });
 
         const newLocation = {
-          lat: result.location.coordinates[1],
-          lng: result.location.coordinates[0],
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
         };
 
         setCurrentLocation(newLocation);
 
-        // Fetch updated trip data
-        const response = await fetch(`/api/geo/trips/${journeyId}`);
-        const data = await response.json();
+        // Get route data (via backend using secret)
+        try {
+          const routeData = await radarGetTripRouteViaBackend(journeyId);
 
-        if (data.success) {
-          const trip = data.data.radarTrip;
-
-          if (trip.distance && trip.duration) {
-            setDistance(trip.distance.value || 0);
-            setDuration(trip.duration.value || 0);
+          if (routeData.distance && routeData.duration) {
+            setDistance(routeData.distance.value || 0);
+            setDuration(routeData.duration.value || 0);
           }
 
-          if (trip.locations && trip.locations.length > 0) {
-            const polylinePoints = trip.locations.map((loc: any) => [
-              loc.coordinates[1],
-              loc.coordinates[0],
+          if (routeData.geometry && routeData.geometry.coordinates) {
+            const polylinePoints = routeData.geometry.coordinates.map((coord: any) => [
+              coord[1], // lat
+              coord[0]  // lng
             ]);
             setRoutePolyline(polylinePoints);
           }
+        } catch (routeErr) {
+          console.warn('Route fetch failed:', routeErr);
+        }
+
+        // Also fetch from your backend for DB sync
+        const response = await fetch(`/api/geo/trips/${journeyId}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.success && data.data.radarTrip) {
+            const trip = data.data.radarTrip;
+            if (trip.distance && trip.duration) {
+              setDistance(trip.distance.value || 0);
+              setDuration(trip.duration.value || 0);
+            }
+          }
         }
       } catch (err) {
-        console.error("Tracking error:", err);
+        console.error('Tracking error:', err);
       }
     }, 27000);
   };
-
-
 
   // Change destination
   const changeDestination = async (newDealerId: string) => {
     if (!activeTripData) return;
 
     try {
+      // Update trip using Web SDK
+      const { trip } = await radarUpdateTrip({
+        destinationGeofenceExternalId: newDealerId
+        // No status override here; SDK manages started/approaching/arrived
+      });
+
+      // Update your backend (DB sync)
       const response = await fetch(`/api/geo/trips/${activeTripData.journeyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -227,7 +302,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           setActiveTripData(prev => prev ? {
             ...prev,
             dealer: newDealer,
-            radarTrip: data.data
+            radarTrip: trip
           } : null);
           setSuccess('Destination updated! 🎯');
           setShowDestinationChange(false);
@@ -236,8 +311,9 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       } else {
         setError(data.error || 'Failed to update');
       }
-    } catch (err) {
-      setError('Failed to change destination');
+    } catch (err: any) {
+      console.error('Change destination error:', err);
+      setError(`Failed to change destination: ${err.message}`);
     }
   };
 
@@ -258,6 +334,14 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         if (trackingIntervalRef.current) {
           clearInterval(trackingIntervalRef.current);
           trackingIntervalRef.current = null;
+        }
+
+        // Allow SDK to stop trip client-side if desired
+        try {
+          ensureRadarInitialized();
+          await Radar.completeTrip();
+        } catch {
+          // non-fatal
         }
       } else {
         setError('Failed to complete trip');
