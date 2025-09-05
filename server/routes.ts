@@ -1453,7 +1453,7 @@ export function setupWebRoutes(app: Express) {
       const totalLocations = finalTrip.trip.locations?.length || 0;
       const finalDistance = finalTrip.trip.distance?.value ?? finalTrip.trip.eta?.distance ?? 0;
 
-      await radar.server.deleteTrip(journeyId);
+      await radar.server.updateTrip(journeyId, 'completed');
 
       await db.update(geoTracking).set({
         checkOutTime: new Date(),

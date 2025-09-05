@@ -44,6 +44,15 @@ async function listTrips(params: { status?: string; includeLocations?: boolean }
   return res.data;
 }
 
+// Add this to radar.ts inside the Server-only section
+async function updateTrip(idOrExternalId: string, status: string) {
+  const res = await axios.patch(`https://api.radar.io/v1/trips/${idOrExternalId}`,
+    { status },
+    { headers: auth() }
+  );
+  return res.data;
+}
+
 async function deleteTrip(idOrExternalId: string) {
   const res = await axios.delete(`https://api.radar.io/v1/trips/${idOrExternalId}`, {
     headers: auth(),
@@ -79,6 +88,7 @@ export const radar = {
     getTripRoute,
     listTrips,
     deleteTrip,
+    updateTrip,
   },
   geofences: {
     searchGeofences,
