@@ -1,5 +1,8 @@
 // src/integrations/radar.ts
+import dotenv from "dotenv";
+dotenv.config();
 import axios from "axios";
+
 
 const RADAR_SECRET_KEY = process.env.RADAR_SECRET_KEY;
 if (!RADAR_SECRET_KEY) {
@@ -7,7 +10,7 @@ if (!RADAR_SECRET_KEY) {
 }
 
 function auth() {
-  return { Authorization: `Bearer ${RADAR_SECRET_KEY}` };
+  return { Authorization: RADAR_SECRET_KEY };
 }
 
 /* ===== Server-only (secret) ===== */

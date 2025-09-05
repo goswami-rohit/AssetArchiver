@@ -76,6 +76,10 @@ async function radarUpdateTrip(options: {
   return result; // { trip, ... }
 }
 
+const toDealerExternalId = (id?: string) =>
+  id?.startsWith('dealer:') ? id : `dealer:${id}`;
+
+
 /* Server-side route proxy for route polyline (uses secret on backend) */
 async function radarGetTripRouteViaBackend(journeyId: string) {
   const res = await fetch(`/api/geo/trips/${journeyId}/route`);
@@ -176,7 +180,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       const { trip } = await radarStartTrip({
         externalId: `${userId}-${Date.now()}`,
         destinationGeofenceTag: "dealer",
-        destinationGeofenceExternalId: selectedDealer.id,
+        destinationGeofenceExternalId: toDealerExternalId(selectedDealer.id),
+
         mode: "car",
         metadata: {
           originLatitude: currentLocation.lat,
@@ -280,7 +285,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     try {
       // Update trip using Web SDK
       const { trip } = await radarUpdateTrip({
-        destinationGeofenceExternalId: newDealerId
+        destinationGeofenceExternalId: toDealerExternalId(newDealerId)
+
         // No status override here; SDK manages started/approaching/arrived
       });
 

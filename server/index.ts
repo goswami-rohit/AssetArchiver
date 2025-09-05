@@ -1,5 +1,4 @@
 import 'dotenv/config';
-
 // Add debug logging immediately after dotenv import
 console.log("🔍 Environment check:");
 console.log("NODE_ENV:", process.env.NODE_ENV);
