@@ -237,6 +237,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           lat: position.coords.latitude,
           lng: position.coords.longitude
         };
+        await Radar.trackOnce({ latitude: newLocation.lat, longitude: newLocation.lng });
+
 
         setCurrentLocation(newLocation);
 
@@ -275,7 +277,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       } catch (err) {
         console.error('Tracking error:', err);
       }
-    }, 27000);
+    }, 8000);
   };
 
   // Change destination
