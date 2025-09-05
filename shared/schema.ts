@@ -28,17 +28,17 @@ export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   workosUserId: varchar("workos_user_id", { length: 255 }).unique(),
   companyId: integer("company_id").notNull().references(() => companies.id, { onDelete: "no action", onUpdate: "no action" }),
-  email: text("email").notNull(),
-  firstName: text("first_name"),
-  lastName: text("last_name"),
-  role: text("role").notNull(),
+  email: varchar("email", { length: 255 }).notNull(),
+  firstName: varchar("first_name", { length: 255 }),
+  lastName: varchar("last_name", { length: 255 }),
+  role: varchar("role", { length: 255 }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow(),
   phoneNumber: varchar("phone_number", { length: 50 }),
   inviteToken: varchar("inviteToken", { length: 255 }).unique(),
-  status: text("status").notNull().default("active"),
-  region: text("region"),
-  area: text("area"),
+  status: varchar("status", { length: 50 }).notNull().default("active"),
+  region: varchar("region", { length: 255 }),
+  area: varchar("area", { length: 255 }),
   salesmanLoginId: varchar("salesman_login_id", { length: 255 }).unique(),
   hashedPassword: text("hashed_password"),
   reportsToId: integer("reports_to_id").references(() => users.id, { onDelete: "set null" }),
@@ -140,6 +140,9 @@ export const dealers = pgTable("dealers", {
   area: varchar("area", { length: 255 }).notNull(),
   phoneNo: varchar("phone_no", { length: 20 }).notNull(),
   address: varchar("address", { length: 500 }).notNull(),
+  pinCode: varchar("pinCode", { length: 20 }),
+  dateOfBirth: date("dateOfBirth"),
+  anniversaryDate: date("anniversaryDate"),
   totalPotential: numeric("total_potential", { precision: 10, scale: 2 }).notNull(),
   bestPotential: numeric("best_potential", { precision: 10, scale: 2 }).notNull(),
   brandSelling: text("brand_selling").array().notNull(),
@@ -377,6 +380,24 @@ export const dealerBrandMapping = pgTable("dealer_brand_mapping", {
   uniqueIndex("dealer_brand_mapping_dealer_id_brand_id_unique").on(t.dealerId, t.brandId),
 ]);
 
+export const salesOrders = pgTable("sales_orders", {
+  id: varchar("id", { length: 255 }).primaryKey().$defaultFn(() => crypto.randomUUID()),
+  salesmanId: integer("salesman_id").references(() => users.id, { onDelete: "set null" }),
+  dealerId: varchar("dealer_id", { length: 255 }).references(() => dealers.id, { onDelete: "set null" }),
+  quantity: numeric("quantity", { precision: 10, scale: 2 }).notNull(),
+  unit: varchar("unit", { length: 50 }).notNull(),
+  orderTotal: numeric("order_total", { precision: 12, scale: 2 }).notNull(),
+  advancePayment: numeric("advance_payment", { precision: 12, scale: 2 }).notNull(),
+  pendingPayment: numeric("pending_payment", { precision: 12, scale: 2 }).notNull(),
+  estimatedDelivery: date("estimated_delivery").notNull(),
+  remarks: varchar("remarks", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, precision: 6 }).defaultNow().notNull(),
+}, (t) => [
+  index("idx_sales_orders_salesman_id").on(t.salesmanId),
+  index("idx_sales_orders_dealer_id").on(t.dealerId),
+]);
+
 // ------------------------- master_connected_table -------------------------
 export const masterConnectedTable = pgTable("master_connected_table", {
   id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),
@@ -393,6 +414,7 @@ export const masterConnectedTable = pgTable("master_connected_table", {
   clientReportId: varchar("clientReportId", { length: 255 }),
   competitionReportId: varchar("competitionReportId", { length: 255 }),
   geoTrackingId: varchar("geoTrackingId", { length: 255 }),
+  salesOrderId: varchar("salesOrderId", { length: 255 }),  // MOVED TO MATCH ORDER
   dealerReportsAndScoresId: varchar("dealerReportsAndScoresId", { length: 255 }),
   salesReportId: integer("salesReportId"),
   collectionReportId: varchar("collectionReportId", { length: 255 }),
@@ -416,6 +438,7 @@ export const masterConnectedTable = pgTable("master_connected_table", {
   index("idx_mct_client_report_id").on(t.clientReportId),
   index("idx_mct_comp_report_id").on(t.competitionReportId),
   index("idx_mct_geotracking_id").on(t.geoTrackingId),
+  index("idx_mct_sales_order_id").on(t.salesOrderId),  // MOVED TO MATCH ORDER
   index("idx_mct_dealer_scores_id").on(t.dealerReportsAndScoresId),
   index("idx_mct_sales_report_id").on(t.salesReportId),
   index("idx_mct_collection_report_id").on(t.collectionReportId),
@@ -443,6 +466,7 @@ export const insertSalesReportSchema = createInsertSchema(salesReport);
 export const insertCollectionReportSchema = createInsertSchema(collectionReports);
 export const insertDdpSchema = createInsertSchema(ddp);
 export const insertRatingSchema = createInsertSchema(ratings);
+export const insertSalesOrderSchema = createInsertSchema(salesOrders);
 export const insertBrandSchema = createInsertSchema(brands);
 export const insertDealerBrandMappingSchema = createInsertSchema(dealerBrandMapping);
 export const insertMasterConnectedTableSchema = createInsertSchema(masterConnectedTable);

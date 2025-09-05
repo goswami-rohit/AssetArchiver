@@ -237,8 +237,17 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           lat: position.coords.latitude,
           lng: position.coords.longitude
         };
-        await Radar.trackOnce({ latitude: newLocation.lat, longitude: newLocation.lng });
-
+        if (!activeTripData) {
+          console.warn('Tracking attempted but no active trip data found.');
+          return;
+        }
+        await Radar.trackOnce({
+          latitude: newLocation.lat,
+          longitude: newLocation.lng,
+          tripOptions: {
+            externalId: activeTripData.radarTrip.externalId
+          }
+        });
 
         setCurrentLocation(newLocation);
 

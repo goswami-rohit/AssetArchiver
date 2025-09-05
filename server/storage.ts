@@ -1,4 +1,4 @@
-import { 
+import {
   users,
   companies,
   dailyVisitReports,
@@ -10,6 +10,7 @@ import {
   clientReports,
   competitionReports,
   geoTracking,
+  salesOrders,
   dailyTasks,
   dealerReportsAndScores,
   salesReport,
@@ -48,6 +49,8 @@ export type GeoTracking = typeof geoTracking.$inferSelect;
 export type InsertGeoTracking = typeof geoTracking.$inferInsert;
 export type DailyTask = typeof dailyTasks.$inferSelect;
 export type InsertDailyTask = typeof dailyTasks.$inferInsert;
+export type SalesOrder = typeof salesOrders.$inferSelect;
+export type InsertSalesOrder = typeof salesOrders.$inferInsert;
 export type DealerReportsAndScores = typeof dealerReportsAndScores.$inferSelect;
 export type InsertDealerReportsAndScores = typeof dealerReportsAndScores.$inferInsert;
 
@@ -157,6 +160,13 @@ export interface IStorage {
   createSalesReport(data: InsertSalesReport): Promise<SalesReport>;
   updateSalesReport(id: number, updates: Partial<InsertSalesReport>): Promise<SalesReport>;
 
+  // SALES ORDERS
+  getSalesOrder(id: string): Promise<SalesOrder | undefined>;
+  getSalesOrdersBySalesmanId(salesmanId: number): Promise<SalesOrder[]>;
+  getSalesOrdersByDealerId(dealerId: string): Promise<SalesOrder[]>;
+  createSalesOrder(data: InsertSalesOrder): Promise<SalesOrder>;
+  updateSalesOrder(id: string, updates: Partial<InsertSalesOrder>): Promise<SalesOrder>;
+
   // COLLECTION REPORTS
   getCollectionReport(id: string): Promise<CollectionReport | undefined>;
   getCollectionReportsByDealerId(dealerId: string): Promise<CollectionReport[]>;
@@ -199,7 +209,7 @@ export class DatabaseStorage implements IStorage {
   // ========================================
   // COMPANY OPERATIONS
   // ========================================
-  
+
   async getCompany(id: number): Promise<Company | undefined> {
     const [company] = await db.select().from(companies).where(eq(companies.id, id));
     return company || undefined;
@@ -225,6 +235,31 @@ export class DatabaseStorage implements IStorage {
       updatedAt: new Date()
     }).where(eq(companies.id, id)).returning();
     return company;
+  }
+
+  // ========================================
+  // SALES ORDERS (NEW)
+  // ========================================
+  async getSalesOrder(id: string): Promise<SalesOrder | undefined> {
+    const [row] = await db.select().from(salesOrders).where(eq(salesOrders.id, id));
+    return row || undefined;
+  }
+  async getSalesOrdersBySalesmanId(salesmanId: number): Promise<SalesOrder[]> {
+    return await db.select().from(salesOrders).where(eq(salesOrders.salesmanId, salesmanId));
+  }
+  async getSalesOrdersByDealerId(dealerId: string): Promise<SalesOrder[]> {
+    return await db.select().from(salesOrders).where(eq(salesOrders.dealerId, dealerId));
+  }
+  async createSalesOrder(data: InsertSalesOrder): Promise<SalesOrder> {
+    const [row] = await db.insert(salesOrders).values(data).returning();
+    return row;
+  }
+  async updateSalesOrder(id: string, updates: Partial<InsertSalesOrder>): Promise<SalesOrder> {
+    const [row] = await db.update(salesOrders).set({
+      ...updates,
+      updatedAt: new Date()
+    }).where(eq(salesOrders.id, id)).returning();
+    return row;
   }
 
   // ========================================

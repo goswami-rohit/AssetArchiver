@@ -19,6 +19,7 @@ import {
   dailyTasks,
   dealerReportsAndScores,
   salesReport,
+  salesOrders,  // ADD THIS LINE
   collectionReports,
   ddp,
   ratings,
@@ -36,6 +37,7 @@ async function seedDatabase() {
   await db.delete(dealerReportsAndScores);
   await db.delete(ratings);
   await db.delete(salesReport);
+  await db.delete(salesOrders);  // ADD THIS LINE
   await db.delete(collectionReports);
   await db.delete(salesmanLeaveApplications);
   await db.delete(salesmanAttendance);
@@ -54,7 +56,6 @@ async function seedDatabase() {
 
   console.log("Database cleared successfully (no demo data inserted).");
 }
-
 // Run if called directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   seedDatabase().catch((err) => {
