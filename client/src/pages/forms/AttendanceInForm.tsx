@@ -59,6 +59,13 @@ export default function AttendanceInForm({
   const [geoBusy, setGeoBusy] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const validate = () => {
+  if (!inPhoto) return "Please take the check-in photo.";
+  if (!locationName || !inTimeLatitude || !inTimeLongitude) return "Location name and coordinates are required.";
+  if (!inTimeTimestamp) return "Timestamp missing. Retake photo.";
+  return null;
+};
+
   useEffect(() => {
     if (step === "photo" && videoRef.current) {
       start(videoRef.current).catch(console.error);
@@ -97,41 +104,42 @@ export default function AttendanceInForm({
     }
   };
 
-  const payload = useMemo(() => {
-    const num = (v: string) => Number(v);
-    return {
-      // required cols
-      userId: userId ?? null,
-      attendanceDate,
-      locationName,
-      inTimeTimestamp,
-      outTimeTimestamp: null,
+  const uploadImage = async (dataUrl: string, prefix: string) => {
+    // turn base64 into blob
+    const blob = await (await fetch(dataUrl)).blob();
 
-      inTimeImageCaptured: !!inPhoto,
-      outTimeImageCaptured: false,
+    // ask backend for presigned URL
+    const res = await fetch("/api/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: `${prefix}-${Date.now()}.jpg`,
+        fileType: "image/jpeg",
+      }),
+    });
 
-      inTimeImageUrl: null,  // TODO: upload inPhoto -> URL
-      outTimeImageUrl: null, // N/A at check-in
+    const result = await res.json();
 
-      inTimeLatitude: num(inTimeLatitude),
-      inTimeLongitude: num(inTimeLongitude),
+    if (!res.ok || !result.success) {
+      throw new Error(result.error || "Failed to get upload URL");
+    }
 
-      // optional telemetry
-      inTimeAccuracy: null,
-      inTimeSpeed: null,
-      inTimeHeading: null,
-      inTimeAltitude: null,
+    const { uploadUrl, publicUrl } = result;
 
-      // client-side for future upload
-      _checkInPhotoDataUrl: inPhoto,
-    };
-  }, [userId, attendanceDate, locationName, inTimeTimestamp, inPhoto, inTimeLatitude, inTimeLongitude]);
+    // upload directly to R2
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      body: blob,
+      headers: {
+        'Content-Type': 'image/jpeg'
+      }
+    });
 
-  const validate = () => {
-    if (!inPhoto) return "Please take the check-in photo.";
-    if (!locationName || !inTimeLatitude || !inTimeLongitude) return "Location name and coordinates are required.";
-    if (!inTimeTimestamp) return "Timestamp missing. Retake photo.";
-    return null;
+    if (!uploadResponse.ok) {
+      throw new Error("Failed to upload image to R2");
+    }
+
+    return publicUrl;
   };
 
   const submit = async () => {
@@ -139,8 +147,45 @@ export default function AttendanceInForm({
     if (err) return alert(err);
     try {
       setSubmitting(true);
-      // TODO: upload `inPhoto` and set payload.inTimeImageUrl
-      onSubmitted?.(payload);
+
+      // Upload the selfie image to R2
+      const selfieUrl = inPhoto ? await uploadImage(inPhoto, "attendance-in") : null;
+
+      // Prepare the punch-in payload
+      const punchInPayload = {
+        userId: userId,
+        companyId: 1, // You may need to get this from props or context
+        latitude: Number(inTimeLatitude),
+        longitude: Number(inTimeLongitude),
+        locationName,
+        accuracy: null, // You can add accuracy from geolocation if needed
+        speed: null,
+        heading: null,
+        altitude: null,
+        selfieUrl
+      };
+
+      // Submit to punch-in endpoint
+      const response = await fetch("/api/attendance/punch-in", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(punchInPayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to punch in");
+      }
+
+      // Call the callback with the successful result
+      onSubmitted?.(result.data);
+
+    } catch (error) {
+      console.error("Punch-in error:", error);
+      alert(`Failed to punch in: ${error.message}`);
     } finally {
       setSubmitting(false);
     }

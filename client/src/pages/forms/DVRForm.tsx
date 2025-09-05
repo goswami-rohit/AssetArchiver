@@ -214,63 +214,94 @@ export default function DVRForm({ userId, onSubmitted, onCancel }: DVRFormProps)
         return null;
     };
 
-    const payload = useMemo(() => {
-        const num = (v: string) => Number(v);
-        return {
-            // DB fields
-            userId: userId ?? null, // provide upstream
-            reportDate,
-            dealerType,
-            dealerName: dealerName || null,
-            subDealerName: subDealerName || null,
-            location,
-            latitude: num(latitude),
-            longitude: num(longitude),
-            visitType,
-            dealerTotalPotential: num(dealerTotalPotential),
-            dealerBestPotential: num(dealerBestPotential),
-            brandSelling, // string[]
-            contactPerson: contactPerson || null,
-            contactPersonPhoneNo: contactPersonPhoneNo || null,
-            todayOrderMt: num(todayOrderMt),
-            todayCollectionRupees: num(todayCollectionRupees),
-            overdueAmount: overdueAmount ? Number(overdueAmount) : null,
-            feedbacks,
-            solutionBySalesperson: solutionBySalesperson || null,
-            anyRemarks: anyRemarks || null,
-            checkInTime: checkInTime,     // ISO strings
-            checkOutTime: checkOutTime,   // ISO strings
-            inTimeImageUrl: null,         // placeholder; see note below
-            outTimeImageUrl: null,        // placeholder; see note below
-            // client-side only (not in DB)
-            _checkInPhotoDataUrl: inPhoto,
-            _checkOutPhotoDataUrl: outPhoto,
-        };
-    }, [
-        userId, reportDate, dealerType, dealerName, subDealerName, location,
-        latitude, longitude, visitType, dealerTotalPotential, dealerBestPotential,
-        brandSelling, contactPerson, contactPersonPhoneNo, todayOrderMt,
-        todayCollectionRupees, overdueAmount, feedbacks, solutionBySalesperson,
-        anyRemarks, checkInTime, checkOutTime, inPhoto, outPhoto
-    ]);
+    const uploadImage = async (dataUrl: string, prefix: string) => {
+        // turn base64 into blob
+        const blob = await (await fetch(dataUrl)).blob();
+        // ask backend for presigned URL
+        const res = await fetch("/api/upload-url", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                fileName: `${prefix}-${Date.now()}.jpg`,
+                fileType: "image/jpeg",
+            }),
+        });
+        const result = await res.json();
+
+        if (!res.ok || !result.success) {
+            throw new Error(result.error || "Failed to get upload URL");
+        }
+        const { uploadUrl, publicUrl } = result;
+        // upload directly to R2
+        const uploadResponse = await fetch(uploadUrl, {
+            method: "PUT",
+            body: blob,
+            headers: {
+                'Content-Type': 'image/jpeg'
+            }
+        });
+        if (!uploadResponse.ok) {
+            throw new Error("Failed to upload image to R2");
+        }
+        return publicUrl;
+    };
 
     const handleSubmit = async () => {
         const err = validate();
         if (err) {
             alert(err);
-            // if we’re on checkout step and something is missing, don’t close camera
             if (step === "checkout") stop();
             return;
         }
         try {
             setSubmitting(true);
-
-            // NOTE: image storage not implemented yet.
-            // Here you would upload `inPhoto` and `outPhoto` to your storage database/service,
-            // receive URLs, then set payload.inTimeImageUrl/outTimeImageUrl accordingly
-            // before calling the backend.
-
-            onSubmitted?.(payload);
+            // Upload both images to R2
+            const inTimeImageUrl = inPhoto ? await uploadImage(inPhoto, "dvr-checkin") : null;
+            const outTimeImageUrl = outPhoto ? await uploadImage(outPhoto, "dvr-checkout") : null;
+            // Prepare the DVR payload
+            const dvrPayload = {
+                userId: userId,
+                reportDate,
+                dealerType,
+                dealerName: dealerName || null,
+                subDealerName: subDealerName || null,
+                location,
+                latitude: Number(latitude),
+                longitude: Number(longitude),
+                visitType,
+                dealerTotalPotential: Number(dealerTotalPotential),
+                dealerBestPotential: Number(dealerBestPotential),
+                brandSelling,
+                contactPerson: contactPerson || null,
+                contactPersonPhoneNo: contactPersonPhoneNo || null,
+                todayOrderMt: Number(todayOrderMt),
+                todayCollectionRupees: Number(todayCollectionRupees),
+                overdueAmount: overdueAmount ? Number(overdueAmount) : null,
+                feedbacks,
+                solutionBySalesperson: solutionBySalesperson || null,
+                anyRemarks: anyRemarks || null,
+                checkInTime,
+                checkOutTime,
+                inTimeImageUrl,
+                outTimeImageUrl
+            };
+            // Submit to DVR endpoint (you need to create this endpoint)
+            const response = await fetch("/api/dvr", {  // or whatever your DVR endpoint is called
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(dvrPayload),
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || "Failed to submit DVR");
+            }
+            // Call the callback with the successful result
+            onSubmitted?.(result.data);
+        } catch (error) {
+            console.error("DVR submission error:", error);
+            alert(`Failed to submit DVR: ${error.message}`);
         } finally {
             setSubmitting(false);
         }

@@ -274,10 +274,27 @@ export default function TVRForm({
         fileType: "image/jpeg",
       }),
     });
-    const { uploadUrl, publicUrl } = await res.json();
+
+    const result = await res.json();
+
+    if (!res.ok || !result.success) {
+      throw new Error(result.error || "Failed to get upload URL");
+    }
+
+    const { uploadUrl, publicUrl } = result;
 
     // upload directly to R2
-    await fetch(uploadUrl, { method: "PUT", body: blob });
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      body: blob,
+      headers: {
+        'Content-Type': 'image/jpeg'
+      }
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error("Failed to upload image to R2");
+    }
 
     return publicUrl;
   };
@@ -329,11 +346,33 @@ export default function TVRForm({
       const outUrl = outPhoto ? await uploadImage(outPhoto, "checkout") : null;
 
       // final payload with R2 URLs
-      onSubmitted?.({
+      const finalPayload = {
         ...payload,
         inTimeImageUrl: inUrl,
         outTimeImageUrl: outUrl,
+      };
+
+      // Submit to your TVR endpoint
+      const response = await fetch("/api/tvr", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(finalPayload),
       });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to submit TVR");
+      }
+
+      // Call the callback with the successful result
+      onSubmitted?.(result.data);
+
+    } catch (error) {
+      console.error("TVR submission error:", error);
+      alert(`Failed to submit TVR: ${error.message}`);
     } finally {
       setSubmitting(false);
     }

@@ -94,21 +94,38 @@ export default function LeaveApplicationForm({
 
     const submit = async (values: LeaveFormValues) => {
         setSubmitting(true);
-        // post leave application to backend, connect endpoint later
         try {
-            // TODO: hook this to your backend
-            // await fetch("/api/leave-applications", {
-            //   method: "POST",
-            //   headers: { "Content-Type": "application/json" },
-            //   body: JSON.stringify({
-            //     ...values,
-            //     // server expects: status: "pending"
-            //   }),
-            // });
+            // Prepare the payload for the endpoint
+            const leavePayload = {
+                userId: values.userId,
+                leaveType: values.leaveType,
+                startDate: values.startDate.toISOString().split('T')[0], // Convert Date to YYYY-MM-DD string
+                endDate: values.endDate.toISOString().split('T')[0],     // Convert Date to YYYY-MM-DD string
+                reason: values.reason,
+                status: "pending" // This will be auto-set by the endpoint's autoFields
+            };
 
+            // Submit to leave-applications endpoint
+            const response = await fetch("/api/leave-applications", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(leavePayload),
+            });
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || "Failed to submit leave application");
+            }
+
+            // Call the callback with the successful result
             onSubmitted?.(values);
-        } catch (e) {
-            console.error("leave submit failed:", e);
+
+        } catch (error) {
+            console.error("Leave application submission error:", error);
+            alert(`Failed to submit leave application: ${error.message}`);
         } finally {
             setSubmitting(false);
         }

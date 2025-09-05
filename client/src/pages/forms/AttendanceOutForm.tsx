@@ -96,37 +96,6 @@ export default function AttendanceOutForm({
       setGeoBusy(false);
     }
   };
-
-  const payload = useMemo(() => {
-    const num = (v: string) => Number(v);
-    return {
-      userId: userId ?? null,
-      attendanceDate,
-      locationName,
-
-      inTimeTimestamp: null,
-      outTimeTimestamp,
-
-      inTimeImageCaptured: false,
-      outTimeImageCaptured: !!outPhoto,
-
-      inTimeImageUrl: null,
-      outTimeImageUrl: null, // TODO: upload outPhoto -> URL
-
-      // If you also want to store out-time lat/long (your table supports it):
-      outTimeLatitude: num(outTimeLatitude),
-      outTimeLongitude: num(outTimeLongitude),
-
-      // optional telemetry
-      outTimeAccuracy: null,
-      outTimeSpeed: null,
-      outTimeHeading: null,
-      outTimeAltitude: null,
-
-      _checkOutPhotoDataUrl: outPhoto,
-    };
-  }, [userId, attendanceDate, locationName, outTimeTimestamp, outPhoto, outTimeLatitude, outTimeLongitude]);
-
   const validate = () => {
     if (!outPhoto) return "Please take the check-out photo.";
     if (!locationName || !outTimeLatitude || !outTimeLongitude) return "Location name and coordinates are required.";
@@ -134,13 +103,86 @@ export default function AttendanceOutForm({
     return null;
   };
 
+  const uploadImage = async (dataUrl: string, prefix: string) => {
+    // turn base64 into blob
+    const blob = await (await fetch(dataUrl)).blob();
+
+    // ask backend for presigned URL
+    const res = await fetch("/api/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fileName: `${prefix}-${Date.now()}.jpg`,
+        fileType: "image/jpeg",
+      }),
+    });
+
+    const result = await res.json();
+
+    if (!res.ok || !result.success) {
+      throw new Error(result.error || "Failed to get upload URL");
+    }
+
+    const { uploadUrl, publicUrl } = result;
+
+    // upload directly to R2
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      body: blob,
+      headers: {
+        'Content-Type': 'image/jpeg'
+      }
+    });
+
+    if (!uploadResponse.ok) {
+      throw new Error("Failed to upload image to R2");
+    }
+
+    return publicUrl;
+  };
+
   const submit = async () => {
     const err = validate();
     if (err) return alert(err);
     try {
       setSubmitting(true);
-      // TODO: upload `outPhoto` and set payload.outTimeImageUrl
-      onSubmitted?.(payload);
+
+      // Upload the checkout selfie image to R2
+      const selfieUrl = outPhoto ? await uploadImage(outPhoto, "attendance-out") : null;
+
+      // Prepare the punch-out payload
+      const punchOutPayload = {
+        userId: userId,
+        latitude: Number(outTimeLatitude),
+        longitude: Number(outTimeLongitude),
+        accuracy: null, // You can enhance useMyLocation to capture this
+        speed: null,
+        heading: null,
+        altitude: null,
+        selfieUrl
+      };
+
+      // Submit to punch-out endpoint
+      const response = await fetch("/api/attendance/punch-out", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(punchOutPayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to punch out");
+      }
+
+      // Call the callback with the successful result
+      onSubmitted?.(result.data);
+
+    } catch (error) {
+      console.error("Punch-out error:", error);
+      alert(`Failed to punch out: ${error.message}`);
     } finally {
       setSubmitting(false);
     }
