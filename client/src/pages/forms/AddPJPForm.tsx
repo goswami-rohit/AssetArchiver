@@ -1,155 +1,325 @@
-import * as React from "react";
+import React, { useState, useEffect } from 'react';
+// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
+import type { SubmitHandler, Resolver } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { format } from 'date-fns';
+import { toast } from 'sonner';
+
+// Shadcn UI Components
+import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
-import { Calendar as CalendarIcon, X, Loader2 } from "lucide-react";
-import { format } from "date-fns";
-import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
 
-type UserLite = {
-    id: number;
-    firstName?: string;
-    lastName?: string;
-    role?: string;
-};
+// Lucide React Icons
+import {
+  CalendarIcon,
+  ChevronsUpDown,
+  Search,
+  ArrowLeft
+} from "lucide-react";
 
-type Props = {
-    user?: UserLite | null;
-    dealers?: { id: string; name: string; address?: string }[];  // 👈 new prop
-    onSubmitted?: (payload: any) => void;
-    onCancel?: () => void;
-};
+// Reusable Constants & State Management
+import { useAppStore, PJP_STATUS, BASE_URL } from '../../components/ReusableUI';
 
-const STATUS = ["planned", "active", "completed", "cancelled"] as const;
+// --- Zod Schema ---
+const PJPSchema = z.object({
+  userId: z.number().optional(),
+  createdById: z.number().optional(),
+  planDate: z.date({
+    required_error: "Plan date is required.",
+  }),
+  areaToBeVisited: z.string().min(1, "Destination dealer is required"),
+  description: z.string().optional(),
+  status: z.enum(PJP_STATUS, {
+    required_error: "Status is required.",
+  }),
+});
 
-export default function PJPForm({ user, dealers, onSubmitted, onCancel }: Props) {
-    const [planDate, setPlanDate] = React.useState<Date>(new Date());
-    const [areaToBeVisited, setAreaToBeVisited] = React.useState("");
-    const [description, setDescription] = React.useState("");
-    const [status, setStatus] = React.useState<(typeof STATUS)[number]>("planned");
-    const [submitting, setSubmitting] = React.useState(false);
+type PJPFormValues = z.infer<typeof PJPSchema>;
 
-    const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
+interface Dealer {
+  name: string;
+  address: string;
+}
 
-    const validate = () => {
-        if (!user?.id) return "Missing user context.";
-        if (!planDate) return "Pick a plan date.";
-        if (!areaToBeVisited.trim()) return "Area to be visited is required.";
-        if (!status) return "Status is required.";
-        return null;
-    };
+// --- Component ---
+export default function AddPJPForm() {
+  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const { user } = useAppStore();
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const err = validate();
-        if (err) return alert(err);
+  const [dealerModalVisible, setDealerModalVisible] = useState(false);
+  const [dealersData, setDealersData] = useState<Dealer[]>([]);
+  const [isDealersLoading, setIsDealersLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
-        const payload = {
-            userId: user!.id,
-            createdById: user!.id,
-            planDate: planDate.toISOString().slice(0, 10),
-            areaToBeVisited: areaToBeVisited.trim(),
-            description: description.trim() || null,
-            status,
-        };
+  const abortControllerRef = React.useRef(new AbortController());
 
-        try {
-            setSubmitting(true);
-            onSubmitted?.(payload);
-        } finally {
-            setSubmitting(false);
+  useEffect(() => {
+    const fetchDealers = async () => {
+      if (!user?.id) {
+        setIsDealersLoading(false);
+        return;
+      }
+
+      abortControllerRef.current = new AbortController();
+      const signal = abortControllerRef.current.signal;
+
+      try {
+        setIsDealersLoading(true);
+        const response = await fetch(`${BASE_URL}/api/dealers/user/${user.id}`, { signal });
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+          setDealersData(result.data);
+        } else {
+          throw new Error(result.error || 'Failed to fetch dealers');
         }
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('Fetch aborted');
+          return;
+        }
+        console.error('Failed to fetch dealers:', err.message);
+        toast.error('Data Fetch Failed', { description: 'Could not load dealer list.' });
+      } finally {
+        setIsDealersLoading(false);
+      }
     };
 
-    return (
-        <form className="space-y-4" onSubmit={handleSubmit}>
-            <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold">Create PJP (Self)</h3>
-                <Button type="button" variant="ghost" size="icon" onClick={onCancel}>
-                    <X className="h-4 w-4" />
-                </Button>
+    fetchDealers();
+
+    return () => {
+      abortControllerRef.current.abort();
+    };
+  }, [user?.id]);
+
+  const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<PJPFormValues>({
+    resolver: zodResolver(PJPSchema) as unknown as Resolver<PJPFormValues, any>,
+    mode: 'onChange',
+    defaultValues: {
+      userId: user?.id,
+      createdById: user?.id,
+      planDate: new Date(),
+      areaToBeVisited: '',
+      description: '',
+      status: 'planned',
+    },
+  });
+
+  const planDate = watch('planDate');
+  const selectedDealerName = watch('areaToBeVisited');
+  const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
+
+  const filteredDealers = dealersData.filter(d =>
+    d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (d.address || '').toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const submit: SubmitHandler<PJPFormValues> = async (values) => {
+    try {
+      const payload = {
+        ...values,
+        planDate: values.planDate.toISOString().slice(0, 10),
+      };
+
+      const response = await fetch(`${BASE_URL}/api/pjp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Failed to create PJP');
+
+      toast.success('PJP Created', {
+        description: 'The new journey plan has been saved.'
+      });
+      window.history.back(); // 👈 FIX: Changed to window.history.back()
+    } catch (error: any) {
+      toast.error('Submission Failed', {
+        description: error.message
+      });
+    }
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center">
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}> {/* 👈 FIX: Changed to window.history.back() */}
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-lg font-bold ml-2">Plan New Journey (PJP)</h1>
+        </div>
+      </header>
+
+      <main className="flex-1 overflow-auto p-6">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-2xl font-bold text-center mb-1">Journey Details</h2>
+          <p className="text-sm text-center text-gray-500 mb-6">Plan a visit for yourself.</p>
+
+          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+            <div className="space-y-1">
+              <Label htmlFor="salesperson">Salesperson</Label>
+              <Input id="salesperson" value={fullName} disabled />
             </div>
 
-            {/* Who */}
-            <div className="grid gap-1">
-                <Label>Salesperson</Label>
-                <div className="text-sm px-3 py-2 rounded-md bg-muted/40 border">
-                    {fullName || "You"}{user?.role ? ` • ${user.role}` : ""}
-                </div>
-            </div>
-
-            {/* Date */}
-            <div className="grid gap-2">
-                <Label>Plan Date</Label>
-                <Popover modal={false}>
+            <div className="space-y-1">
+              <Label htmlFor="planDate">Plan Date *</Label>
+              <Controller
+                control={control}
+                name="planDate"
+                render={({ field }) => (
+                  <Popover>
                     <PopoverTrigger asChild>
-                        <Button type="button" variant="outline" className="w-full justify-start">
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {planDate ? format(planDate, "PPP") : "Pick a date"}
-                        </Button>
+                      <Button
+                        variant={"outline"}
+                        className={`w-full justify-between h-12 font-normal ${!field.value && "text-muted-foreground"}`}
+                      >
+                        {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                        <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                      </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="p-0" align="start">
-                        <Calendar
-                            mode="single"
-                            selected={planDate}
-                            onSelect={(d) => d && setPlanDate(d)}
-                        // usually you plan for today or future
-                        // disabled={(d) => d < new Date(new Date().setHours(0,0,0,0))}
-                        />
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={field.value}
+                        onSelect={field.onChange}
+                        initialFocus
+                      />
                     </PopoverContent>
-                </Popover>
+                  </Popover>
+                )}
+              />
+              {errors.planDate && <p className="text-sm text-red-500 mt-1">{errors.planDate.message}</p>}
             </div>
 
-            {/* Area */}
-            <div className="grid gap-2">
-                <Label>Destination Dealer</Label>
-                <Select value={areaToBeVisited} onValueChange={setAreaToBeVisited}>
-                    <SelectTrigger>
-                        <SelectValue placeholder="Select dealer" />
+            <div className="space-y-1">
+              <Label htmlFor="areaToBeVisited">Select Destination Dealer *</Label>
+              <Dialog open={dealerModalVisible} onOpenChange={setDealerModalVisible}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between h-12">
+                    {selectedDealerName || "Select Destination Dealer"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Select Destination Dealer</DialogTitle>
+                  </DialogHeader>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search dealers..."
+                      className="pl-8 mb-4"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  <div className="h-[200px] overflow-y-auto">
+                    {isDealersLoading ? (
+                      <div className="flex justify-center items-center h-full">
+                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+                      </div>
+                    ) : (
+                      <div className="space-y-1">
+                        {filteredDealers.length > 0 ? (
+                          filteredDealers.map(d => (
+                            <Button
+                              key={d.name} // Using name as key, assuming it's unique
+                              variant="ghost"
+                              className="w-full justify-start"
+                              onClick={() => {
+                                setValue('areaToBeVisited', `${d.name} - ${d.address || ''}`, { shouldValidate: true });
+                                setDealerModalVisible(false);
+                                setSearchQuery('');
+                              }}
+                            >
+                              {d.name} - {d.address || ''}
+                            </Button>
+                          ))
+                        ) : (
+                          <p className="text-center text-sm text-gray-500">No dealers found.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <DialogFooter>
+                    <Button onClick={() => setDealerModalVisible(false)}>Done</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              {errors.areaToBeVisited && <p className="text-sm text-red-500 mt-1">{errors.areaToBeVisited.message}</p>}
+            </div>
+            
+            <div className="space-y-1">
+              <Label htmlFor="description">Description</Label>
+              <Controller
+                control={control}
+                name="description"
+                render={({ field: { value, ...field } }) => (
+                  <textarea
+                    {...field}
+                    placeholder="Description (Optional)"
+                    rows={3}
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={value || ''}
+                  />
+                )}
+              />
+            </div>
+            
+            <div className="space-y-1">
+              <Label htmlFor="status">Status</Label>
+              <Controller
+                control={control}
+                name="status"
+                render={({ field: { onChange, value } }) => (
+                  <Select onValueChange={onChange} value={value}>
+                    <SelectTrigger className="w-full h-12">
+                      <SelectValue placeholder="Select Status" />
                     </SelectTrigger>
                     <SelectContent>
-                        {(dealers || []).map((d) => (
-                            <SelectItem key={d.id} value={String(d.id)}>
-                                {d.name} {d.address ? `– ${d.address}` : ""}
-                            </SelectItem>
-                        ))}
+                      {PJP_STATUS.map(s => (
+                        <SelectItem key={s} value={s}>
+                          {s.charAt(0).toUpperCase() + s.slice(1)}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
-                </Select>
+                  </Select>
+                )}
+              />
+              {errors.status && <p className="text-sm text-red-500 mt-1">{errors.status.message}</p>}
             </div>
 
-            {/* Description (optional) */}
-            <div className="grid gap-2">
-                <Label>Description (optional)</Label>
-                <Textarea
-                    rows={3}
-                    placeholder="Short note/objective for this plan"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                />
-            </div>
-
-            {/* Status */}
-            <div className="grid gap-2">
-                <Label>Status</Label>
-                <Select value={status} onValueChange={(v) => setStatus(v as any)}>
-                    <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
-                    <SelectContent>
-                        {STATUS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                    </SelectContent>
-                </Select>
-            </div>
-
-            {/* Actions */}
-            <div className="flex justify-end gap-3 pt-2">
-                <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-                <Button type="submit" disabled={submitting}>
-                    {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving…</>) : "Save PJP"}
-                </Button>
-            </div>
-        </form>
-    );
+            <Button
+              type="submit"
+              className="w-full h-12"
+              disabled={isSubmitting || !isValid}
+            >
+              {isSubmitting ? "Saving..." : "Save Journey Plan"}
+            </Button>
+          </form>
+        </div>
+      </main>
+      <Toaster />
+    </div>
+  );
 }

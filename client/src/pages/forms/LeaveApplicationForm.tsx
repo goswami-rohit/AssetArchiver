@@ -1,256 +1,179 @@
-import * as React from "react";
-import { useState } from "react";
-import { z } from "zod";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { format } from "date-fns";
+import React from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { useLocation } from "wouter"; // 👈 FIX #1: Switched to wouter
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { Loader2, ArrowLeft, CalendarIcon } from 'lucide-react';
 
+// --- UI Components ---
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar as CalendarIcon, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
 
-// ------------------------------
-// Schema
-// ------------------------------
-const LeaveSchema = z
-    .object({
-        userId: z.number().int().positive(),
-        leaveType: z.string().min(1, "Leave type is required"),
-        startDate: z.date({ required_error: "Start date is required" }),
-        endDate: z.date({ required_error: "End date is required" }),
-        reason: z.string().min(5, "Please provide a brief reason"),
-        // Client sets status to pending; admin updates later
-        status: z.literal("pending").default("pending"),
-    })
-    .refine((v) => v.endDate >= v.startDate, {
-        message: "End date cannot be earlier than start date",
-        path: ["endDate"],
-    });
+// --- Custom Hooks & Constants ---
+import { useAppStore, BASE_URL, LEAVE_TYPE } from '@/components/ReusableUI';
 
-export type LeaveFormValues = z.infer<typeof LeaveSchema>;
+// --- Helper for combining Tailwind classes ---
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
 
-// ------------------------------
-// Props
-// ------------------------------
-type Props = {
-    userId?: number | null; // will be injected by Profile page
-    defaultValues?: Partial<LeaveFormValues>;
-    onSubmitted?: (payload: LeaveFormValues) => void;
-    onCancel?: () => void;
-};
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
 
-// ------------------------------
-// Component
-// ------------------------------
-export default function LeaveApplicationForm({
-    userId,
-    defaultValues,
-    onSubmitted,
-    onCancel,
-}: Props) {
-    const [submitting, setSubmitting] = useState(false);
+// --- Zod Schema ---
+const LeaveSchema = z.object({
+  leaveType: z.string().min(1, "Leave type is required"),
+  startDate: z.date({ required_error: "Start date is required" }),
+  endDate: z.date({ required_error: "End date is required" }),
+  reason: z.string().min(5, "A brief reason of at least 5 characters is required"),
+}).refine((data) => data.endDate >= data.startDate, {
+  message: "End date cannot be earlier than the start date",
+  path: ["endDate"],
+});
 
-    const form = useForm<LeaveFormValues>({
-        resolver: zodResolver(LeaveSchema),
-        mode: "onChange",
-        defaultValues: {
-            userId: userId ?? 0,
-            leaveType: defaultValues?.leaveType ?? "",
-            startDate: defaultValues?.startDate ?? new Date(),
-            endDate: defaultValues?.endDate ?? new Date(),
-            reason: defaultValues?.reason ?? "",
-            status: "pending",
-        },
-    });
+type LeaveFormValues = z.infer<typeof LeaveSchema>;
 
-    const {
-        register,
-        setValue,
-        watch,
-        handleSubmit,
-        formState: { errors, isValid },
-    } = form;
+// --- Component Props (No longer needed) ---
+// interface LeaveApplicationFormProps {
+//   onSubmitted: () => void;
+//   onCancel: () => void;
+// }
 
-    const startDate = watch("startDate");
-    const endDate = watch("endDate");
-    const [openStart, setOpenStart] = useState(false);
-    const [openEnd, setOpenEnd] = useState(false);
+// --- Component ---
+// 👈 FIX #2: Removed props from the component signature
+export default function LeaveApplicationForm() {
+  const { user } = useAppStore();
+  const [, navigate] = useLocation(); // 👈 FIX #3: Using wouter's navigation hook
 
+  const { control, handleSubmit, watch, formState: { errors, isSubmitting, isValid } } = useForm<LeaveFormValues>({
+    resolver: zodResolver(LeaveSchema),
+    mode: 'onChange',
+    defaultValues: {
+      leaveType: '',
+      startDate: new Date(),
+      endDate: new Date(),
+      reason: '',
+    },
+  });
 
-    const submit = async (values: LeaveFormValues) => {
-        setSubmitting(true);
-        try {
-            // Prepare the payload for the endpoint
-            const leavePayload = {
-                userId: values.userId,
-                leaveType: values.leaveType,
-                startDate: values.startDate.toISOString().split('T')[0], // Convert Date to YYYY-MM-DD string
-                endDate: values.endDate.toISOString().split('T')[0],     // Convert Date to YYYY-MM-DD string
-                reason: values.reason,
-                status: "pending" // This will be auto-set by the endpoint's autoFields
-            };
+  const startDate = watch('startDate');
 
-            // Submit to leave-applications endpoint
-            const response = await fetch("/api/leave-applications", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify(leavePayload),
-            });
+  const submit = async (values: LeaveFormValues) => {
+    if (!user?.id) {
+      toast.error("Authentication Error", { description: "User not found. Please log in again." });
+      return;
+    }
+    try {
+      const payload = {
+        userId: user.id,
+        status: 'pending',
+        ...values,
+        startDate: format(values.startDate, 'yyyy-MM-dd'),
+        endDate: format(values.endDate, 'yyyy-MM-dd'),
+      };
 
-            const result = await response.json();
+      const response = await fetch(`${BASE_URL}/api/leave-applications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-            if (!response.ok || !result.success) {
-                throw new Error(result.error || "Failed to submit leave application");
-            }
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to submit leave application");
+      }
 
-            // Call the callback with the successful result
-            onSubmitted?.(values);
+      toast.success("Success", { description: "Your leave application has been submitted." });
+      // 👈 FIX #4: Navigate on success instead of calling a prop
+      setTimeout(() => navigate('/crm'), 1500);
 
-        } catch (error) {
-            console.error("Leave application submission error:", error);
-            alert(`Failed to submit leave application: ${error.message}`);
-        } finally {
-            setSubmitting(false);
-        }
-    };
+    } catch (error: any) {
+      toast.error("Submission Failed", { description: error.message || "An unexpected error occurred." });
+    }
+  };
 
-    return (
-        <form className="space-y-4" onSubmit={handleSubmit(submit)}>
-            {/* Leave Type */}
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Leave Type</label>
-                <input
-                    type="text"
-                    placeholder="Sick/Weather/Family/Personal..."
-                    className="w-full rounded-md border px-3 py-2 text-sm shadow-sm bg-background"
-                    {...form.register("leaveType", { required: "Leave type is required" })}
-                />
-                {errors.leaveType && (
-                    <p className="text-xs text-destructive">{errors.leaveType.message}</p>
-                )}
-            </div>
+  return (
+    <div className="p-6">
+      <DialogHeader>
+        <DialogTitle>Request Time Off</DialogTitle>
+        <p className="text-sm text-muted-foreground pt-1">Fill in the details for your leave request.</p>
+      </DialogHeader>
+      <form onSubmit={handleSubmit(submit)} className="space-y-6 pt-4">
+        <div className="space-y-1">
+          <Label>Leave Type *</Label>
+          <Controller name="leaveType" control={control} render={({ field }) => (
+            <Select onValueChange={field.onChange} value={field.value}>
+              <SelectTrigger><SelectValue placeholder="Select Leave Type..." /></SelectTrigger>
+              <SelectContent>{LEAVE_TYPE.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+            </Select>
+          )} />
+          {errors.leaveType && <p className="text-sm text-red-500 mt-1">{errors.leaveType.message}</p>}
+        </div>
 
-            {/* Start Date */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label>Start Date *</Label>
+            <Controller name="startDate" control={control} render={({ field }) => (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
+              </Popover>
+            )} />
+            {errors.startDate && <p className="text-sm text-red-500 mt-1">{errors.startDate.message}</p>}
+          </div>
+          <div className="space-y-1">
+            <Label>End Date *</Label>
+            <Controller name="endDate" control={control} render={({ field }) => (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} disabled={(date) => date < startDate} initialFocus /></PopoverContent>
+              </Popover>
+            )} />
+            {errors.endDate && <p className="text-sm text-red-500 mt-1">{errors.endDate.message}</p>}
+          </div>
+        </div>
 
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Start date</label>
-                <Popover modal={false} open={openStart} onOpenChange={setOpenStart}>
-                    <PopoverTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className={cn("w-full justify-start text-left font-normal", !startDate && "text-muted-foreground")}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {startDate ? format(startDate, "PPP") : "Pick a date"}
-                        </Button>
-                    </PopoverTrigger>
-                    {/* z-index above Dialog (50 by default) */}
-                    <PopoverContent align="start" sideOffset={8} className="p-0 z-[60]">
-                        <Calendar
-                            mode="single"
-                            selected={startDate}
-                            onSelect={(d) => {
-                                if (!d) return;
-                                setValue("startDate", d, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
-                                // optional: if endDate < startDate, sync it
-                                const currentEnd = watch("endDate");
-                                if (currentEnd && d > currentEnd) {
-                                    setValue("endDate", d, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
-                                }
-                                setOpenStart(false);
-                            }}
-                            initialFocus
-                        />
-                    </PopoverContent>
-                </Popover>
-                {errors.startDate && <p className="text-xs text-destructive">{errors.startDate.message as string}</p>}
-            </div>
+        <Controller name="reason" control={control} render={({ field }) => (
+          <div className="space-y-1">
+            <Label htmlFor="reason">Reason *</Label>
+            <Textarea {...field} id="reason" placeholder="Please provide a reason for your leave..." />
+            {errors.reason && <p className="text-sm text-red-500 mt-1">{errors.reason.message}</p>}
+          </div>
+        )} />
 
-
-            {/* End Date */}
-            <div className="space-y-2">
-                <label className="text-sm font-medium">End date</label>
-                <Popover modal={false} open={openEnd} onOpenChange={setOpenEnd}>
-                    <PopoverTrigger asChild>
-                        <Button
-                            type="button"
-                            variant="outline"
-                            className={cn("w-full justify-start text-left font-normal", !endDate && "text-muted-foreground")}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {endDate ? format(endDate, "PPP") : "Pick a date"}
-                        </Button>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" sideOffset={8} className="p-0 z-[60]">
-                        <Calendar
-                            mode="single"
-                            selected={endDate}
-                            onSelect={(d) => {
-                                if (!d) return;
-                                setValue("endDate", d, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
-                                setOpenEnd(false);
-                            }}
-                            disabled={(date) => (startDate ? date < startDate : false)}
-                            initialFocus
-                        />
-                    </PopoverContent>
-                </Popover>
-                {errors.endDate && <p className="text-xs text-destructive">{errors.endDate.message as string}</p>}
-            </div>
-
-
-            {/* Reason */}
-            <div className="space-y-2">
-                <label className="text-sm font-medium">Reason</label>
-                <Textarea
-                    rows={4}
-                    placeholder="Short description"
-                    {...register("reason")}
-                />
-                {errors.reason && (
-                    <p className="text-xs text-destructive">{errors.reason.message}</p>
-                )}
-            </div>
-
-            {/* Hidden status (pending) */}
-            <input type="hidden" value="pending" {...register("status")} />
-            {/* Hidden userId to keep payload aligned */}
-            <input type="hidden" value={userId ?? 0} {...register("userId", { valueAsNumber: true })} />
-
-            {/* Actions */}
-            <div className="flex items-center gap-2 pt-2">
-                <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
-                    Cancel
-                </Button>
-                <Button type="submit" className="flex-1" disabled={!isValid || submitting}>
-                    {submitting ? (
-                        <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Submitting…
-                        </>
-                    ) : (
-                        "Submit"
-                    )}
-                </Button>
-            </div>
-        </form>
-    );
+        <div className="flex justify-end items-center gap-4 pt-2">
+          {/* 👈 FIX #5: Navigate back on cancel */}
+          <Button type="button" variant="ghost" onClick={() => window.history.back()}>Cancel</Button>
+          <Button type="submit" disabled={!isValid || isSubmitting}>
+            {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</> : "Submit"}
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
 }

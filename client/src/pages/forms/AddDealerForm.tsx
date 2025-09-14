@@ -1,445 +1,602 @@
-import * as React from "react";
+import React, { useState, useEffect } from 'react';
+import type { SubmitHandler, Resolver } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { toast } from 'sonner';
+
+// Shadcn UI Components
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
+import { Toaster } from "@/components/ui/sonner";
+
+// Lucide React Icons
 import {
-  Popover, PopoverTrigger, PopoverContent,
-} from "@/components/ui/popover";
-import {
-  Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem,
-} from "@/components/ui/command";
-import { Check, ChevronsUpDown, X } from "lucide-react";
-import { DEALER_TYPES, REGIONS, AREAS, BRANDS } from "@/components/ReusableUI";
+  ChevronsUpDown,
+  Search,
+  Crosshair,
+  Calendar,
+  ArrowLeft
+} from "lucide-react";
 
-type DealerLite = { id: string; name: string };
+// Reusable Constants & State Management
+import { useAppStore, DEALER_TYPES, BRANDS, FEEDBACKS, BASE_URL } from '../../components/ReusableUI';
 
-// Multi-select component for brands
-function BrandsMultiSelect({
-  value, onChange, placeholder = "Select brands",
-}: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {
-  const [open, setOpen] = React.useState(false);
-  const toggle = (b: string) =>
-    onChange(value.includes(b) ? value.filter(v => v !== b) : [...value, b]);
+// Zod Schema to match the database table
+const DealerSchema = z.object({
+  userId: z.number(),
+  type: z.string().min(1, "Dealer type is required"),
+  isSubDealer: z.boolean(),
+  parentDealerId: z.string().optional().nullable(),
+  name: z.string().min(3, "Name must be at least 3 characters"),
+  region: z.string().min(1, "Region is required"),
+  area: z.string().min(2, "Area is required"),
+  phoneNo: z.string().regex(/^\d{10}$/, "Must be a valid 10-digit phone number"),
+  address: z.string().min(10, "Address must be at least 10 characters"),
+  pinCode: z.string().optional().nullable().refine(val => !val || /^\d{6}$/.test(val), {
+    message: "Must be a 6-digit PIN code",
+  }),
+  latitude: z.coerce.number().optional().nullable(),
+  longitude: z.coerce.number().optional().nullable(),
+  dateOfBirth: z.string().optional().nullable().refine(val => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {
+    message: "Date must be in YYYY-MM-DD format",
+  }),
+  anniversaryDate: z.string().optional().nullable().refine(val => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {
+    message: "Date must be in YYYY-MM-DD format",
+  }),
+  totalPotential: z.coerce.number().min(0, "Must be a non-negative number"),
+  bestPotential: z.coerce.number().min(0, "Must be a non-negative number"),
+  brandSelling: z.array(z.string()).min(1, "Select at least one brand"),
+  feedbacks: z.string().min(1, "Feedback is required"),
+  remarks: z.string().optional(),
+}).refine(data => !data.isSubDealer || (data.isSubDealer && data.parentDealerId), {
+  message: "Parent dealer is required for sub-dealers",
+  path: ["parentDealerId"],
+});
 
-  return (
-    <Popover modal={false} open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          role="combobox"
-          aria-expanded={open}
-          className="w-full justify-between"
-        >
-          {value.length ? `${value.length} selected` : placeholder}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]"
-        align="start"
-        sideOffset={8}
-      >
-        <Command>
-          <CommandInput placeholder="Search brand..." />
-          <CommandList>
-            <CommandEmpty>No brand found.</CommandEmpty>
-            <CommandGroup>
-              {BRANDS.map(b => {
-                const active = value.includes(b);
-                return (
-                  <CommandItem
-                    key={b}
-                    onSelect={() => toggle(b)}
-                    className="cursor-pointer"
-                  >
-                    <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
-                    {b}
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+type DealerFormValues = z.infer<typeof DealerSchema>;
+
+export default function AddDealerForm() {
+  // Removed `useNavigate` and `Maps` from state/hooks
+  const { user } = useAppStore();
+
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+  const [brandsModalOpen, setBrandsModalOpen] = useState(false);
+  const [dealersData, setDealersData] = useState<any[]>([]);
+  const [isDealersLoading, setIsDealersLoading] = useState(true);
+  const [dealerModalOpen, setDealerModalOpen] = useState(false);
+  const [dealerSearchQuery, setDealerSearchQuery] = useState('');
+
+  const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<DealerFormValues>({
+    resolver: zodResolver(DealerSchema) as unknown as Resolver<DealerFormValues, any>,
+    mode: 'onChange',
+    defaultValues: {
+      userId: user?.id ?? 0,
+      type: '',
+      isSubDealer: false,
+      parentDealerId: null,
+      name: '',
+      region: '',
+      area: '',
+      phoneNo: '',
+      address: '',
+      pinCode: null,
+      latitude: null,
+      longitude: null,
+      dateOfBirth: null,
+      anniversaryDate: null,
+      totalPotential: 0,
+      bestPotential: 0,
+      brandSelling: [],
+      feedbacks: '',
+      remarks: '',
+    },
+  });
+
+  const isSubDealer = watch('isSubDealer');
+  const brandSelling = watch('brandSelling');
+  const parentDealerId = watch('parentDealerId');
+
+  const selectedParentDealerName = dealersData.find(d => d.id === parentDealerId)?.name || '';
+
+  const filteredDealers = dealersData.filter(d =>
+    d.name.toLowerCase().includes(dealerSearchQuery.toLowerCase())
   );
-}
 
-export default function AddDealerForm({
-  userId,
-  onCancel,
-}: {
-  userId?: number;
-  onCancel?: () => void;
-}) {
-  const [type, setType] = React.useState<string>("");
-  const [parentDealerId, setParentDealerId] = React.useState<string>("");
-  const [parentDealers, setParentDealers] = React.useState<DealerLite[]>([]);
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const [name, setName] = React.useState("");
-  const [region, setRegion] = React.useState("");
-  const [area, setArea] = React.useState("");
-  const [phoneNo, setPhoneNo] = React.useState("");
-  const [address, setAddress] = React.useState("");
-  const [totalPotential, setTotalPotential] = React.useState("");
-  const [bestPotential, setBestPotential] = React.useState("");
-  const [brandSelling, setBrandSelling] = React.useState<string[]>([]);
-  const [feedbacks, setFeedbacks] = React.useState("");
-  const [remarks, setRemarks] = React.useState("");
-  const [isSubDealer, setIsSubDealer] = React.useState(false);
-  const [latitude, setLatitude] = React.useState("");
-  const [longitude, setLongitude] = React.useState("");
-  const [formattedAddress, setFormattedAddress] = React.useState("");
-
-  // Fetch parent dealers from backend
-  React.useEffect(() => {
-    async function fetchDealers() {
+  useEffect(() => {
+    const fetchDealers = async () => {
       try {
-        const res = await fetch(`/api/dealers/user/${userId}`);
-        if (!res.ok) throw new Error("Failed to fetch dealers");
-        const data = await res.json();
-        setParentDealers(data.data || []); // Use data.data from your API response
+        setIsDealersLoading(true);
+        const response = await fetch(`${BASE_URL}/api/dealers`);
+        const result = await response.json();
+        if (response.ok && result.success) {
+          setDealersData(result.data);
+        } else {
+          toast.error("Failed to load dealers.", {
+            description: "An error occurred while fetching dealer data."
+          });
+        }
       } catch (err) {
-        console.error("Error loading dealers:", err);
+        toast.error("Failed to fetch dealers.", {
+          description: "Please check your network connection."
+        });
+      } finally {
+        setIsDealersLoading(false);
       }
-    }
-    if (userId) {
-      fetchDealers();
-    }
-  }, [userId]);
+    };
+    fetchDealers();
+  }, [user?.id]);
 
-  // Forward geocoding: address -> coords
-  async function forwardGeocode(address: string) {
-    try {
-      const res = await fetch(
-        `https://api.radar.io/v1/geocode/forward?query=${encodeURIComponent(address)}`,
-        { headers: { Authorization: "prj_live_pk_4762150b92e059b7c1855256d8b9cd8b79cfde46" } }
-      );
-      const data = await res.json();
-      if (data.addresses?.length) {
-        const addr = data.addresses[0];
-        setLatitude(String(addr.latitude));
-        setLongitude(String(addr.longitude));
-        setFormattedAddress(addr.formattedAddress);
-        setRegion(addr.state || "");
-        setArea(addr.city || addr.neighborhood || "");
-      }
-    } catch (err) {
-      console.error("Forward geocode failed:", err);
-    }
-  }
-
-  // Reverse geocoding: coords -> address
-  async function reverseGeocode(lat: string, lon: string) {
-    try {
-      const res = await fetch(
-        `https://api.radar.io/v1/geocode/reverse?coordinates=${lat},${lon}`,
-        { headers: { Authorization: "prj_live_pk_4762150b92e059b7c1855256d8b9cd8b79cfde46" } }
-      );
-      const data = await res.json();
-      if (data.addresses?.length) {
-        const addr = data.addresses[0];
-        setFormattedAddress(addr.formattedAddress);
-        setRegion(addr.state || "");
-        setArea(addr.city || addr.neighborhood || "");
-      }
-    } catch (err) {
-      console.error("Reverse geocode failed:", err);
-    }
-  }
-  const validate = (): string | null => {
-    if (!type) return "Type is required.";
-    if (isSubDealer && !parentDealerId) return "Select parent dealer.";
-    if (!name) return "Name is required.";
-    if (!region) return "Region is required.";
-    if (!area) return "Area is required.";
-    if (!phoneNo) return "Phone number is required.";
-    if (!address && !formattedAddress) return "Address is required."; // ← FIX THIS LINE
-    if (!totalPotential || Number.isNaN(Number(totalPotential))) return "Total potential must be a number.";
-    if (!bestPotential || Number.isNaN(Number(bestPotential))) return "Best potential must be a number.";
-    if (!brandSelling.length) return "Select at least one brand.";
-    if (!feedbacks) return "Feedbacks is required.";
-    if (!latitude || !longitude) return "Latitude and longitude are required for geofencing.";
-    return null;
-  };
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const err = validate();
-    if (err) {
-      alert(err);
+  const useMyLocation = () => {
+    setIsLoadingLocation(true);
+    if (!("geolocation" in navigator)) {
+      toast.error("Geolocation not supported", {
+        description: "Your browser does not support location services."
+      });
+      setIsLoadingLocation(false);
       return;
     }
 
-    setIsSubmitting(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setValue('latitude', position.coords.latitude, { shouldValidate: true });
+        setValue('longitude', position.coords.longitude, { shouldValidate: true });
+        toast.success("Location Captured", {
+          description: "Your current location has been saved."
+        });
+        setIsLoadingLocation(false);
+      },
+      (error) => {
+        console.error("Geolocation error:", error);
+        toast.error("Error getting location", {
+          description: error.message || "Could not fetch location."
+        });
+        setIsLoadingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      }
+    );
+  };
 
+  const submit: SubmitHandler<DealerFormValues> = async (values) => {
     try {
-      // Build payload
-      let payload: any = {
-        userId: userId ?? null,
-        type,
-        parentDealerId: isSubDealer ? parentDealerId || null : null,
-        name,
-        region,
-        area,
-        phoneNo,
-        address: formattedAddress || address,
-        totalPotential,
-        bestPotential,
-        brandSelling,
-        feedbacks,
-        remarks: remarks || null,
-        latitude: Number(latitude),
-        longitude: Number(longitude),
+      const payload = {
+        userId: values.userId,
+        type: values.type,
+        parentDealerId: values.isSubDealer ? values.parentDealerId || null : null,
+        name: values.name,
+        region: values.region,
+        area: values.area,
+        phoneNo: values.phoneNo,
+        address: values.address,
+        pinCode: values.pinCode || null,
+        latitude: values.latitude !== null && values.latitude !== undefined ? String(values.latitude) : null,
+        longitude: values.longitude !== null && values.longitude !== undefined ? String(values.longitude) : null,
+        dateOfBirth: values.dateOfBirth || null,
+        anniversaryDate: values.anniversaryDate || null,
+        totalPotential: String(values.totalPotential),
+        bestPotential: String(values.bestPotential),
+        brandSelling: values.brandSelling,
+        feedbacks: values.feedbacks,
+        remarks: values.remarks || null,
       };
 
-      // 🔥 Ensure we never send id/createdAt/updatedAt (remove if present)
-      delete payload.id;
-      delete payload.createdAt;
-      delete payload.updatedAt;
-
-      console.log("Sending payload:", payload);
-
-      const response = await fetch("/api/dealers", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const response = await fetch(`${BASE_URL}/api/dealers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       const result = await response.json();
-      console.log("Backend response:", result);
-
-      if (result.success) {
-        alert(`✅ Dealer created successfully! 
-Dealer ID: ${result.data.id}
-Geofence ID: ${result.geofenceRef?.id}
-Radius: ${result.geofenceRef?.radiusMeters}m`);
-
-        // Reset form
-        setType("");
-        setParentDealerId("");
-        setName("");
-        setRegion("");
-        setArea("");
-        setPhoneNo("");
-        setAddress("");
-        setTotalPotential("");
-        setBestPotential("");
-        setBrandSelling([]);
-        setFeedbacks("");
-        setRemarks("");
-        setLatitude("");
-        setLongitude("");
-        setFormattedAddress("");
-        setIsSubDealer(false);
-
-        onCancel?.();
-      } else {
-        alert(`❌ Error: ${result.error}`);
-        if (result.details) {
-          console.error("Validation details:", result.details);
-        }
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create dealer');
       }
+
+      toast.success("Dealer Created", {
+        description: "The new dealer has been saved."
+      });
+      // Replaced `Maps(-1)` with `window.history.back()`
+      window.history.back();
     } catch (error: any) {
-      alert(`❌ Failed to create dealer: ${error.message}`);
-    } finally {
-      setIsSubmitting(false);
+      toast.error("Submission Failed", {
+        description: error?.message || "An unexpected error occurred."
+      });
     }
   };
+
   return (
-    <form className="space-y-4" onSubmit={submit}>
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">Add Dealer / Sub-Dealer</h3>
-        <Button type="button" variant="ghost" size="icon" onClick={onCancel}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-
-      {/* Dealer or Sub-Dealer toggle */}
-      <div className="flex items-center gap-2">
-        <input
-          id="isSubDealer"
-          type="checkbox"
-          checked={isSubDealer}
-          onChange={(e) => setIsSubDealer(e.target.checked)}
-          className="h-4 w-4"
-        />
-        <Label htmlFor="isSubDealer">Is Sub-Dealer?</Label>
-      </div>
-
-      {/* Type */}
-      <div className="grid gap-2">
-        <Label>Type</Label>
-        <Select value={type} onValueChange={setType}>
-          <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-          <SelectContent className="z-[60]">
-            {DEALER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Parent Dealer */}
-      {isSubDealer && (
-        <div className="grid gap-2">
-          <Label>Parent Dealer</Label>
-          <Select value={parentDealerId} onValueChange={setParentDealerId}>
-            <SelectTrigger><SelectValue placeholder="Select parent dealer" /></SelectTrigger>
-            <SelectContent className="z-[60]">
-              {parentDealers.length
-                ? parentDealers.map(d => (
-                  <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                ))
-                : <div className="px-3 py-2 text-sm text-muted-foreground">No dealers available</div>}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      <div className="grid gap-2">
-        <Label>Dealer/Sub-Dealer Name</Label>
-        <Input value={name} onChange={e => setName(e.target.value)} required />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Region</Label>
-          <Select value={region} onValueChange={setRegion}>
-            <SelectTrigger><SelectValue placeholder="Select region" /></SelectTrigger>
-            <SelectContent className="z-[60]">
-              {REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-2">
-          <Label>Area</Label>
-          <Input
-            placeholder="Type area / locality"
-            value={area}
-            onChange={e => setArea(e.target.value)}
-            required
-          />
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Address</Label>
-        <Textarea
-          rows={2}
-          value={formattedAddress || address}
-          onChange={e => setAddress(e.target.value)}
-          placeholder="Type dealer address"
-          required
-        />
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => forwardGeocode(address)}
-          >
-            Geocode Address
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center">
+          {/* Replaced `Maps(-1)` with `window.history.back()` */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
+            <ArrowLeft className="h-4 w-4" />
           </Button>
+          <h1 className="text-lg font-bold ml-2">Add New Dealer</h1>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Latitude</Label>
-          <Input value={latitude} readOnly />
+      <main className="flex-1 overflow-auto p-6">
+        <div className="max-w-3xl mx-auto">
+          <h2 className="text-2xl font-bold text-center mb-1">Dealer Information</h2>
+          <p className="text-sm text-center text-gray-500 mb-6">Fill in the details for the new dealer.</p>
+
+          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+            <div className="flex items-center justify-between rounded-lg border p-4">
+              <Label htmlFor="is-sub-dealer">Is this a Sub-Dealer?</Label>
+              <Controller
+                control={control}
+                name="isSubDealer"
+                render={({ field: { onChange, value } }) => (
+                  <Switch
+                    checked={value}
+                    onCheckedChange={onChange}
+                    id="is-sub-dealer"
+                  />
+                )}
+              />
+            </div>
+
+            {isSubDealer && (
+              <div className="space-y-1">
+                <Dialog open={dealerModalOpen} onOpenChange={setDealerModalOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" className="w-full justify-between h-12">
+                      {selectedParentDealerName || "Select Parent Dealer *"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[425px]">
+                    <DialogHeader>
+                      <DialogTitle>Select Parent Dealer</DialogTitle>
+                    </DialogHeader>
+                    <div className="relative">
+                      <Search className="absolute left-2.5 top-3 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search dealers..."
+                        className="pl-8 mb-4"
+                        value={dealerSearchQuery}
+                        onChange={(e) => setDealerSearchQuery(e.target.value)}
+                      />
+                    </div>
+                    <div className="h-[200px] overflow-y-auto">
+                      {isDealersLoading ? (
+                        <div className="flex justify-center items-center h-full">
+                          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          {filteredDealers.length > 0 ? (
+                            filteredDealers.map(d => (
+                              <Button
+                                key={d.id}
+                                variant="ghost"
+                                className="w-full justify-start"
+                                onClick={() => {
+                                  setValue('parentDealerId', d.id, { shouldValidate: true });
+                                  setDealerModalOpen(false);
+                                  setDealerSearchQuery('');
+                                }}
+                              >
+                                {d.name}
+                              </Button>
+                            ))
+                          ) : (
+                            <p className="text-center text-sm text-gray-500">No dealers found.</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button onClick={() => setDealerModalOpen(false)}>Done</Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                {errors.parentDealerId && <p className="text-sm text-red-500 mt-1">{errors.parentDealerId.message}</p>}
+              </div>
+            )}
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="type"
+                render={({ field: { onChange, value } }) => (
+                  <Select onValueChange={onChange} value={value}>
+                    <SelectTrigger className="w-full h-12">
+                      <SelectValue placeholder="Select Dealer Type *" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEALER_TYPES.map(t => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.type && <p className="text-sm text-red-500 mt-1">{errors.type.message}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="name"
+                render={({ field }) => (
+                  <Input {...field} placeholder="Dealer Name *" className="h-12" />
+                )}
+              />
+              {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name.message}</p>}
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="region"
+                  render={({ field }) => (
+                    <Input {...field} placeholder="Region *" className="h-12" />
+                  )}
+                />
+                {errors.region && <p className="text-sm text-red-500 mt-1">{errors.region.message}</p>}
+              </div>
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="area"
+                  render={({ field }) => (
+                    <Input {...field} placeholder="Area *" className="h-12" />
+                  )}
+                />
+                {errors.area && <p className="text-sm text-red-500 mt-1">{errors.area.message}</p>}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="address"
+                render={({ field }) => (
+                  <textarea {...field} placeholder="Address *" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+                )}
+              />
+              {errors.address && <p className="text-sm text-red-500 mt-1">{errors.address.message}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="phoneNo"
+                render={({ field }) => (
+                  <Input {...field} placeholder="Phone No *" type="tel" className="h-12" />
+                )}
+              />
+              {errors.phoneNo && <p className="text-sm text-red-500 mt-1">{errors.phoneNo.message}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="pinCode"
+                render={({ field: { value, ...field } }) => (
+                  <Input
+                    {...field}
+                    placeholder="PIN Code"
+                    type="number"
+                    className="h-12"
+                    value={value !== null && value !== undefined ? String(value) : ''}
+                  />
+                )}
+              />
+              {errors.pinCode && <p className="text-sm text-red-500 mt-1">{errors.pinCode.message}</p>}
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <Controller
+                  control={control}
+                  name="latitude"
+                  render={({ field: { value, ...field } }) => (
+                    <Input
+                      {...field}
+                      placeholder="Latitude"
+                      value={value !== null && value !== undefined ? String(value) : ''}
+                      disabled
+                    />
+                  )}
+                />
+              </div>
+              <div className="flex-1">
+                <Controller
+                  control={control}
+                  name="longitude"
+                  render={({ field: { value, ...field } }) => (
+                    <Input
+                      {...field}
+                      placeholder="Longitude"
+                      value={value !== null && value !== undefined ? String(value) : ''}
+                      disabled
+                    />
+                  )}
+                />
+              </div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={useMyLocation}
+              disabled={isLoadingLocation}
+              className="w-full h-12"
+            >
+              {isLoadingLocation ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent mr-2" />
+                  Fetching Location...
+                </>
+              ) : (
+                <>
+                  <Crosshair className="h-4 w-4 mr-2" />
+                  Use My Current Location
+                </>
+              )}
+            </Button>
+
+            ---
+
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="dateOfBirth"
+                  render={({ field: { value, ...field } }) => (
+                    <div className="relative">
+                      <Input
+                        {...field}
+                        placeholder="Date of Birth (YYYY-MM-DD)"
+                        className="h-12"
+                        value={value || ''}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
+                />
+                {errors.dateOfBirth && <p className="text-sm text-red-500 mt-1">{errors.dateOfBirth.message}</p>}
+              </div>
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="anniversaryDate"
+                  render={({ field: { value, ...field } }) => (
+                    <div className="relative">
+                      <Input
+                        {...field}
+                        placeholder="Anniversary Date (YYYY-MM-DD)"
+                        className="h-12"
+                        value={value || ''}
+                      />
+                      <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                  )}
+                />
+                {errors.anniversaryDate && <p className="text-sm text-red-500 mt-1">{errors.anniversaryDate.message}</p>}
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="totalPotential"
+                  render={({ field }) => (
+                    <Input {...field} placeholder="Total Potential *" type="number" className="h-12" />
+                  )}
+                />
+                {errors.totalPotential && <p className="text-sm text-red-500 mt-1">{errors.totalPotential.message}</p>}
+              </div>
+              <div className="flex-1 space-y-1">
+                <Controller
+                  control={control}
+                  name="bestPotential"
+                  render={({ field }) => (
+                    <Input {...field} placeholder="Best Potential *" type="number" className="h-12" />
+                  )}
+                />
+                {errors.bestPotential && <p className="text-sm text-red-500 mt-1">{errors.bestPotential.message}</p>}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Dialog open={brandsModalOpen} onOpenChange={setBrandsModalOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between h-12">
+                    {brandSelling?.length > 0 ? brandSelling.join(', ') : 'Select brands...'}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Select Brands</DialogTitle>
+                  </DialogHeader>
+                  <div className="grid gap-2 overflow-y-auto max-h-[300px]">
+                    {BRANDS.map(brand => (
+                      <div key={brand} className="flex items-center space-x-2">
+                        <Checkbox
+                          id={brand}
+                          checked={brandSelling.includes(brand)}
+                          onCheckedChange={(checked) => {
+                            if (checked) {
+                              setValue('brandSelling', [...brandSelling, brand], { shouldValidate: true });
+                            } else {
+                              setValue('brandSelling', brandSelling.filter(b => b !== brand), { shouldValidate: true });
+                            }
+                          }}
+                        />
+                        <Label htmlFor={brand} className="cursor-pointer font-normal">{brand}</Label>
+                      </div>
+                    ))}
+                  </div>
+                  <DialogFooter>
+                    <Button onClick={() => setBrandsModalOpen(false)}>Done</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              {errors.brandSelling && <p className="text-sm text-red-500 mt-1">{errors.brandSelling.message}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="feedbacks"
+                render={({ field: { onChange, value } }) => (
+                  <Select onValueChange={onChange} value={value}>
+                    <SelectTrigger className="w-full h-12">
+                      <SelectValue placeholder="Select Feedback *" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {FEEDBACKS.map(f => (
+                        <SelectItem key={f} value={f}>{f}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {errors.feedbacks && <p className="text-sm text-red-500 mt-1">{errors.feedbacks.message}</p>}
+            </div>
+
+            <div className="space-y-1">
+              <Controller
+                control={control}
+                name="remarks"
+                render={({ field }) => (
+                  <textarea {...field} placeholder="Remarks" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+                )}
+              />
+              {errors.remarks && <p className="text-sm text-red-500 mt-1">{errors.remarks.message}</p>}
+            </div>
+
+            <Button
+              type="submit"
+              className="w-full h-12"
+              disabled={isSubmitting || !isValid}
+            >
+              {isSubmitting ? "Saving..." : "Save Dealer"}
+            </Button>
+          </form>
         </div>
-        <div className="grid gap-2">
-          <Label>Longitude</Label>
-          <Input value={longitude} readOnly />
-        </div>
-      </div>
-
-      <div className="flex gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={async () => {
-            if (navigator.geolocation) {
-              navigator.geolocation.getCurrentPosition(
-                async (pos) => {
-                  const lat = String(pos.coords.latitude);
-                  const lon = String(pos.coords.longitude);
-                  setLatitude(lat);
-                  setLongitude(lon);
-                  // Automatically reverse geocode to get address
-                  await reverseGeocode(lat, lon);
-                },
-                (err) => {
-                  alert("Failed to get location: " + err.message);
-                }
-              );
-            } else {
-              alert("Geolocation not supported in this browser.");
-            }
-          }}
-        >
-          Use My Location
-        </Button>
-
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => reverseGeocode(latitude, longitude)}
-          disabled={!latitude || !longitude}
-        >
-          Reverse Geocode
-        </Button>
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Phone No</Label>
-        <Input inputMode="tel" value={phoneNo} onChange={e => setPhoneNo(e.target.value)} required />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Total Potential</Label>
-          <Input inputMode="decimal" value={totalPotential} onChange={e => setTotalPotential(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Best Potential</Label>
-          <Input inputMode="decimal" value={bestPotential} onChange={e => setBestPotential(e.target.value)} required />
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Brands Selling</Label>
-        <BrandsMultiSelect value={brandSelling} onChange={setBrandSelling} />
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Feedbacks</Label>
-        <Select value={feedbacks} onValueChange={setFeedbacks}>
-          <SelectTrigger><SelectValue placeholder="Select feedback" /></SelectTrigger>
-          <SelectContent className="z-[60]">
-            <SelectItem value="Interested">Interested</SelectItem>
-            <SelectItem value="Not Interested">Not Interested</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Remarks (optional)</Label>
-        <Textarea rows={2} value={remarks} onChange={e => setRemarks(e.target.value)} />
-      </div>
-
-      <div className="flex justify-end gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={isSubmitting}>
-          {isSubmitting ? "Creating..." : "Save Dealer"}
-        </Button>
-      </div>
-    </form>
+      </main>
+      <Toaster />
+    </div>
   );
 }

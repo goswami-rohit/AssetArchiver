@@ -1,507 +1,354 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useState, useEffect, useRef } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
+import { toast } from 'sonner';
+import { Loader2, ArrowLeft, Camera, MapPin } from 'lucide-react';
+
+// --- UI Components ---
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Check, ChevronsUpDown, Crosshair, Camera, X, RefreshCw } from "lucide-react";
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-} from "@/components/ui/command";
-import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Card, CardContent } from "@/components/ui/card";
 
-import { DEALER_TYPES, BRANDS } from "@/components/ReusableUI";
+// --- Custom Hooks & Constants ---
+import { useAppStore, DEALER_TYPES, BRANDS, FEEDBACKS, BASE_URL } from '@/components/ReusableUI';
 
-type DVRFormProps = {
-    userId?: number;                 // optional; pass from parent if you want
-    onSubmitted?: (payload: any) => void;
-    onCancel?: () => void;
-};
+// --- Type Definitions ---
+type Step = 'checkin' | 'form' | 'checkout' | 'loading' | 'submitting';
 
-const FEEDBACKS = ["Interested", "Not Interested"] as const;
+// --- Zod Schema ---
+const DVReportSchema = z.object({
+  userId: z.number().int().positive(),
+  reportDate: z.string().min(1, "Report date is required"),
+  dealerType: z.string().min(1, "Dealer type is required"),
+  dealerName: z.string().min(1, "Dealer name is required"),
+  subDealerName: z.string().optional().nullable(),
+  location: z.string().min(1, "Location is required"),
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  visitType: z.string().min(1, "Visit type is required"),
+  dealerTotalPotential: z.coerce.number().positive("Must be a positive number"),
+  dealerBestPotential: z.coerce.number().positive("Must be a positive number"),
+  brandSelling: z.string().array().min(1, "Select at least one brand"),
+  contactPerson: z.string().optional().nullable(),
+  contactPersonPhoneNo: z.string().optional().nullable(),
+  todayOrderMt: z.coerce.number().min(0, "Cannot be negative"),
+  todayCollectionRupees: z.coerce.number().min(0, "Cannot be negative"),
+  overdueAmount: z.coerce.number().optional().nullable(),
+  feedbacks: z.string().min(1, "Feedback is required"),
+  solutionBySalesperson: z.string().optional().nullable(),
+  anyRemarks: z.string().optional().nullable(),
+});
+type DVReportFormValues = z.infer<typeof DVReportSchema>;
 
-type Step = "checkin" | "form" | "checkout";
-
-function useCamera() {
-    const streamRef = useRef<MediaStream | null>(null);
-
-    const start = async (videoEl: HTMLVideoElement) => {
-        streamRef.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-        videoEl.srcObject = streamRef.current;
-        await videoEl.play();
-    };
-
-    const stop = () => {
-        streamRef.current?.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-    };
-
-    const capture = (videoEl: HTMLVideoElement) => {
-        const canvas = document.createElement("canvas");
-        canvas.width = videoEl.videoWidth || 1280;
-        canvas.height = videoEl.videoHeight || 720;
-        const ctx = canvas.getContext("2d");
-        if (ctx) ctx.drawImage(videoEl, 0, 0);
-        return canvas.toDataURL("image/jpeg", 0.85);
-    };
-
-    return { start, stop, capture };
+// --- Helper: Convert Data URL to Blob ---
+async function dataURLtoBlob(dataurl: string): Promise<Blob> {
+  const res = await fetch(dataurl);
+  return await res.blob();
 }
 
-// DVR form multiselect 
-export function BrandsMultiSelect({
-    value,
-    onChange,
-    placeholder = "Select brands",
-}: {
-    value: string[];
-    onChange: (v: string[]) => void;
-    placeholder?: string;
-}) {
-    const [open, setOpen] = React.useState(false);
+// --- Component ---
+export default function DVRForm() {
+  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const { user } = useAppStore();
 
-    const toggle = (brand: string) => {
-        if (value.includes(brand)) onChange(value.filter((b) => b !== brand));
-        else onChange([...value, brand]);
-    };
+  const [step, setStep] = useState<Step>('loading');
+  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
+  const [checkOutPhoto, setCheckOutPhoto] = useState<string | null>(null);
+  const [checkInTime, setCheckInTime] = useState<string | null>(null);
+  const [isBrandsDialogOpen, setIsBrandsDialogOpen] = useState(false);
+  const [isGeoLoading, setIsGeoLoading] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-    return (
-        <Popover modal={false} open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-                <Button
-                    type="button"               // ← don’t submit the form
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={open}
-                    className="w-full justify-between"
-                >
-                    {value.length ? `${value.length} selected` : placeholder}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-            </PopoverTrigger>
+  const { control, handleSubmit, setValue, trigger, watch, formState: { errors } } = useForm<DVReportFormValues>({
+    resolver: zodResolver(DVReportSchema),
+    mode: 'onChange',
+    defaultValues: {
+      userId: user?.id,
+      reportDate: new Date().toISOString().slice(0, 10),
+      dealerTotalPotential: undefined,
+      dealerBestPotential: undefined,
+      todayOrderMt: 0,
+      todayCollectionRupees: 0,
+      overdueAmount: undefined,
+      brandSelling: [],
+    },
+  });
 
-            <PopoverContent
-                className="w-[min(22rem,calc(100vw-2rem))] p-0 z-[60]"  // ← stay above dialog
-                align="start"
-                sideOffset={8}
-            >
-                <Command>
-                    <CommandInput placeholder="Search brand..." />
-                    <CommandList>
-                        <CommandEmpty>No brand found.</CommandEmpty>
-                        <CommandGroup>
-                            {BRANDS.map(brand => {
-                                const active = value.includes(brand);
-                                return (
-                                    <CommandItem
-                                        key={brand}
-                                        onSelect={() => toggle(brand)} // keep open for multi-pick
-                                        className="cursor-pointer"
-                                    >
-                                        <Check className={`mr-2 h-4 w-4 ${active ? "opacity-100" : "opacity-0"}`} />
-                                        {brand}
-                                    </CommandItem>
-                                );
-                            })}
-                        </CommandGroup>
-                    </CommandList>
-                </Command>
-            </PopoverContent>
-        </Popover>
+  const brandSelling = watch('brandSelling');
+
+  useEffect(() => {
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(() => setStep('checkin'))
+      .catch(() => {
+        toast.error("Permission Denied", { description: "Camera access is required to proceed." });
+        window.history.back(); // 👈 FIX: Changed to window.history.back()
+      });
+  }, []); // 👈 FIX: Removed navigate from dependency array
+
+  const handleOpenCamera = async () => {
+    try {
+      setIsCameraOpen(true);
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      toast.error("Camera Error", { description: "Could not start the camera." });
+      setIsCameraOpen(false);
+    }
+  };
+
+  const handleCapture = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+      const dataUrl = canvas.toDataURL('image/jpeg');
+
+      if (step === 'checkin') {
+        setCheckInPhoto(dataUrl);
+        setCheckInTime(new Date().toISOString());
+        setStep('form');
+      } else if (step === 'checkout') {
+        setCheckOutPhoto(dataUrl);
+      }
+
+      // Stop camera stream
+      if (video.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+      setIsCameraOpen(false);
+    }
+  };
+
+  const useMyLocation = () => {
+    setIsGeoLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setValue('latitude', latitude, { shouldValidate: true });
+        setValue('longitude', longitude, { shouldValidate: true });
+        setValue('location', `Lat ${latitude.toFixed(5)}, Lon ${longitude.toFixed(5)}`, { shouldValidate: true });
+        toast.success('Location Captured');
+        setIsGeoLoading(false);
+      },
+      (error) => {
+        toast.error("Location Error", { description: error.message });
+        setIsGeoLoading(false);
+      }
     );
-}
+  };
 
-export default function DVRForm({ userId, onSubmitted, onCancel }: DVRFormProps) {
-    const [step, setStep] = useState<Step>("checkin");
+  const handleProceedToCheckout = async () => {
+    const isValid = await trigger();
+    if (isValid) setStep('checkout');
+    else toast.error('Validation Error', { description: 'Please fill all required fields correctly.' });
+  };
 
-    // images
-    const [inPhoto, setInPhoto] = useState<string | null>(null);
-    const [outPhoto, setOutPhoto] = useState<string | null>(null);
-    const [checkInTime, setCheckInTime] = useState<string | null>(null);
-    const [checkOutTime, setCheckOutTime] = useState<string | null>(null);
+  const submit = async (data: DVReportFormValues) => {
+    if (!checkInPhoto || !checkOutPhoto) {
+      toast.error('Photo Missing', { description: 'Check-in and Check-out photos are required.' });
+      return;
+    }
+    setStep('submitting');
 
-    // core fields
-    const [reportDate, setReportDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-    const [dealerType, setDealerType] = useState<string>("");
-    const [dealerName, setDealerName] = useState("");
-    const [subDealerName, setSubDealerName] = useState("");
-    const [location, setLocation] = useState("");
-    const [latitude, setLatitude] = useState<string>("");
-    const [longitude, setLongitude] = useState<string>("");
-    const [visitType, setVisitType] = useState<string>("");
-    const [dealerTotalPotential, setDealerTotalPotential] = useState<string>("");
-    const [dealerBestPotential, setDealerBestPotential] = useState<string>("");
-    const [brandSelling, setBrandSelling] = useState<string[]>([]);
-    const [contactPerson, setContactPerson] = useState("");
-    const [contactPersonPhoneNo, setContactPersonPhoneNo] = useState("");
-    const [todayOrderMt, setTodayOrderMt] = useState<string>("");
-    const [todayCollectionRupees, setTodayCollectionRupees] = useState<string>("");
-    const [overdueAmount, setOverdueAmount] = useState<string>("");
-    const [feedbacks, setFeedbacks] = useState<string>("");
-    const [solutionBySalesperson, setSolutionBySalesperson] = useState("");
-    const [anyRemarks, setAnyRemarks] = useState("");
-
-    const [submitting, setSubmitting] = useState(false);
-    const [geoBusy, setGeoBusy] = useState(false);
-
-    // camera refs
-    const videoRef = useRef<HTMLVideoElement | null>(null);
-    const { start, stop, capture } = useCamera();
-
-    // Start camera for check-in / checkout steps
-    useEffect(() => {
-        if ((step === "checkin" || step === "checkout") && videoRef.current) {
-            start(videoRef.current).catch(err => console.error("camera error:", err));
-            return () => stop();
+    try {
+      const formData = new FormData();
+      Object.entries(data).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          formData.append(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
         }
-    }, [step, start, stop]);
+      });
+      formData.append('checkInTime', checkInTime!);
+      formData.append('checkOutTime', new Date().toISOString());
+      formData.append('inTimeImage', await dataURLtoBlob(checkInPhoto), 'checkin.jpg');
+      formData.append('outTimeImage', await dataURLtoBlob(checkOutPhoto), 'checkout.jpg');
 
-    const doCapture = () => {
-        if (!videoRef.current) return;
-        const dataUrl = capture(videoRef.current);
-        if (step === "checkin") {
-            setInPhoto(dataUrl);
-            setCheckInTime(new Date().toISOString());
-            stop();
-            setStep("form");
-        } else {
-            setOutPhoto(dataUrl);
-            setCheckOutTime(new Date().toISOString());
-            stop();
-            // final submit after checkout
-            handleSubmit();
-        }
-    };
+      const response = await fetch(`${BASE_URL}/api/daily-visit-reports`, {
+        method: 'POST',
+        body: formData, // Headers are set automatically for FormData
+      });
 
-    const useMyLocation = async () => {
-        try {
-            setGeoBusy(true);
-            const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-                navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 })
-            );
-            setLatitude(String(pos.coords.latitude));
-            setLongitude(String(pos.coords.longitude));
-            if (!location) setLocation(`Lat ${pos.coords.latitude.toFixed(5)}, Lng ${pos.coords.longitude.toFixed(5)}`);
-        } catch (e) {
-            console.error("geolocation error", e);
-            alert("Unable to get your location. Check permissions.");
-        } finally {
-            setGeoBusy(false);
-        }
-    };
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({ error: "An unknown error occurred" }));
+        throw new Error(result.error || 'Failed to submit report.');
+      }
 
-    const validate = (): string | null => {
-        // every field mandatory; yes, it’s strict
-        const required = [
-            reportDate, dealerType, location, latitude, longitude, visitType,
-            dealerTotalPotential, dealerBestPotential, todayOrderMt,
-            todayCollectionRupees, feedbacks, inPhoto,
-        ];
-        if (required.some(v => v === "" || v == null)) return "Please fill all required fields and take the check-in photo.";
-        if (!brandSelling.length) return "Select at least one brand.";
+      toast.success('DVR Submitted Successfully');
+      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+
+    } catch (error: any) {
+      toast.error('Submission Failed', { description: error.message });
+      setStep('checkout');
+    }
+  };
+
+  const renderCheckInOrOut = (isCheckout: boolean) => (
+    <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+      <h1 className="text-2xl font-bold">{isCheckout ? 'Dealer Checkout' : 'Dealer Check-in'}</h1>
+      <p className="text-muted-foreground mb-6">Take a selfie to {isCheckout ? 'complete' : 'start'} the visit.</p>
+      <Avatar className="w-48 h-48 mb-6 border-2">
+        <AvatarImage src={(isCheckout ? checkOutPhoto : checkInPhoto) || ''} alt="Selfie" />
+        <AvatarFallback><Camera className="w-16 h-16 text-muted-foreground" /></AvatarFallback>
+      </Avatar>
+      <Button onClick={handleOpenCamera} className="w-full max-w-sm mb-4">
+        <Camera className="mr-2 h-4 w-4" /> Open Camera
+      </Button>
+      {isCheckout && checkOutPhoto && (
+        <Button onClick={() => handleSubmit(submit)()} className="w-full max-w-sm">
+          {step === 'submitting' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Complete & Submit Report
+        </Button>
+      )}
+    </div>
+  );
+
+  const renderContent = () => {
+    switch (step) {
+      case 'loading':
+      case 'submitting':
+        return (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+          </div>
+        );
+      case 'checkin':
+        return renderCheckInOrOut(false);
+      case 'checkout':
+        return renderCheckInOrOut(true);
+      case 'form':
+        return (
+          <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6">
+            <div className="flex items-center gap-4 border-b pb-4">
+              <Avatar className="w-20 h-20"><AvatarImage src={checkInPhoto || ''} /></Avatar>
+              <div className="space-y-1">
+                <h2 className="text-xl font-bold">Visit Details</h2>
+                <p className="text-sm text-muted-foreground">Fill in all the required information below.</p>
+              </div>
+            </div>
+
+            {/* Form fields... */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Controller name="dealerType" control={control} render={({ field }) => (
+                <div className="space-y-1"><Label>Dealer Type *</Label><Select onValueChange={field.onChange} value={field.value}><SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger><SelectContent>{DEALER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>{errors.dealerType && <p className="text-sm text-red-500 mt-1">{errors.dealerType.message}</p>}</div>
+              )} />
+              <Controller name="dealerName" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="dealerName">Dealer Name *</Label><Input id="dealerName" {...field} />{errors.dealerName && <p className="text-sm text-red-500 mt-1">{errors.dealerName.message}</p>}</div>)} />
+            </div>
+            <Controller name="subDealerName" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="subDealerName">Sub Dealer Name</Label><Input id="subDealerName" {...field} value={field.value || ''} /></div>)} />
+
+            <div className="space-y-1">
+              <Label htmlFor="location">Location *</Label>
+              <div className="flex gap-2">
+                <Controller name="location" control={control} render={({ field }) => (<Input id="location" {...field} className="flex-1" />)} />
+                <Button type="button" variant="outline" onClick={useMyLocation} disabled={isGeoLoading}>
+                  {isGeoLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
+                </Button>
+              </div>
+              {errors.location && <p className="text-sm text-red-500 mt-1">{errors.location.message}</p>}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Controller name="visitType" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="visitType">Visit Type *</Label><Input id="visitType" {...field} />{errors.visitType && <p className="text-sm text-red-500 mt-1">{errors.visitType.message}</p>}</div>)} />
+              <Controller name="dealerTotalPotential" control={control} render={({ field }) => (<div className="space-y-1"><Label>Total Potential (MT)*</Label><Input {...field} type="number" onChange={e => field.onChange(e.target.valueAsNumber)} />{errors.dealerTotalPotential && <p className="text-sm text-red-500 mt-1">{errors.dealerTotalPotential.message}</p>}</div>)} />
+              <Controller name="dealerBestPotential" control={control} render={({ field }) => (<div className="space-y-1"><Label>Best Potential (MT)*</Label><Input {...field} type="number" onChange={e => field.onChange(e.target.valueAsNumber)} />{errors.dealerBestPotential && <p className="text-sm text-red-500 mt-1">{errors.dealerBestPotential.message}</p>}</div>)} />
+            </div>
+
+            <div className="space-y-1">
+              <Label>Brands Selling *</Label>
+              <Button type="button" variant="outline" className="w-full justify-start font-normal" onClick={() => setIsBrandsDialogOpen(true)}>{brandSelling.length ? brandSelling.join(', ') : 'Select brands...'}</Button>
+              {errors.brandSelling && <p className="text-sm text-red-500 mt-1">{errors.brandSelling.message}</p>}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Controller name="contactPerson" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="contactPerson">Contact Person</Label><Input id="contactPerson" {...field} value={field.value || ''} /></div>)} />
+              <Controller name="contactPersonPhoneNo" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="contactPersonPhoneNo">Contact Phone</Label><Input id="contactPersonPhoneNo" type="tel" {...field} value={field.value || ''} /></div>)} />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Controller name="todayOrderMt" control={control} render={({ field }) => (<div className="space-y-1"><Label>Today's Order (MT)*</Label><Input {...field} type="number" onChange={e => field.onChange(e.target.valueAsNumber)} />{errors.todayOrderMt && <p className="text-sm text-red-500 mt-1">{errors.todayOrderMt.message}</p>}</div>)} />
+              <Controller name="todayCollectionRupees" control={control} render={({ field }) => (<div className="space-y-1"><Label>Today's Collection (₹)*</Label><Input {...field} type="number" onChange={e => field.onChange(e.target.valueAsNumber)} />{errors.todayCollectionRupees && <p className="text-sm text-red-500 mt-1">{errors.todayCollectionRupees.message}</p>}</div>)} />
+              <Controller name="overdueAmount" control={control} render={({ field }) => (<div className="space-y-1"><Label>Overdue Amount (₹)</Label><Input {...field} value={field.value ?? ''} type="number" onChange={e => field.onChange(e.target.valueAsNumber)} /></div>)} />                 </div>
+
+            <Controller name="feedbacks" control={control} render={({ field }) => (<div className="space-y-1"><Label>Feedback *</Label><Select onValueChange={field.onChange} value={field.value}><SelectTrigger><SelectValue placeholder="Select feedback..." /></SelectTrigger><SelectContent>{FEEDBACKS.map(f => <SelectItem key={f} value={f}>{f}</SelectItem>)}</SelectContent></Select>{errors.feedbacks && <p className="text-sm text-red-500 mt-1">{errors.feedbacks.message}</p>}</div>)} />
+            <Controller name="solutionBySalesperson" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="solution">Solution by Salesperson</Label><Textarea id="solution" {...field} value={field.value || ''} /></div>)} />
+            <Controller name="anyRemarks" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="remarks">Any Remarks</Label><Textarea id="remarks" {...field} value={field.value || ''} /></div>)} />
+
+            <Button type="submit" className="w-full h-12">Continue to Checkout</Button>
+          </form>
+        );
+      default:
         return null;
-    };
-
-    const uploadImage = async (dataUrl: string, prefix: string) => {
-        // turn base64 into blob
-        const blob = await (await fetch(dataUrl)).blob();
-        // ask backend for presigned URL
-        const res = await fetch("/api/upload-url", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                fileName: `${prefix}-${Date.now()}.jpg`,
-                fileType: "image/jpeg",
-            }),
-        });
-        const result = await res.json();
-
-        if (!res.ok || !result.success) {
-            throw new Error(result.error || "Failed to get upload URL");
-        }
-        const { uploadUrl, publicUrl } = result;
-        // upload directly to R2
-        const uploadResponse = await fetch(uploadUrl, {
-            method: "PUT",
-            body: blob,
-            headers: {
-                'Content-Type': 'image/jpeg'
-            }
-        });
-        if (!uploadResponse.ok) {
-            throw new Error("Failed to upload image to R2");
-        }
-        return publicUrl;
-    };
-
-    const handleSubmit = async () => {
-        const err = validate();
-        if (err) {
-            alert(err);
-            if (step === "checkout") stop();
-            return;
-        }
-        try {
-            setSubmitting(true);
-            // Upload both images to R2
-            const inTimeImageUrl = inPhoto ? await uploadImage(inPhoto, "dvr-checkin") : null;
-            const outTimeImageUrl = outPhoto ? await uploadImage(outPhoto, "dvr-checkout") : null;
-            // Prepare the DVR payload
-            const dvrPayload = {
-                userId: userId,
-                reportDate,
-                dealerType,
-                dealerName: dealerName || null,
-                subDealerName: subDealerName || null,
-                location,
-                latitude: Number(latitude),
-                longitude: Number(longitude),
-                visitType,
-                dealerTotalPotential: Number(dealerTotalPotential),
-                dealerBestPotential: Number(dealerBestPotential),
-                brandSelling,
-                contactPerson: contactPerson || null,
-                contactPersonPhoneNo: contactPersonPhoneNo || null,
-                todayOrderMt: Number(todayOrderMt),
-                todayCollectionRupees: Number(todayCollectionRupees),
-                overdueAmount: overdueAmount ? Number(overdueAmount) : null,
-                feedbacks,
-                solutionBySalesperson: solutionBySalesperson || null,
-                anyRemarks: anyRemarks || null,
-                checkInTime,
-                checkOutTime,
-                inTimeImageUrl,
-                outTimeImageUrl
-            };
-            // Submit to DVR endpoint (you need to create this endpoint)
-            const response = await fetch("/api/dvr", {  // or whatever your DVR endpoint is called
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(dvrPayload),
-            });
-            const result = await response.json();
-            if (!response.ok || !result.success) {
-                throw new Error(result.error || "Failed to submit DVR");
-            }
-            // Call the callback with the successful result
-            onSubmitted?.(result.data);
-        } catch (error) {
-            console.error("DVR submission error:", error);
-            alert(`Failed to submit DVR: ${error.message}`);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    if (step === "checkin") {
-        return (
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-base font-semibold">Check in photo</h3>
-                    <Button variant="ghost" size="icon" onClick={onCancel}>
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
-                <div className="rounded-xl overflow-hidden bg-black/50">
-                    <video ref={videoRef} className="w-full h-64 object-cover" playsInline muted />
-                </div>
-                <Button onClick={doCapture} className="w-full">
-                    <Camera className="h-4 w-4 mr-2" />
-                    Capture & Continue
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                    We’ll ask for a checkout photo after you submit the form.
-                </p>
-            </div>
-        );
     }
+  };
 
-    if (step === "checkout") {
-        return (
-            <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                    <h3 className="text-base font-semibold">Check out photo</h3>
-                    <Button variant="ghost" size="icon" onClick={onCancel}>
-                        <X className="h-4 w-4" />
-                    </Button>
-                </div>
-                <div className="rounded-xl overflow-hidden bg-black/50">
-                    <video ref={videoRef} className="w-full h-64 object-cover" playsInline muted />
-                </div>
-                <Button onClick={doCapture} className="w-full" disabled={submitting}>
-                    {submitting ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Camera className="h-4 w-4 mr-2" />}
-                    Capture & Submit
-                </Button>
-            </div>
-        );
-    }
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center">
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <h1 className="text-lg font-bold ml-2">Daily Visit Report</h1>
+        </div>
+      </header>
 
-    // step === 'form'
-    return (
-        <form
-            className="space-y-4"
-            onSubmit={(e) => {
-                e.preventDefault();
-                // go to checkout camera; final submit happens after checkout capture
-                setStep("checkout");
-            }}
-        >
-            <div className="flex items-center justify-between">
-                <h3 className="text-base font-semibold">Daily Visit Report</h3>
-                <Button variant="ghost" size="icon" onClick={onCancel}>
-                    <X className="h-4 w-4" />
-                </Button>
-            </div>
+      <main className="flex-1 overflow-auto p-4 sm:p-6">
+        {renderContent()}
+      </main>
 
-            <div className="grid grid-cols-1 gap-4">
-                {/* Report date */}
-                <div className="grid gap-2">
-                    <Label>Report Date</Label>
-                    <Input type="date" required value={reportDate} onChange={e => setReportDate(e.target.value)} />
-                </div>
+      <Dialog open={isCameraOpen} onOpenChange={setIsCameraOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Take Selfie</DialogTitle></DialogHeader>
+          <video ref={videoRef} autoPlay playsInline className="w-full rounded-md" />
+          <canvas ref={canvasRef} className="hidden" />
+          <DialogFooter>
+            <Button onClick={handleCapture}>Capture Photo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-                {/* Dealer type */}
-                <div className="grid gap-2">
-                    <Label>Dealer Type</Label>
-                    <Select value={dealerType} onValueChange={setDealerType}>
-                        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
-                        <SelectContent className="z-[60]">
-                            {DEALER_TYPES.map(t => (
-                                <SelectItem key={t} value={t}>{t}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                {/* Dealer names */}
-                <div className="grid gap-2">
-                    <Label>Dealer Name</Label>
-                    <Input required value={dealerName} onChange={e => setDealerName(e.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                    <Label>Sub Dealer Name</Label>
-                    <Input required value={subDealerName} onChange={e => setSubDealerName(e.target.value)} />
-                </div>
-
-                {/* Location + lat/long */}
-                <div className="grid gap-2">
-                    <Label>Location</Label>
-                    <div className="flex gap-2">
-                        <Input className="flex-1" required value={location} onChange={e => setLocation(e.target.value)} />
-                        <Button type="button" onClick={useMyLocation} disabled={geoBusy} variant="secondary">
-                            {geoBusy ? <RefreshCw className="h-4 w-4 mr-1 animate-spin" /> : <Crosshair className="h-4 w-4 mr-1" />}
-                            Use my location
-                        </Button>
-                    </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="grid gap-2">
-                        <Label>Latitude</Label>
-                        <Input required inputMode="decimal" value={latitude} onChange={e => setLatitude(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2">
-                        <Label>Longitude</Label>
-                        <Input required inputMode="decimal" value={longitude} onChange={e => setLongitude(e.target.value)} />
-                    </div>
-                </div>
-
-                {/* Visit type */}
-                <div className="grid gap-2">
-                    <Label>Visit Type</Label>
-                    <Input required value={visitType} onChange={e => setVisitType(e.target.value)} placeholder="Best / Non Best / etc." />
-                </div>
-
-                {/* Potentials */}
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="grid gap-2">
-                        <Label>Dealer Total Potential (MT)</Label>
-                        <Input required inputMode="decimal" value={dealerTotalPotential} onChange={e => setDealerTotalPotential(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2">
-                        <Label>Dealer Best Potential (MT)</Label>
-                        <Input required inputMode="decimal" value={dealerBestPotential} onChange={e => setDealerBestPotential(e.target.value)} />
-                    </div>
-                </div>
-
-                {/* Brands multiselect */}
-                <div className="grid gap-2">
-                    <Label>Brands Selling</Label>
-                    <BrandsMultiSelect value={brandSelling} onChange={setBrandSelling} />
-                </div>
-
-                {/* Contact */}
-                <div className="grid gap-2">
-                    <Label>Contact Person</Label>
-                    <Input required value={contactPerson} onChange={e => setContactPerson(e.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                    <Label>Contact Person Phone No</Label>
-                    <Input required inputMode="tel" value={contactPersonPhoneNo} onChange={e => setContactPersonPhoneNo(e.target.value)} />
-                </div>
-
-                {/* Orders/Collection */}
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="grid gap-2">
-                        <Label>Today Order (MT)</Label>
-                        <Input required inputMode="decimal" value={todayOrderMt} onChange={e => setTodayOrderMt(e.target.value)} />
-                    </div>
-                    <div className="grid gap-2">
-                        <Label>Today Collection (₹)</Label>
-                        <Input required inputMode="decimal" value={todayCollectionRupees} onChange={e => setTodayCollectionRupees(e.target.value)} />
-                    </div>
-                </div>
-
-                <div className="grid gap-2">
-                    <Label>Overdue Amount (₹)</Label>
-                    <Input required inputMode="decimal" value={overdueAmount} onChange={e => setOverdueAmount(e.target.value)} />
-                </div>
-
-                {/* Feedbacks */}
-                <div className="grid gap-2">
-                    <Label>Feedbacks</Label>
-                    <Select value={feedbacks} onValueChange={setFeedbacks}>
-                        <SelectTrigger><SelectValue placeholder="Select feedback" /></SelectTrigger>
-                        <SelectContent className="z-[60]">
-                            {FEEDBACKS.map(f => (
-                                <SelectItem key={f} value={f}>{f}</SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                </div>
-
-                {/* Solutions / Remarks */}
-                <div className="grid gap-2">
-                    <Label>Solution By Salesperson</Label>
-                    <Textarea required value={solutionBySalesperson} onChange={e => setSolutionBySalesperson(e.target.value)} rows={3} />
-                </div>
-                <div className="grid gap-2">
-                    <Label>Remarks</Label>
-                    <Textarea required value={anyRemarks} onChange={e => setAnyRemarks(e.target.value)} rows={3} />
-                </div>
-
-                <div className="text-xs text-muted-foreground">
-                    Check-in time: {checkInTime ? new Date(checkInTime).toLocaleString() : "pending"}
-                </div>
-
-                <div className="flex gap-3 justify-end pt-2">
-                    <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-                    <Button type="submit">Continue to checkout photo</Button>
-                </div>
-            </div>
-        </form>
-    );
+      <Dialog open={isBrandsDialogOpen} onOpenChange={setIsBrandsDialogOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Select Brands</DialogTitle></DialogHeader>
+          <div className="space-y-2 py-4">
+            {BRANDS.map(brand => (
+              <div key={brand} className="flex items-center space-x-2">
+                <Checkbox
+                  id={brand}
+                  checked={brandSelling.includes(brand)}
+                  onCheckedChange={(checked) => {
+                    const currentBrands = brandSelling;
+                    const newBrands = checked ? [...currentBrands, brand] : currentBrands.filter(b => b !== brand);
+                    setValue('brandSelling', newBrands, { shouldValidate: true });
+                  }}
+                />
+                <Label htmlFor={brand} className="font-normal">{brand}</Label>
+              </div>
+            ))}
+          </div>
+          <DialogFooter><DialogClose asChild><Button>Done</Button></DialogClose></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Toaster />
+    </div>
+  );
 }

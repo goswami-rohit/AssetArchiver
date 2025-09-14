@@ -1,285 +1,201 @@
-import React, { useCallback, useState } from "react";
-import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Separator } from "@/components/ui/separator";
+import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from "wouter"; // 👈 FIX #1: Switched to wouter
+import { toast } from 'sonner';
 import {
-  CheckCircle,
-  Building2,
-  FileText,
-  LogOut,
-  Eye,
-  Navigation,
-  Award,
-  Target,
-  Package,
-  ClipboardList,
-  Clock,
-} from "lucide-react";
+  FileText, Store, Map, CheckCircle, User, Trophy, Clock,
+  ClipboardList, Package, LogOut, Target, Briefcase
+} from 'lucide-react';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import LeaveApplicationForm from "@/pages/forms/LeaveApplicationForm";
+// --- Reusable Web Components ---
+import AppHeader from '@/components/AppHeader';
+import SideNavBar from '@/pages/SideNavBar';
+import LiquidGlassCard from '@/components/LiquidGlassCard';
+import LeaveApplicationForm from '@/pages/forms/LeaveApplicationForm';
 
-import { useAppStore } from "@/components/ReusableUI";
-import { StatusBar, StatTile } from "@/components/ReusableUI";
+// --- UI Libraries ---
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Toaster } from '@/components/ui/sonner';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
-// Tiny local fallback for "Empty"
-function Empty({ icon: Icon, label }: { icon: any; label: string }) {
+// --- Custom Hooks & Constants ---
+import { useAppStore, fetchUserById } from '../components/ReusableUI';
+
+// --- Type Definitions for Icon Mapping ---
+type IconName = keyof typeof iconMap;
+const iconMap = {
+  FileText, Store, Map, CheckCircle, User, Trophy, Clock, Target,
+  ClipboardList, Package, Briefcase
+};
+
+// --- Sub-components for Profile Page ---
+
+const StatTile: React.FC<{ iconName: IconName; value: string | number; label: string; color: string; }> = ({ iconName, value, label, color }) => {
+  const Icon = iconMap[iconName] || FileText;
   return (
-    <div className="text-center py-8 text-muted-foreground">
-      <Icon className="h-12 w-12 mx-auto opacity-40 mb-3" />
-      <p className="text-sm">{label}</p>
+    <div className="w-[48%] mb-3">
+      <LiquidGlassCard>
+        <div className="flex items-center">
+          <div className="w-9 h-9 rounded-full flex items-center justify-center mr-3" style={{ backgroundColor: color }}>
+            <Icon size={20} className="text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-xl font-bold text-white">{value}</p>
+            <p className="text-xs mt-1 text-gray-300">{label}</p>
+          </div>
+        </div>
+      </LiquidGlassCard>
     </div>
   );
-}
+};
 
+const ProgressBar: React.FC<{ progress: number; color: string; }> = ({ progress, color }) => (
+  <div className="h-2 rounded-lg overflow-hidden bg-white/20">
+    <div className="h-full rounded-lg" style={{ width: `${progress}%`, backgroundColor: color }} />
+  </div>
+);
+
+const ActionButton: React.FC<{ icon: IconName; title: string; onPress: () => void; color: string; }> = ({ icon, title, onPress, color }) => {
+  const Icon = iconMap[icon] || ClipboardList;
+  return (
+    <div className="flex-1">
+      <LiquidGlassCard onPress={onPress}>
+        <div className="flex flex-col items-center text-center gap-2">
+          <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: color }}>
+            <Icon size={22} className="text-white" />
+          </div>
+          <p className="text-xs font-bold text-white">{title}</p>
+        </div>
+      </LiquidGlassCard>
+    </div>
+  );
+};
+
+
+// --- Main Profile Page Component ---
 export default function ProfilePage() {
-  const {
-    user,
-    reports,
-    salesReports,
-    collectionReports,
-    dealers,
-    pjps,
-    dailyTasks,
-    dashboardStats,
-    userTargets,
-    setUIState,
-    setUser,
-  } = useAppStore();
-
+  const [, navigate] = useLocation(); // 👈 FIX #2: Using wouter's navigation hook
+  const { user, reports, dealers, pjps, dailyTasks, dashboardStats, userTargets, setUser } = useAppStore();
   const [openLeave, setOpenLeave] = useState(false);
 
+  useEffect(() => {
+    const loadUser = async () => {
+      if (!user?.id) {
+        try {
+          const storedUserId = localStorage.getItem('userId');
+          if (storedUserId) {
+            const fetched = await fetchUserById(Number(storedUserId));
+            if (fetched) setUser(fetched);
+          }
+        } catch (err) {
+          console.error('Failed to fetch user from storage', err);
+        }
+      }
+    };
+    loadUser();
+  }, [user, setUser]);
+
   const handleLogout = useCallback(() => {
-    localStorage.removeItem("user");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("isAuthenticated");
-    setUser(null);
-  }, [setUser]);
+    toast("Are you sure you want to log out?", {
+      action: {
+        label: "Log Out",
+        onClick: async () => {
+          localStorage.clear();
+          setUser(null);
+          navigate('/login');
+        },
+      },
+      cancel: {
+        label: "Cancel",
+        onClick: () => {},
+      }
+    });
+  }, [navigate, setUser]);
+
+  const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase();
+
+  const statsData = [
+    { iconName: 'FileText' as IconName, value: (reports || []).length, label: 'Reports', color: '#3b82f6' },
+    { iconName: 'Store' as IconName, value: (dealers || []).length, label: 'Dealers', color: '#10b981' },
+    { iconName: 'Map' as IconName, value: (pjps || []).length, label: 'PJPs', color: '#f59e0b' },
+    { iconName: 'CheckCircle' as IconName, value: (dailyTasks || []).filter((t: any) => t.status === 'Completed').length, label: 'Tasks Done', color: '#a855f7' },
+  ];
 
   return (
-    <div className="min-h-full flex flex-col">
-      <StatusBar />
+    <div className="flex flex-col h-screen bg-gray-900 text-white bg-cover bg-center" style={{ backgroundImage: "url('https://placehold.co/1080x1920/000000/FFFFFF?text=Mobile+Background')" }}>
+     <SideNavBar/>
+      <AppHeader title="Profile" onMenuClick={() => alert("Menu clicked!")} />
 
-      <div className="px-6 py-6 pb-32">
-        {/* Profile Header */}
-        <div className="text-center mb-8">
-          <Avatar className="h-24 w-24 mx-auto ring-4 ring-primary/20 shadow-lg">
-            <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground text-2xl font-bold">
-              {user?.firstName?.[0]}
-              {user?.lastName?.[0]}
-            </AvatarFallback>
-          </Avatar>
-          <h2 className="text-2xl font-bold mt-4">
-            {user?.firstName} {user?.lastName}
-          </h2>
-          <p className="text-muted-foreground">{user?.email}</p>
-          <Badge className="mt-2" variant="secondary">
-            {user?.role ?? "User"}
-          </Badge>
-        </div>
+      <main className="flex-1 overflow-y-auto pb-8">
+        <div className="container mx-auto px-4 py-4 space-y-4">
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-2 gap-4 mb-8">
-          <StatTile
-            icon={FileText}
-            value={(reports || []).length + (salesReports || []).length + (collectionReports || []).length}
-            label="Total Reports"
-            tint="text-blue-500"
-          />
-          <StatTile icon={Building2} value={(dealers || []).length} label="Dealers Managed" tint="text-orange-500" />
-          <StatTile icon={Navigation} value={(pjps || []).length} label="Journey Plans" tint="text-purple-500" />
-          <StatTile
-            icon={CheckCircle}
-            value={(dailyTasks || []).filter((t: any) => t.status === "Completed").length}
-            label="Completed Tasks"
-            tint="text-emerald-500"
-          />
-        </div>
-
-        {/* Performance Section */}
-        <Card className="mb-8 border-0 shadow-sm bg-card/60">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Award className="h-5 w-5 text-yellow-500" />
-              Performance Overview
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {dashboardStats?.attendance && (
-                <div>
-                  <div className="flex items-center justify-between text-sm mb-2">
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4 text-blue-500" />
-                      <span>Today's Attendance</span>
-                    </div>
-                    <Badge variant={dashboardStats.attendance.isPresent ? "default" : "secondary"}>
-                      {dashboardStats.attendance.isPresent ? "Present" : "Absent"}
-                    </Badge>
-                  </div>
-                  {dashboardStats.attendance.punchInTime && (
-                    <p className="text-xs text-muted-foreground ml-6">
-                      Punch In: {new Date(dashboardStats.attendance.punchInTime).toLocaleTimeString()}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {(userTargets || []).map((target: any, idx: number) => {
-                const progress = Math.min(100, Math.round(((target.current ?? 0) / (target.target || 1)) * 100));
-                const barColor =
-                  progress >= 80 ? "bg-emerald-500" : progress >= 60 ? "bg-yellow-500" : "bg-red-500";
-                const Icon = target.icon || Target;
-
-                return (
-                  <div key={`${target.label}-${idx}`} className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="flex items-center gap-2">
-                        <Icon className={`h-4 w-4 ${target.color || "text-muted-foreground"}`} />
-                        <span>{target.label}</span>
-                      </div>
-                      <span className="font-mono text-xs">
-                        {target.current} / {target.target}
-                      </span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <motion.div
-                        initial={{ width: 0 }}
-                        animate={{ width: `${progress}%` }}
-                        transition={{ duration: 0.8, delay: idx * 0.1 }}
-                        className={`h-full ${barColor}`}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+          <LiquidGlassCard>
+            <div className="flex flex-col items-center">
+              <Avatar className="w-24 h-24 mb-4 bg-blue-500">
+                <AvatarFallback className="text-3xl font-bold bg-blue-500 text-white">{initials}</AvatarFallback>
+              </Avatar>
+              <h2 className="text-2xl font-bold">{`${user?.firstName || ''} ${user?.lastName || ''}`}</h2>
+              <p className="text-sm text-gray-300 mb-3">{user?.email}</p>
+              <div className="flex items-center px-4 py-2 rounded-full gap-2 bg-blue-500/30">
+                <Briefcase size={16} className="text-blue-300" />
+                <p className="text-xs font-semibold text-blue-300 tracking-wide">{user?.role ?? 'Agent'}</p>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </LiquidGlassCard>
 
-        {/* Recent PJPs */}
-        <Card className="mb-8 border-0 shadow-sm bg-card/60">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Navigation className="h-5 w-5 text-purple-500" />
-              Recent Journey Plans
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {(pjps || []).slice(0, 5).length ? (
-              <div className="space-y-3">
-                {(pjps || []).slice(0, 5).map((pjp: any, i: number) => (
-                  <div key={pjp.id ?? i} className="p-3 bg-muted/50 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <h4 className="font-medium text-sm">{pjp.objective}</h4>
-                        <p className="text-xs text-muted-foreground mt-1">{pjp.siteName || pjp.location}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          <Badge variant="outline" className="text-xs">
-                            {pjp.status}
-                          </Badge>
-                          {pjp.planDate && (
-                            <span className="text-xs text-muted-foreground">
-                              {new Date(pjp.planDate).toLocaleDateString()}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => {
-                          setUIState("selectedItem", pjp);
-                          setUIState("showDetailModal", true);
-                        }}
-                      >
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+          <div className="flex flex-row flex-wrap justify-between">
+            {statsData.map((stat) => <StatTile key={stat.label} {...stat} />)}
+          </div>
+
+          <LiquidGlassCard>
+            <div className="flex items-center mb-5">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center mr-3 bg-yellow-500"><Trophy size={20} className="text-white" /></div>
+              <h3 className="text-base font-bold tracking-wider">PERFORMANCE</h3>
+            </div>
+            {dashboardStats?.attendance && (
+              <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-2"><Clock size={16} className="text-gray-400" /><p className="text-sm">Attendance</p></div>
+                <div className={`px-3 py-1 rounded-full ${dashboardStats.attendance.isPresent ? 'bg-green-500/30' : 'bg-red-500/30'}`}>
+                  <p className={`text-xs font-bold tracking-wider ${dashboardStats.attendance.isPresent ? 'text-green-300' : 'text-red-300'}`}>
+                    {dashboardStats.attendance.isPresent ? 'ACTIVE' : 'OFFLINE'}
+                  </p>
+                </div>
               </div>
-            ) : (
-              <Empty icon={Navigation} label="No journey plans yet" />
             )}
-          </CardContent>
-        </Card>
+            {(userTargets || []).map((target: any, index: number) => {
+              const progress = Math.min(100, Math.round(((target.current ?? 0) / (target.target || 1)) * 100));
+              const progressColor = progress >= 80 ? '#10b981' : progress >= 60 ? '#f59e0b' : '#ef4444';
+              return (
+                <div key={index} className="mb-4">
+                  <div className="flex justify-between items-center mb-2">
+                    <div className="flex items-center gap-2"><Target size={16} className="text-gray-400" /><p className="text-sm">{target.label}</p></div>
+                    <p className="text-xs text-gray-400">{target.current} / {target.target}</p>
+                  </div>
+                  <ProgressBar progress={progress} color={progressColor} />
+                </div>
+              );
+            })}
+          </LiquidGlassCard>
 
-        {/* Settings & Actions */}
-        <div className="space-y-5">
-          {/* Apply for Leave */}
-          <Button
-            variant="outline"
-            className="w-full justify-start gap-3 h-12 rounded-xl border bg-card hover:bg-accent/10"
-            onClick={() => setOpenLeave(true)}
-          >
-            <ClipboardList className="h-5 w-5" />
-            Apply for Leave
-          </Button>
-
-          {/* Leave Application Dialog */}
-          <Dialog modal={false} open={openLeave} onOpenChange={setOpenLeave}>
-            <DialogContent className="p-0 w-[100vw] sm:max-w-md h-[90vh] overflow-hidden">
-              <DialogHeader className="px-4 pt-4 pb-2">
-                <DialogTitle>Apply for Leave</DialogTitle>
-              </DialogHeader>
-              <div className="h-full overflow-y-auto px-4 pb-4">
-                <LeaveApplicationForm
-                  userId={user?.id}
-                  onSubmitted={() => setOpenLeave(false)}
-                  onCancel={() => setOpenLeave(false)}
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Leave Applications show area*/}
-          <div className="rounded-xl border bg-card/60 p-4">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-              Your Leave Applications
-            </h3>
-            <Empty icon={ClipboardList} label="No leave applications yet" />
+          <div className="flex justify-between gap-3">
+            <ActionButton icon="ClipboardList" title="Apply for Leave" onPress={() => setOpenLeave(true)} color="#3b82f6" />
+            <ActionButton icon="Package" title="Brand Mapping" onPress={() => toast.info("Brand Mapping Coming Soon!")} color="#10b981" />
           </div>
 
-          {/* Brand Mapping */}
-          <Button
-            variant="outline"
-            className="w-full justify-start gap-3 h-12 rounded-xl border bg-card hover:bg-accent/10"
-            onClick={() => {
-              setUIState("createType", "dealer-brand-mapping");
-              setUIState("showCreateModal", true);
-            }}
-          >
-            <Package className="h-5 w-5" />
-            Manage Brand Mapping
-          </Button>
-
-          {/* Brand Mapping List show area*/}
-          <div className="rounded-xl border bg-card/60 p-4">
-            <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-              Dealer-Brand Mapping
-            </h3>
-            <Empty icon={Package} label="No mappings yet" />
-          </div>
+          <LiquidGlassCard>
+            <Button onClick={handleLogout} variant="destructive" className="w-full h-12 bg-red-500/80 hover:bg-red-600">
+              <LogOut className="mr-2 h-4 w-4" /> LOG OUT
+            </Button>
+          </LiquidGlassCard>
         </div>
+      </main>
 
-        {/* Logout */}
-        <div className="mt-6">
-          <Button
-            variant="destructive"
-            className="w-full h-12 rounded-xl shadow-sm"
-            onClick={handleLogout}
-          >
-            <LogOut className="h-5 w-5 mr-2" />
-            Logout
-          </Button>
-        </div>
-      </div>
-
+      <Dialog open={openLeave} onOpenChange={setOpenLeave}>
+        <DialogContent className="bg-gray-900/80 backdrop-blur-xl border-white/20 text-white p-0">
+          <LeaveApplicationForm/>
+        </DialogContent>
+      </Dialog>
+      <Toaster theme="dark" />
     </div>
   );
 }

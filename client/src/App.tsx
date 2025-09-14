@@ -9,14 +9,26 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Dashboard from "@/pages/dashboard";
 import VendorsTable from "./components/vendors-table";
 import NotFound from "@/pages/not-found";
-import Login from "@/pages/Login"; 
+import Login from "@/pages/Login";
 
 import HomePage from "@/pages/HomePage";
 import ProfilePage from "@/pages/ProfilePage";
 import JourneyTracker from "@/pages/JourneyTracker";
 import ChatInterface from "@/pages/ChatInterface";
+
+// form componnets import 
+import DVRForm from '@/pages/forms/DVRForm';
+import TVRForm from '@/pages/forms/TVRForm';
+import AddPJPForm from '@/pages/forms/AddPJPForm';
+import AddDealerForm from '@/pages/forms/AddDealerForm';
+import AddSiteForm from "./pages/forms/AddSiteForm";
+import CompetitionReportForm from "./pages/forms/CompetitionReportForm";
+import DailyTasksForm from "./pages/forms/DailyTasksForm";
+import LeaveApplicationForm from "./pages/forms/LeaveApplicationForm";
+import SalesOrderForm from "./pages/forms/SalesOrderForm";
+
 //import CRMDashboard from "@/pages/CRMDashboard"; 
-import ProtectedRoute from "@/components/ProtectedRoute"; 
+import ProtectedRoute from "@/components/ProtectedRoute";
 
 function Router() {
   return (
@@ -44,7 +56,7 @@ function Router() {
       <Route path="/crm/journey">
         <ProtectedRoute>
           <AppShell>
-            <JourneyTracker userId={1} />
+            <JourneyTracker />
           </AppShell>
         </ProtectedRoute>
       </Route>
@@ -56,6 +68,80 @@ function Router() {
           </AppShell>
         </ProtectedRoute>
       </Route>
+
+      {/* form navigations */}
+      <Route path="/dvr-form">
+        <ProtectedRoute>
+          <AppShell>
+            <DVRForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/tvr-form">
+        <ProtectedRoute>
+          <AppShell>
+            <TVRForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/pjp-form">
+        <ProtectedRoute>
+          <AppShell>
+            <AddPJPForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/dealer-form">
+        <ProtectedRoute>
+          <AppShell>
+            <AddDealerForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/site-form">
+        <ProtectedRoute>
+          <AppShell>
+            <AddSiteForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/daily-tasks-form">
+        <ProtectedRoute>
+          <AppShell>
+            <DailyTasksForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/competition-form">
+        <ProtectedRoute>
+          <AppShell>
+            <CompetitionReportForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/leave-form">
+        <ProtectedRoute>
+          <AppShell>
+            <LeaveApplicationForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/sales-order-form">
+        <ProtectedRoute>
+          <AppShell>
+            <SalesOrderForm />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
+      {/*End of form routes */}
 
       {/* Your Existing Routes */}
       <Route path="/" component={Dashboard} />

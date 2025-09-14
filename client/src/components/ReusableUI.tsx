@@ -1,49 +1,57 @@
-// src/components/ReusableUI.tsx - COMPLETELY REDESIGNED
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
+import { create } from 'zustand';
 import { Badge } from "@/components/ui/badge";
-import { create } from "zustand";
-
-// Import Lucide React icons
-import { 
-  MapPin, 
-  Navigation, 
-  Search, 
-  Clock, 
-  Route, 
-  Target, 
-  Car, 
-  Edit3,
-  Timer,
-  Navigation2,
-  Map as MapIcon,
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent
+} from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   ArrowLeft,
+  Route,
+  Locate,
+  Car,
+  Edit3,
+  MapPin,
+  Timer,
+  Target,
   Plus,
   Minus,
-  Locate
-} from 'lucide-react';
+  DollarSign, Package, Users, Activity
+} from "lucide-react";
 
-// Your existing interfaces remain the same...
-export interface Company { 
-    companyName?: string 
+// URL setting manager for whole frontend 
+export const BASE_URL = import.meta.env.VITE_APP_BASE_URL || "http://localhost:8000";
+
+// --- STATE MANAGEMENT (Zustand) & INTERFACES ---
+export interface UserShape {
+  id: number;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  role?: string;
 }
 
-export interface UserShape {
-  id: number
-  firstName?: string
-  lastName?: string
-  email?: string
-  role?: string
-  company?: Company
-  companyId?: number | null
+export interface PJP {
+  id: string;
+  dealerName: string;
+  dealerAddress: string;
+  status: string;
+  planDate: string;
 }
 
 export interface AppState {
   user: UserShape | null
+  isAuthenticated: boolean;
   currentPage: "home" | "ai" | "journey" | "profile"
   attendanceStatus: "in" | "out"
   isLoading: boolean
@@ -72,6 +80,10 @@ export interface AppState {
     activePJPs: number;
     totalDealers: number;
     totalReports: number;
+    attendance?: {
+      isPresent: boolean;
+      punchInTime?: string | Date;
+    };
   }
 
   showCreateModal: boolean
@@ -80,6 +92,7 @@ export interface AppState {
   showDetailModal: boolean
 
   setUser: (u: UserShape | null) => void
+  setIsAuthenticated: (b: boolean) => void
   setCurrentPage: (p: AppState["currentPage"]) => void
   setAttendanceStatus: (s: AppState["attendanceStatus"]) => void
   setLoading: (b: boolean) => void
@@ -88,16 +101,17 @@ export interface AppState {
   setData: (k: string, data: any) => void
   setUIState: (k: string, v: any) => void
   resetModals: () => void
+  reset: () => void
 }
 
-export const useAppStore = create<AppState>((set) => ({
+const initialState = {
   user: null,
-  currentPage: "home",
-  attendanceStatus: "out",
+  isAuthenticated: false,
+  currentPage: "home" as AppState["currentPage"],
+  attendanceStatus: "out" as AppState["attendanceStatus"],
   isLoading: false,
   isOnline: true,
   lastSync: null,
-
   dailyTasks: [],
   pjps: [],
   dealers: [],
@@ -121,13 +135,17 @@ export const useAppStore = create<AppState>((set) => ({
     totalDealers: 0,
     totalReports: 0
   },
-
   showCreateModal: false,
-  createType: "task",
+  createType: "task" as AppState["createType"],
   selectedItem: null,
   showDetailModal: false,
+};
+
+export const useAppStore = create<AppState>((set) => ({
+  ...initialState,
 
   setUser: (user) => set({ user }),
+  setIsAuthenticated: (isAuthenticated) => set({ isAuthenticated }),
   setCurrentPage: (currentPage) => set({ currentPage }),
   setAttendanceStatus: (attendanceStatus) => set({ attendanceStatus }),
   setLoading: (isLoading) => set({ isLoading }),
@@ -136,76 +154,234 @@ export const useAppStore = create<AppState>((set) => ({
   setData: (key, data) => set({ [key]: data } as any),
   setUIState: (key, value) => set({ [key]: value } as any),
   resetModals: () => set({ showCreateModal: false, showDetailModal: false, selectedItem: null }),
+  reset: () => set(initialState),
 }))
 
-// --------------------
-// Existing UI Components (keep these)
-// --------------------
+// --- REUSABLE UI COMPONENTS (Converted to standard React) ---
 export const StatusBar = () => {
-  const { isOnline, lastSync } = useAppStore()
+  const { isOnline, lastSync } = useAppStore();
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-background/95 backdrop-blur border-b">
-      <div className="flex items-center gap-2">
-        <span className={`inline-block h-2 w-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-red-500"}`} />
-        <span className="text-xs font-medium text-muted-foreground">{isOnline ? "Online" : "Offline"}</span>
+    <div className="flex flex-row items-center justify-between px-4 py-2 bg-white/95 border-b border-gray-200">
+      <div className="flex flex-row items-center gap-2">
+        <div className={`h-2 w-2 rounded-full ${isOnline ? "bg-emerald-500" : "bg-red-500"}`} />
+        <span className="text-sm text-gray-600 font-medium">{isOnline ? "Online" : "Offline"}</span>
       </div>
       {lastSync && (
-        <span className="text-xs text-muted-foreground">Last sync: {lastSync.toLocaleTimeString()}</span>
+        <span className="text-sm text-gray-500">
+          Last sync: {lastSync.toLocaleTimeString()}
+        </span>
       )}
     </div>
-  )
-}
+  );
+};
 
 export const LoadingList = ({ rows = 3 }: { rows?: number }) => (
   <div className="space-y-3">
     {Array.from({ length: rows }).map((_, i) => (
-      <Card key={i} className="bg-card/50 border-0 shadow-sm">
-        <CardContent className="p-4">
-          <div className="flex items-center gap-3">
-            <Skeleton className="h-10 w-10 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-3 w-1/2" />
-            </div>
+      <div key={i} className="bg-white/80 border border-gray-200 rounded-lg shadow-sm p-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-full bg-gray-200" />
+          <div className="flex-1 space-y-2">
+            <div className="h-4 w-3/4 rounded bg-gray-200" />
+            <div className="h-3 w-1/2 rounded bg-gray-200" />
           </div>
-        </CardContent>
-      </Card>
-    ))}
-  </div>
-)
-
-export const StatCard = ({ label, value, Icon, gradient }: { label: string; value: number; Icon: any; gradient: string }) => (
-  <Card className="bg-card/80 border-0 shadow-sm hover:shadow-md transition-all duration-200">
-    <CardContent className="p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-          <p className="text-2xl font-bold tracking-tight mt-1">{value}</p>
-        </div>
-        <div className={`p-3 rounded-xl ${gradient} shadow-sm`}>
-          <Icon className="h-5 w-5 text-white" />
         </div>
       </div>
-    </CardContent>
-  </Card>
-)
+    ))}
+  </div>
+);
 
-export const StatTile = ({ icon: Icon, value, label, tint }: { icon: any; value: number; label: string; tint: string }) => (
-  <Card className="bg-card/60 border-0 shadow-sm">
-    <CardContent className="p-4 text-center">
-      <Icon className={`h-8 w-8 mx-auto mb-2 ${tint}`} />
-      <p className="text-2xl font-bold">{value}</p>
-      <p className="text-xs text-muted-foreground">{label}</p>
-    </CardContent>
-  </Card>
-)
+export const StatTile = ({ iconName, value, label, tint }: { iconName: string; value: number; label: string; tint: string }) => (
+  <div className="flex-1 bg-white p-4 rounded-lg shadow-sm">
+    <div className="flex items-center">
+      <span className={`h-5 w-5 ${tint} mr-3`}>
+        <img src={`/icons/${iconName}.svg`} alt={`${label} icon`} className="h-full w-full" />
+      </span>
+      <div>
+        <h3 className="text-xl font-bold">{value}</h3>
+        <p className="text-sm text-gray-500">{label}</p>
+      </div>
+    </div>
+  </div>
+);
+
+// --- Helper to select an icon based on a name prop ---
+const Icon = ({ name, className }: { name: string; className?: string }) => {
+  switch (name) {
+    case 'dollar-sign':
+      return <DollarSign className={className} />;
+    case 'package':
+      return <Package className={className} />;
+    case 'users':
+      return <Users className={className} />;
+    case 'activity':
+      return <Activity className={className} />;
+    default:
+      return <Activity className={className} />; // Default icon
+  }
+};
+
+interface StatCardProps {
+  title: string;
+  value: string;
+  iconName: string;
+  description?: string;
+}
+
+export function StatCard({ title, value, iconName, description }: StatCardProps) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Icon name={iconName} className="h-4 w-4 text-muted-foreground" />
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold">{value}</div>
+        {description && <p className="text-xs text-muted-foreground">{description}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- CONSTANTS AND API CALLS ---
+export const DEALER_TYPES = ["Dealer-Best", "Sub Dealer-Best", "Dealer-Non Best", "Sub Dealer-Non Best",] as const;
+export const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
+export const UNITS = ["MT", "KG", "Bags"] as const;
+export const FEEDBACKS = ["Interested", "Not Interested", "Follow-up Required"];
+export const LEAVE_TYPE = ["Sick Leave", "Medical Leave", "Family/Friends Emergency", "Personal Leave", "Bad Weather Situation", "Local Festival", "State Holiday", "Other-Specify In Reason"];
+export const INFLUENCERS = [
+  "Contractor", "Engineer", "Architect", "Mason", "Builder", "Petty Contractor",
+];
+export const QUALITY_COMPLAINT = [
+  "Slow Setting", "Low weight", "Colour issues", "Cracks", "Miscellaneous",
+];
+export const PROMO_ACTIVITY = [
+  "Mason Meet", "Table meet / Counter meet", "Mega mason meet", "Engineer meet", "Consumer Camp", "Miscellaneous",
+];
+export const CHANNEL_PARTNER_VISIT = [
+  "Dealer Visit", "Sub dealer", "Authorized retailers", "Other Brand counters",
+];
+export const PJP_STATUS = ["planned", "active", "completed", "cancelled"] as const;
+
+type Dealer = {
+  id: number | string;
+  region?: string | null;
+  area?: string | null;
+  [key: string]: any;
+};
+
+export async function fetchRegions(): Promise<string[]> {
+  const url = `${BASE_URL}/api/dealers`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch regions');
+  const json: { success: boolean; data: Dealer[] } = await res.json();
+  const regions: string[] = [
+    ...new Set(
+      json.data
+        .map((d) => d.region)
+        .filter((r): r is string => typeof r === 'string' && r.trim() !== '')
+    ),
+  ];
+  return regions;
+}
+
+export async function fetchAreas(): Promise<string[]> {
+  const url = `${BASE_URL}/api/dealers`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to fetch areas');
+  const json: { success: boolean; data: Dealer[] } = await res.json();
+  const areas: string[] = [
+    ...new Set(
+      json.data
+        .map((d) => d.area)
+        .filter((a): a is string => typeof a === 'string' && a.trim() !== '')
+    ),
+  ];
+  return areas;
+}
+
+export async function fetchUserById(userId: number) {
+  const res = await fetch(`${BASE_URL}/api/users/${userId}`);
+  if (!res.ok) throw new Error("Failed to fetch user");
+  const json = await res.json();
+  return json.data;
+}
+
+export async function fetchUsersByRole(role: string, limit = 50) {
+  const res = await fetch(`${BASE_URL}/api/users/role/${role}?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch users by role");
+  const json = await res.json();
+  return json.data;
+}
+
+export async function fetchAllUsers(limit = 50) {
+  const res = await fetch(`${BASE_URL}/api/users?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch users");
+  const json = await res.json();
+  return json.data;
+}
+
+export async function fetchUsersByArea(area: string, limit = 50) {
+  if (!area) throw new Error("Area is required");
+  const url = `${BASE_URL}/api/users?area=${encodeURIComponent(area)}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => null);
+    throw new Error(`Failed to fetch users by area (${area}): ${res.status} ${txt ?? res.statusText}`);
+  }
+  const json = await res.json();
+  return json.data;
+}
+
+export async function fetchUsersByRegion(region: string, limit = 50) {
+  if (!region) throw new Error("Region is required");
+  const url = `${BASE_URL}/api/users?region=${encodeURIComponent(region)}&limit=${limit}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => null);
+    throw new Error(`Failed to fetch users by region (${region}): ${res.status} ${txt ?? res.statusText}`);
+  }
+  const json = await res.json();
+  return json.data;
+}
+
+export async function fetchCompanyByUserId(userId: number) {
+  if (!userId) throw new Error("userId is required");
+
+  const userRes = await fetch(`${BASE_URL}/api/users/${userId}`);
+  if (!userRes.ok) {
+    const txt = await userRes.text().catch(() => null);
+    throw new Error(
+      `Failed to fetch user (${userId}): ${userRes.status} ${txt ?? userRes.statusText}`
+    );
+  }
+
+  const userJson = await userRes.json();
+  const user = userJson?.data;
+  const companyId = user?.companyId;
+
+  if (!companyId) {
+    return null;
+  }
+
+  const compRes = await fetch(`${BASE_URL}/api/companies/${companyId}`);
+  if (!compRes.ok) {
+    const txt = await compRes.text().catch(() => null);
+    throw new Error(
+      `Failed to fetch company (${companyId}): ${compRes.status} ${txt ?? compRes.statusText}`
+    );
+  }
+
+  const compJson = await compRes.json();
+  return compJson?.data ?? null;
+}
 
 // --------------------
 // MODERN JOURNEY TRACKER UI COMPONENTS
 // --------------------
 
 export const JourneyStatusBadge = ({ status }: { status: 'idle' | 'active' | 'completed' }) => (
-  <Badge 
+  <Badge
     variant={status === 'active' ? 'destructive' : status === 'completed' ? 'default' : 'secondary'}
     className="animate-pulse"
   >
@@ -213,9 +389,9 @@ export const JourneyStatusBadge = ({ status }: { status: 'idle' | 'active' | 'co
   </Badge>
 );
 
-export const ModernJourneyHeader = ({ 
-  status, 
-  onBack 
+export const ModernJourneyHeader = ({
+  status,
+  onBack
 }: {
   status: 'idle' | 'active' | 'completed';
   onBack?: () => void;
@@ -223,9 +399,9 @@ export const ModernJourneyHeader = ({
   <div className="flex items-center justify-between p-4 bg-background/95 backdrop-blur-md border-b border-border/50">
     <div className="flex items-center gap-3">
       {onBack && (
-        <Button 
-          onClick={onBack} 
-          variant="ghost" 
+        <Button
+          onClick={onBack}
+          variant="ghost"
           size="icon"
           className="h-9 w-9 rounded-full hover:bg-muted"
         >
@@ -241,14 +417,14 @@ export const ModernJourneyHeader = ({
   </div>
 );
 
-export const ModernTripPlanningCard = ({ 
-  currentLocation, 
-  selectedDealer, 
-  dealers, 
+export const ModernTripPlanningCard = ({
+  currentLocation,
+  selectedDealer,
+  dealers,
   isLoadingLocation,
-  onGetCurrentLocation, 
-  onDealerSelect, 
-  onStartTrip 
+  onGetCurrentLocation,
+  onDealerSelect,
+  onStartTrip
 }: {
   currentLocation?: string;
   selectedDealer?: any;
@@ -333,11 +509,11 @@ export const ModernTripPlanningCard = ({
   </Card>
 );
 
-export const ModernActiveTripCard = ({ 
-  dealer, 
-  distance, 
-  duration, 
-  onChangeDestination, 
+export const ModernActiveTripCard = ({
+  dealer,
+  distance,
+  duration,
+  onChangeDestination,
   onCompleteTrip,
   showDestinationChange,
   dealers,
@@ -375,7 +551,7 @@ export const ModernActiveTripCard = ({
       {/* Trip Stats */}
       <div className="grid grid-cols-2 gap-4">
         <div className="text-center p-3 rounded-lg bg-muted/50">
-          <MapIcon className="h-4 w-4 mx-auto mb-1 text-blue-600" />
+          <MapPin className="h-4 w-4 mx-auto mb-1 text-blue-600" />
           <p className="text-lg font-bold">
             {distance > 0 ? `${(distance / 1000).toFixed(1)}km` : '0km'}
           </p>
@@ -432,10 +608,10 @@ export const ModernActiveTripCard = ({
   </Card>
 );
 
-export const ModernCompletedTripCard = ({ 
-  distance, 
-  duration, 
-  onStartNew 
+export const ModernCompletedTripCard = ({
+  distance,
+  duration,
+  onStartNew
 }: {
   distance: number;
   duration: number;
@@ -466,23 +642,21 @@ export const ModernCompletedTripCard = ({
   </Card>
 );
 
-export const ModernMessageCard = ({ 
-  type, 
-  message 
+export const ModernMessageCard = ({
+  type,
+  message
 }: {
   type: 'success' | 'error';
   message: string;
 }) => (
   <div className="mx-4 mb-2">
-    <Card className={`border-0 shadow-lg ${
-      type === 'success' 
-        ? 'bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-800' 
+    <Card className={`border-0 shadow-lg ${type === 'success'
+        ? 'bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-800'
         : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800'
-    }`}>
+      }`}>
       <CardContent className="p-3">
-        <p className={`text-sm font-medium ${
-          type === 'success' ? 'text-green-800 dark:text-green-400' : 'text-red-800 dark:text-red-400'
-        }`}>
+        <p className={`text-sm font-medium ${type === 'success' ? 'text-green-800 dark:text-green-400' : 'text-red-800 dark:text-red-400'
+          }`}>
           {message}
         </p>
       </CardContent>
@@ -490,17 +664,17 @@ export const ModernMessageCard = ({
   </div>
 );
 
-export const ModernMapControls = ({ 
-  onZoomIn, 
-  onZoomOut, 
-  onLocate 
+export const ModernMapControls = ({
+  onZoomIn,
+  onZoomOut,
+  onLocate
 }: {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onLocate: () => void;
 }) => (
   <div className="absolute top-4 right-4 space-y-2 z-[1000]">
-    <Button 
+    <Button
       onClick={onZoomIn}
       size="icon"
       variant="secondary"
@@ -508,7 +682,7 @@ export const ModernMapControls = ({
     >
       <Plus className="h-4 w-4" />
     </Button>
-    <Button 
+    <Button
       onClick={onZoomOut}
       size="icon"
       variant="secondary"
@@ -516,7 +690,7 @@ export const ModernMapControls = ({
     >
       <Minus className="h-4 w-4" />
     </Button>
-    <Button 
+    <Button
       onClick={onLocate}
       size="icon"
       variant="secondary"
@@ -526,10 +700,3 @@ export const ModernMapControls = ({
     </Button>
   </div>
 );
-
-// Reusable constants in forms
-export const DEALER_TYPES = [ "Dealer-Best", "Sub Dealer-Best", "Dealer-Non Best", "Sub Dealer-Non Best",] as const;
-export const BRANDS = ["Star", "Amrit", "Dalmia", "Topcem", "Black Tiger", "Surya Gold", "Max", "Taj", "Specify in remarks"];
-export const UNITS = ["MT", "KG", "Bags"] as const;
-export const REGIONS = ["Kamrup M", "Kamrup", "Karbi Anglong", "Dehmaji"];
-export const AREAS = ["Guwahati", "Beltola", "Zoo Road", "Tezpur", "Diphu", "Nagaon", "Barpeta"];

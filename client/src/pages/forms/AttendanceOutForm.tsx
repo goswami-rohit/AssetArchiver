@@ -1,252 +1,205 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useState, useEffect, useRef } from 'react';
+import { toast } from 'sonner';
+import { Loader2, Camera, MapPin } from 'lucide-react';
+
+// --- UI Components ---
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Camera, Crosshair, RefreshCw, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
-type Props = {
-  userId?: number;
-  defaultLocationName?: string;
-  onSubmitted?: (payload: any) => void;
-  onCancel?: () => void;
-};
+// --- Constants (inlined to resolve import issues) ---
+import { BASE_URL } from "@/components/ReusableUI";
 
-function useCamera() {
-  const streamRef = useRef<MediaStream | null>(null);
-  const start = async (videoEl: HTMLVideoElement) => {
-    streamRef.current = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "environment" },
-      audio: false,
-    });
-    videoEl.srcObject = streamRef.current;
-    await videoEl.play();
-  };
-  const stop = () => {
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
-  };
-  const capture = (videoEl: HTMLVideoElement) => {
-    const canvas = document.createElement("canvas");
-    canvas.width = videoEl.videoWidth || 1280;
-    canvas.height = videoEl.videoHeight || 720;
-    const ctx = canvas.getContext("2d");
-    if (ctx) ctx.drawImage(videoEl, 0, 0);
-    return canvas.toDataURL("image/jpeg", 0.85);
-  };
-  return { start, stop, capture };
+// --- Type Definitions ---
+type Step = 'camera' | 'location' | 'loading' | 'confirm';
+interface AttendanceOutFormProps {
+  userId: number;
+  onSubmitted: () => void;
+  onCancel: () => void;
+}
+interface GeoLocation {
+    coords: {
+        latitude: number;
+        longitude: number;
+        accuracy: number | null;
+    };
+    timestamp: number;
 }
 
-export default function AttendanceOutForm({
-  userId,
-  defaultLocationName,
-  onSubmitted,
-  onCancel,
-}: Props) {
-  type Step = "photo" | "location";
-  const [step, setStep] = useState<Step>("photo");
+// --- Helper: Convert Data URL to Blob ---
+async function dataURLtoBlob(dataurl: string): Promise<Blob> {
+    const res = await fetch(dataurl);
+    return await res.blob();
+}
 
-  const { start, stop, capture } = useCamera();
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  const [attendanceDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [outTimeTimestamp, setOutTimeTimestamp] = useState<string | null>(null);
-  const [outPhoto, setOutPhoto] = useState<string | null>(null);
-
-  const [locationName, setLocationName] = useState<string>(defaultLocationName || "");
-  const [outTimeLatitude, setLat] = useState<string>("");
-  const [outTimeLongitude, setLng] = useState<string>("");
-  const [geoBusy, setGeoBusy] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
+// --- Component ---
+export default function AttendanceOutForm({ userId, onSubmitted, onCancel }: AttendanceOutFormProps) {
+  const [step, setStep] = useState<Step>('loading');
+  const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [location, setLocation] = useState<GeoLocation | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (step === "photo" && videoRef.current) {
-      start(videoRef.current).catch(console.error);
-      return () => stop();
-    }
-  }, [step, start, stop]);
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(() => setStep('camera'))
+      .catch(() => {
+        toast.error("Permission Required", { description: "Camera access is needed to check out." });
+        onCancel();
+      });
+  }, [onCancel]);
 
-  const takePhoto = () => {
-    if (!videoRef.current) return;
-    const dataUrl = capture(videoRef.current);
-    setOutPhoto(dataUrl);
-    setOutTimeTimestamp(new Date().toISOString());
-    stop();
-    setStep("location");
-  };
-
-  const useMyLocation = async () => {
+  const handleOpenCamera = async () => {
     try {
-      setGeoBusy(true);
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-        })
-      );
-      setLat(String(pos.coords.latitude));
-      setLng(String(pos.coords.longitude));
-      if (!locationName) {
-        setLocationName(`Lat ${pos.coords.latitude.toFixed(5)}, Lng ${pos.coords.longitude.toFixed(5)}`);
+        setIsCameraOpen(true);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+        if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+        }
+    } catch (err) {
+        toast.error("Camera Error", { description: "Could not start the camera." });
+        setIsCameraOpen(false);
+    }
+  };
+  
+  const takePicture = () => {
+      if (videoRef.current && canvasRef.current) {
+          const video = videoRef.current;
+          const canvas = canvasRef.current;
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const context = canvas.getContext('2d');
+          context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+          const dataUrl = canvas.toDataURL('image/jpeg');
+          setPhotoUri(dataUrl);
+
+          if (video.srcObject) {
+            const stream = video.srcObject as MediaStream;
+            stream.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+          }
+          setIsCameraOpen(false);
+          fetchLocation();
       }
-    } catch (e) {
-      console.error(e);
-      alert("Unable to get your location. Check permissions.");
-    } finally {
-      setGeoBusy(false);
-    }
-  };
-  const validate = () => {
-    if (!outPhoto) return "Please take the check-out photo.";
-    if (!locationName || !outTimeLatitude || !outTimeLongitude) return "Location name and coordinates are required.";
-    if (!outTimeTimestamp) return "Timestamp missing. Retake photo.";
-    return null;
   };
 
-  const uploadImage = async (dataUrl: string, prefix: string) => {
-    // turn base64 into blob
-    const blob = await (await fetch(dataUrl)).blob();
-
-    // ask backend for presigned URL
-    const res = await fetch("/api/upload-url", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        fileName: `${prefix}-${Date.now()}.jpg`,
-        fileType: "image/jpeg",
-      }),
-    });
-
-    const result = await res.json();
-
-    if (!res.ok || !result.success) {
-      throw new Error(result.error || "Failed to get upload URL");
-    }
-
-    const { uploadUrl, publicUrl } = result;
-
-    // upload directly to R2
-    const uploadResponse = await fetch(uploadUrl, {
-      method: "PUT",
-      body: blob,
-      headers: {
-        'Content-Type': 'image/jpeg'
+  const fetchLocation = () => {
+    setStep('loading');
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocation(position);
+        setStep('confirm');
+      },
+      (error) => {
+        toast.error("Location Error", { description: error.message || "Unable to fetch location." });
+        setStep('camera');
       }
-    });
-
-    if (!uploadResponse.ok) {
-      throw new Error("Failed to upload image to R2");
-    }
-
-    return publicUrl;
+    );
   };
 
-  const submit = async () => {
-    const err = validate();
-    if (err) return alert(err);
+  const handleSubmit = async () => {
+    if (!photoUri || !location) {
+      return toast.error("Error", { description: "Photo or location data is missing." });
+    }
+    setIsSubmitting(true);
+
+    const formData = new FormData();
+    formData.append('userId', String(userId));
+    formData.append('outTimeTimestamp', new Date(location.timestamp).toISOString());
+    formData.append('outTimeImageCaptured', 'true');
+    formData.append('outTimeLatitude', String(location.coords.latitude));
+    formData.append('outTimeLongitude', String(location.coords.longitude));
+    formData.append('outTimeAccuracy', String(location.coords.accuracy));
+    formData.append('outTimeImage', await dataURLtoBlob(photoUri), 'checkout.jpg');
+
     try {
-      setSubmitting(true);
-
-      // Upload the checkout selfie image to R2
-      const selfieUrl = outPhoto ? await uploadImage(outPhoto, "attendance-out") : null;
-
-      // Prepare the punch-out payload
-      const punchOutPayload = {
-        userId: userId,
-        latitude: Number(outTimeLatitude),
-        longitude: Number(outTimeLongitude),
-        accuracy: null, // You can enhance useMyLocation to capture this
-        speed: null,
-        heading: null,
-        altitude: null,
-        selfieUrl
-      };
-
-      // Submit to punch-out endpoint
-      const response = await fetch("/api/attendance/punch-out", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(punchOutPayload),
+      const response = await fetch(`${BASE_URL}/api/attendance/check-out`, {
+        method: 'POST',
+        body: formData,
       });
 
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to punch out");
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({ error: 'Failed to check out.' }));
+        throw new Error(result.error);
       }
 
-      // Call the callback with the successful result
-      onSubmitted?.(result.data);
-
-    } catch (error) {
-      console.error("Punch-out error:", error);
-      alert(`Failed to punch out: ${error.message}`);
+      toast.success('Checked Out Successfully!');
+      onSubmitted();
+    } catch (error: any) {
+      toast.error('Submission Failed', { description: error.message });
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
-  if (step === "photo") {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-base font-semibold">Attendance Check-out</h3>
-          <Button variant="ghost" size="icon" onClick={onCancel}><X className="h-4 w-4" /></Button>
-        </div>
-        <div className="rounded-xl overflow-hidden bg-black/50">
-          <video ref={videoRef} playsInline muted className="w-full h-64 object-cover" />
-        </div>
-        <Button onClick={takePhoto} className="w-full">
-          <Camera className="h-4 w-4 mr-2" /> Capture & Continue
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          We’ll grab your location next. Attendance date: {attendanceDate}
-        </p>
-      </div>
-    );
-  }
+  const renderContent = () => {
+    switch(step) {
+      case 'loading':
+        return <Loader2 className="h-12 w-12 animate-spin text-primary" />;
+      
+      case 'camera':
+        return (
+          <>
+            <h1 className="text-2xl font-bold">Selfie Capture</h1>
+            <p className="text-muted-foreground text-center mb-6">Please take a selfie to mark your check-out.</p>
+            <Avatar className="w-64 h-64 mb-6 border-2">
+                <AvatarFallback className="bg-muted"><Camera className="w-16 h-16 text-muted-foreground" /></AvatarFallback>
+            </Avatar>
+            <Button onClick={handleOpenCamera} className="w-full max-w-sm">
+                <Camera className="mr-2 h-4 w-4" /> Capture & Continue
+            </Button>
+          </>
+        );
 
-  // step === "location"
+      case 'confirm':
+        return (
+          <>
+            <h1 className="text-2xl font-bold">Confirm Details</h1>
+            <p className="text-muted-foreground text-center mb-6">Review your photo and location before checking out.</p>
+            <Avatar className="w-48 h-48 mb-6 border-2">
+                <AvatarImage src={photoUri || ''} alt="Your selfie" />
+                <AvatarFallback className="bg-muted"><Camera className="w-12 h-12 text-muted-foreground" /></AvatarFallback>
+            </Avatar>
+            <div className="text-center mb-6 bg-muted p-3 rounded-lg">
+                <p className="text-sm text-muted-foreground flex items-center justify-center gap-2"><MapPin className="h-4 w-4" /> Location Captured</p>
+                <p className="font-semibold">Lat: {location?.coords.latitude.toFixed(5)}, Lon: {location?.coords.longitude.toFixed(5)}</p>
+            </div>
+            <Button onClick={handleSubmit} className="w-full max-w-sm" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Confirm Check-out
+            </Button>
+          </>
+        );
+      default:
+        return <p className="text-destructive">Something went wrong. Please cancel and try again.</p>;
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">Your Location</h3>
-        <Button variant="ghost" size="icon" onClick={onCancel}><X className="h-4 w-4" /></Button>
+    <div className="flex flex-col h-full w-full items-center justify-center p-4 bg-background relative">
+      <div className="flex flex-col items-center justify-center text-center w-full max-w-sm">
+        {renderContent()}
       </div>
-
-      <div className="grid gap-2">
-        <Label>Location name</Label>
-        <Textarea
-          rows={2}
-          placeholder="e.g., Returning from site / Dealer location"
-          value={locationName}
-          onChange={e => setLocationName(e.target.value)}
-          required
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Latitude</Label>
-          <Input inputMode="decimal" value={outTimeLatitude} onChange={e => setLat(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Longitude</Label>
-          <Input inputMode="decimal" value={outTimeLongitude} onChange={e => setLng(e.target.value)} required />
-        </div>
-      </div>
-
-      <Button type="button" variant="secondary" onClick={useMyLocation} disabled={geoBusy}>
-        {geoBusy ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Crosshair className="h-4 w-4 mr-2" />}
-        Use my current location
+      <Button
+        variant="ghost"
+        onClick={onCancel}
+        disabled={isSubmitting}
+        className="absolute bottom-6"
+      >
+        Cancel
       </Button>
-
-      <div className="flex justify-end gap-3 pt-2">
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={submit} disabled={submitting}>Confirm Check-out</Button>
-      </div>
+       <Dialog open={isCameraOpen} onOpenChange={setIsCameraOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Take Selfie</DialogTitle></DialogHeader>
+          <video ref={videoRef} autoPlay playsInline className="w-full rounded-md" />
+          <canvas ref={canvasRef} className="hidden" />
+          <DialogFooter>
+            <Button onClick={takePicture}>Capture Photo</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

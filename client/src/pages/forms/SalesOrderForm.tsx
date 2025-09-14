@@ -1,297 +1,306 @@
-import * as React from "react";
-import { useMemo, useState } from "react";
+import React, { useEffect, useState } from 'react';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { Loader2, ArrowLeft, CalendarIcon, ChevronsUpDown, Check } from 'lucide-react';
+
+// --- UI Components ---
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import { X, Loader2 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Toaster } from "@/components/ui/sonner";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 
-import { DEALER_TYPES, UNITS, REGIONS, AREAS } from "@/components/ReusableUI";
+// --- Custom Hooks & Constants ---
+import { useAppStore, BASE_URL, UNITS } from '../../components/ReusableUI';
 
-// —————————————————————————————————————
-// Props
-// —————————————————————————————————————
-type UserLite = {
-  id?: number;
-  firstName?: string;
-  lastName?: string;
-  role?: string;
-  phoneNumber?: string;
-  email?: string;
-};
+// --- Helper for combining Tailwind classes ---
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
 
-export default function SalesOrderForm({
-  user,               // can be undefined or null now
-  onSubmitted,
-  onCancel,
-}: {
-  user?: UserLite | null;   // ← allow null
-  onSubmitted?: (payload: any) => void;
-  onCancel?: () => void;
-}) {
-  // derive logged-in user (fallback to localStorage["user"])
-  const memoUser = useMemo<UserLite>(() => {
-    if (user?.firstName || user?.lastName) return user;
-    try {
-      const raw = localStorage.getItem("user");
-      if (!raw) return {};
-      const u = JSON.parse(raw);
-      return { id: u?.id, firstName: u?.firstName, lastName: u?.lastName, role: u?.role };
-    } catch { return {}; }
-  }, [user]);
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
 
-  // ——————————————————————————————————
-  // Form state (all mandatory per spec)
-  // ——————————————————————————————————
-  const [salesmanName, setSalesmanName] = useState(
-    [memoUser.firstName, memoUser.lastName].filter(Boolean).join(" ") || ""
-  );
-  const [salesmanRole, setSalesmanRole] = useState(memoUser.role ?? "");
+// --- Zod Schema ---
+const SalesOrderSchema = z.object({
+  dealerId: z.string().min(1, "A dealer must be selected"),
+  quantity: z.coerce.number().positive({ message: "Quantity must be a positive number" }),
+  unit: z.string().min(1, "A unit is required"),
+  orderTotal: z.coerce.number().positive({ message: "Order total must be a positive number" }),
+  advancePayment: z.coerce.number().min(0, "Advance payment cannot be negative"),
+  pendingPayment: z.coerce.number().min(0),
+  estimatedDelivery: z.date({ required_error: "An estimated delivery date is required" }),
+  remarks: z.string().optional().nullable(),
+});
 
-  const [dealerType, setDealerType] = useState<string>("");
-  const [dealerName, setDealerName] = useState("");
-  const [dealerPhone, setDealerPhone] = useState("");
-  const [dealerAddress, setDealerAddress] = useState("");
+type SalesOrderFormValues = z.infer<typeof SalesOrderSchema>;
 
-  const [area, setArea] = useState<string>("");
-  const [region, setRegion] = useState<string>("");
+interface Dealer {
+  id: string;
+  name: string;
+  address: string;
+  phoneNo: string;
+  region: string;
+  area: string;
+  type: string;
+}
 
-  const [quantity, setQuantity] = useState<string>("");
-  const [unit, setUnit] = useState<string>("");
-  const [orderTotal, setOrderTotal] = useState<string>("");    // ₹
-  const [advancePayment, setAdvancePayment] = useState<string>("");
-  const [pendingPayment, setPendingPayment] = useState<string>("");
-  const [estimatedDelivery, setEstimatedDelivery] = useState<string>(() =>
-    new Date().toISOString().slice(0, 10)
-  );
+// --- Component ---
+export default function SalesOrderForm() {
+  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const { user } = useAppStore();
+  const [dealers, setDealers] = useState<Dealer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDealerDialogOpen, setIsDealerDialogOpen] = useState(false);
 
-  // extras (free text)
-  const [remarks, setRemarks] = useState("");
+  const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<SalesOrderFormValues>({
+    resolver: zodResolver(SalesOrderSchema),
+    mode: 'onChange',
+    defaultValues: {
+      dealerId: '',
+      quantity: undefined,
+      unit: '',
+      orderTotal: undefined,
+      advancePayment: 0,
+      pendingPayment: 0,
+      estimatedDelivery: new Date(),
+      remarks: '',
+    },
+  });
 
-  const [submitting, setSubmitting] = useState(false);
+  const [orderTotal, advancePayment, dealerId] = watch(['orderTotal', 'advancePayment', 'dealerId']);
+  const selectedDealer = dealers.find(d => d.id === dealerId) || null;
 
-  // keep pending in sync if user edits total/advance
-  React.useEffect(() => {
-    const total = Number(orderTotal || 0);
-    const adv = Number(advancePayment || 0);
-    if (Number.isFinite(total) && Number.isFinite(adv)) {
-      const pending = Math.max(total - adv, 0);
-      setPendingPayment(pending.toString());
-    }
-  }, [orderTotal, advancePayment]);
-
-  const validate = (): string | null => {
-    if (!salesmanName.trim()) return "Salesman name is required.";
-    if (!salesmanRole.trim()) return "Salesman role is required.";
-    if (!dealerType) return "Dealer type is required.";
-    if (!dealerName.trim()) return "Dealer name is required.";
-    if (!dealerPhone.trim()) return "Dealer phone number is required.";
-    if (!dealerAddress.trim()) return "Dealer address is required.";
-    if (!area) return "Dealer area is required.";
-    if (!region) return "Dealer region is required.";
-    if (!quantity || isNaN(Number(quantity)) || Number(quantity) <= 0) return "Enter a valid order quantity.";
-    if (!unit) return "Select order quantity unit.";
-    if (!orderTotal || isNaN(Number(orderTotal)) || Number(orderTotal) <= 0) return "Enter a valid order total.";
-    if (advancePayment === "" || isNaN(Number(advancePayment)) || Number(advancePayment) < 0)
-      return "Enter a valid advance amount.";
-    if (pendingPayment === "" || isNaN(Number(pendingPayment)) || Number(pendingPayment) < 0)
-      return "Pending payment must be valid.";
-    if (!estimatedDelivery) return "Estimated delivery date is required.";
-    return null;
-  };
-
-  const payload = useMemo(() => {
-    const q = Number(quantity || 0);
-    const ot = Number(orderTotal || 0);
-    const ap = Number(advancePayment || 0);
-    const pp = Number(pendingPayment || 0);
-
-    // Friendly summary to send via SMS/Email later
-    const summaryLines = [
-      `Sales Order`,
-      `---------------------------`,
-      `Salesman: ${salesmanName} (${salesmanRole})`,
-      `Dealer: ${dealerName} [${dealerType}]`,
-      `Phone: ${dealerPhone}`,
-      `Address: ${dealerAddress}`,
-      `Area/Region: ${area} / ${region}`,
-      `Quantity: ${q} ${unit}`,
-      `Order Total: ₹${ot.toLocaleString()}`,
-      `Advance: ₹${ap.toLocaleString()} | Pending: ₹${pp.toLocaleString()}`,
-      `Delivery ETA: ${estimatedDelivery}`,
-      remarks ? `Remarks: ${remarks}` : null,
-    ].filter(Boolean).join("\n");
-
-    return {
-      meta: {
-        toPhone: "123456789",
-        toEmail: "example@mail.com",
-      },
-      order: {
-        salesman: { name: salesmanName, role: salesmanRole, userId: memoUser.id ?? null },
-        dealer: {
-          type: dealerType, name: dealerName, phone: dealerPhone,
-          address: dealerAddress, area, region,
-        },
-        details: {
-          quantity: q, unit,
-          orderTotal: ot,
-          advancePayment: ap,
-          pendingPayment: pp,
-          estimatedDelivery, // YYYY-MM-DD
-          remarks: remarks || null,
-        },
-      },
-      message: summaryLines,
+  useEffect(() => {
+    const fetchDealers = async () => {
+      try {
+        const response = await fetch(`${BASE_URL}/api/dealers`);
+        if (!response.ok) throw new Error('Failed to fetch dealers');
+        const result = await response.json();
+        if (result.success) setDealers(result.data);
+        else toast.error("Error", { description: "Could not load dealers." });
+      } catch (error: any) {
+        toast.error("Network Error", { description: error.message });
+      } finally {
+        setIsLoading(false);
+      }
     };
-  }, [
-    salesmanName, salesmanRole, memoUser.id,
-    dealerType, dealerName, dealerPhone, dealerAddress, area, region,
-    quantity, unit, orderTotal, advancePayment, pendingPayment, estimatedDelivery, remarks
-  ]);
+    fetchDealers();
+  }, []);
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const err = validate();
-    if (err) return alert(err);
+  useEffect(() => {
+    const total = Number(orderTotal || 0);
+    const advance = Number(advancePayment || 0);
+    setValue('pendingPayment', Math.max(0, total - advance));
+  }, [orderTotal, advancePayment, setValue]);
 
+  const submit = async (values: SalesOrderFormValues) => {
     try {
-      setSubmitting(true);
-      // TODO: Later call your backend to send:
-      // await fetch("/api/sales-order/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      onSubmitted?.(payload);
-    } finally {
-      setSubmitting(false);
+      const payload = {
+        salesmanId: user?.id,
+        ...values,
+        quantity: String(values.quantity),
+        orderTotal: String(values.orderTotal),
+        advancePayment: String(values.advancePayment),
+        pendingPayment: String(values.pendingPayment),
+        estimatedDelivery: format(values.estimatedDelivery, 'yyyy-MM-dd'),
+      };
+
+      const response = await fetch(`${BASE_URL}/api/sales-orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ message: 'Failed to submit sales order.' }));
+        throw new Error(errorData.error || errorData.message);
+      }
+
+      toast.success('Order Submitted', { description: 'The sales order has been sent successfully.' });
+      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+
+    } catch (error: any) {
+      toast.error('Submission Failed', { description: error.message });
     }
   };
 
   return (
-    <form className="space-y-4" onSubmit={submit}>
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">Create Sales Order</h3>
-        <Button type="button" variant="ghost" size="icon" onClick={onCancel}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
+    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="container flex h-14 items-center">
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <h1 className="text-lg font-bold ml-2">Create Sales Order</h1>
+        </div>
+      </header>
+      
+      <main className="flex-1 overflow-auto p-6">
+        <form onSubmit={handleSubmit(submit)} className="max-w-4xl mx-auto space-y-8">
+          
+          {/* Salesman Details */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4 border-b pb-2">Salesman Details</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label>Salesman Name</Label>
+                <Input value={`${user?.firstName || ''} ${user?.lastName || ''}`} disabled />
+              </div>
+              <div className="space-y-1">
+                <Label>Role</Label>
+                <Input value={user?.role || ''} disabled />
+              </div>
+            </div>
+          </div>
 
-      {/* Salesman */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Salesman</Label>
-          <Input value={salesmanName} onChange={(e) => setSalesmanName(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Role</Label>
-          <Input value={salesmanRole} onChange={(e) => setSalesmanRole(e.target.value)} required />
-        </div>
-      </div>
+          {/* Dealer Details */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4 border-b pb-2">Dealer Details</h2>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label>Select Dealer *</Label>
+                 <Dialog open={isDealerDialogOpen} onOpenChange={setIsDealerDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between h-12 font-normal text-left">
+                        {selectedDealer ? `${selectedDealer.name} - ${selectedDealer.address}` : "Select a dealer..."}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent className="p-0">
+                      <Command>
+                        <CommandInput placeholder="Search for a dealer..." />
+                        <CommandList>
+                          {isLoading && <div className="p-4 text-center text-sm">Loading dealers...</div>}
+                          <CommandEmpty>No dealer found.</CommandEmpty>
+                          <CommandGroup>
+                            {dealers.map((dealer) => (
+                              <CommandItem key={dealer.id} value={dealer.name} onSelect={() => {
+                                setValue("dealerId", dealer.id, { shouldValidate: true });
+                                setIsDealerDialogOpen(false);
+                              }}>
+                                <Check className={cn("mr-2 h-4 w-4", dealerId === dealer.id ? "opacity-100" : "opacity-0")} />
+                                <div>
+                                    <p>{dealer.name}</p>
+                                    <p className="text-xs text-muted-foreground">{dealer.address}</p>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </DialogContent>
+                  </Dialog>
+                  {errors.dealerId && <p className="text-sm text-red-500 mt-1">{errors.dealerId.message}</p>}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input placeholder="Dealer Type" value={selectedDealer?.type || ''} disabled />
+                  <Input placeholder="Dealer Phone" value={selectedDealer?.phoneNo || ''} disabled />
+              </div>
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Input placeholder="Area" value={selectedDealer?.area || ''} disabled />
+                  <Input placeholder="Region" value={selectedDealer?.region || ''} disabled />
+              </div>
+            </div>
+          </div>
 
-      {/* Dealer basic */}
-      <div className="grid gap-2">
-        <Label>Dealer Type</Label>
-        <Select value={dealerType} onValueChange={setDealerType}>
-          <SelectTrigger><SelectValue placeholder="Select dealer type" /></SelectTrigger>
-          <SelectContent>
-            {DEALER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Dealer Name</Label>
-          <Input value={dealerName} onChange={(e) => setDealerName(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Dealer Phone No</Label>
-          <Input inputMode="tel" value={dealerPhone} onChange={(e) => setDealerPhone(e.target.value)} required />
-        </div>
-      </div>
-
-      <div className="grid gap-2">
-        <Label>Dealer Address</Label>
-        <Textarea rows={2} value={dealerAddress} onChange={(e) => setDealerAddress(e.target.value)} required />
-      </div>
-
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Area</Label>
-          <Select value={area} onValueChange={setArea}>
-            <SelectTrigger><SelectValue placeholder="Select area" /></SelectTrigger>
-            <SelectContent>{AREAS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-2">
-          <Label>Region</Label>
-          <Select value={region} onValueChange={setRegion}>
-            <SelectTrigger><SelectValue placeholder="Select region" /></SelectTrigger>
-            <SelectContent>{REGIONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Order details */}
-      <div className="grid grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Order Quantity</Label>
-          <Input inputMode="decimal" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Unit</Label>
-          <Select value={unit} onValueChange={setUnit}>
-            <SelectTrigger><SelectValue placeholder="Select unit" /></SelectTrigger>
-            <SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2">
-        <div className="grid gap-2">
-          <Label>Order Total (₹)</Label>
-          <Input inputMode="decimal" value={orderTotal} onChange={(e) => setOrderTotal(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Advance (₹)</Label>
-          <Input inputMode="decimal" value={advancePayment} onChange={(e) => setAdvancePayment(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Pending (₹)</Label>
-          <Input inputMode="decimal" value={pendingPayment} onChange={(e) => setPendingPayment(e.target.value)} required />
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <div className="grid gap-2">
-          <Label>Estimated Delivery Date</Label>
-          <Input type="date" value={estimatedDelivery} onChange={(e) => setEstimatedDelivery(e.target.value)} required />
-        </div>
-        <div className="grid gap-2">
-          <Label>Remarks (optional)</Label>
-          <Input value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Any special instruction" />
-        </div>
-      </div>
-
-      {/* Preview (what will be sent) */}
-      <div className="rounded-xl border bg-card/60 p-3 text-xs whitespace-pre-wrap">
-        {payload.message}
-      </div>
-
-      {/* Actions */}
-      <div className="flex justify-end gap-3 pt-2">
-        <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button type="submit" disabled={submitting}>
-          {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Sending…</>) : "Submit & Send"}
-        </Button>
-      </div>
-
-      {/* Dev note for you */}
-      {/* TODO: In your backend:
-           - POST to /api/sales-order/send with `payload`
-           - Send SMS to payload.meta.toPhone and Email to payload.meta.toEmail
-           - No DB insert required for this workflow */}
-    </form>
+          {/* Order Details */}
+          <div>
+            <h2 className="text-xl font-semibold mb-4 border-b pb-2">Order Details</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Controller name="quantity" control={control} render={({ field }) => (
+                  <div className="space-y-1">
+                    <Label htmlFor="quantity">Quantity *</Label>
+                    <Input {...field} id="quantity" type="number" placeholder="0" onChange={e => field.onChange(e.target.valueAsNumber)} />
+                    {errors.quantity && <p className="text-sm text-red-500 mt-1">{errors.quantity.message}</p>}
+                  </div>
+                )} />
+                <Controller name="unit" control={control} render={({ field }) => (
+                  <div className="space-y-1">
+                    <Label>Unit *</Label>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <SelectTrigger><SelectValue placeholder="Select Unit..." /></SelectTrigger>
+                      <SelectContent>{UNITS.map(unit => <SelectItem key={unit} value={unit}>{unit}</SelectItem>)}</SelectContent>
+                    </Select>
+                    {errors.unit && <p className="text-sm text-red-500 mt-1">{errors.unit.message}</p>}
+                  </div>
+                )} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <Controller name="orderTotal" control={control} render={({ field }) => (
+                    <div className="space-y-1">
+                        <Label htmlFor="orderTotal">Order Total (₹) *</Label>
+                        <Input {...field} id="orderTotal" type="number" placeholder="0.00" onChange={e => field.onChange(e.target.valueAsNumber)} />
+                        {errors.orderTotal && <p className="text-sm text-red-500 mt-1">{errors.orderTotal.message}</p>}
+                    </div>
+                )} />
+                <Controller name="advancePayment" control={control} render={({ field }) => (
+                    <div className="space-y-1">
+                        <Label htmlFor="advancePayment">Advance (₹) *</Label>
+                        <Input {...field} id="advancePayment" type="number" placeholder="0.00" onChange={e => field.onChange(e.target.valueAsNumber)} />
+                        {errors.advancePayment && <p className="text-sm text-red-500 mt-1">{errors.advancePayment.message}</p>}
+                    </div>
+                )} />
+                <Controller name="pendingPayment" control={control} render={({ field }) => (
+                    <div className="space-y-1">
+                        <Label htmlFor="pendingPayment">Pending (₹)</Label>
+                        <Input {...field} id="pendingPayment" type="number" disabled />
+                    </div>
+                )} />
+              </div>
+              <Controller name="estimatedDelivery" control={control} render={({ field }) => (
+                <div className="space-y-1">
+                    <Label>Estimated Delivery *</Label>
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" className={cn("w-full sm:w-1/2 justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus /></PopoverContent>
+                    </Popover>
+                    {errors.estimatedDelivery && <p className="text-sm text-red-500 mt-1">{errors.estimatedDelivery.message}</p>}
+                </div>
+              )} />
+              <Controller name="remarks" control={control} render={({ field }) => (
+                  <div className="space-y-1">
+                      <Label htmlFor="remarks">Remarks (Optional)</Label>
+                      <Textarea {...field} value={field.value || ''} id="remarks" placeholder="Add any special instructions or notes..." />
+                  </div>
+              )} />
+            </div>
+          </div>
+          
+          <div className="pt-4">
+            <Button type="submit" className="w-full h-12" disabled={!isValid || isSubmitting}>
+              {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting Order...</> : "Submit & Send Order"}
+            </Button>
+          </div>
+        </form>
+      </main>
+      <Toaster />
+    </div>
   );
 }
