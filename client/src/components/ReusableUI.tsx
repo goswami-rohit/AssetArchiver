@@ -270,6 +270,7 @@ type Dealer = {
   [key: string]: any;
 };
 
+// Dealer area + region fetching
 export async function fetchRegions(): Promise<string[]> {
   const url = `${BASE_URL}/api/dealers`;
   const res = await fetch(url);
@@ -300,6 +301,7 @@ export async function fetchAreas(): Promise<string[]> {
   return areas;
 }
 
+// user area + region + role + id fetching
 export async function fetchUserById(userId: number) {
   const res = await fetch(`${BASE_URL}/api/users/${userId}`);
   if (!res.ok) throw new Error("Failed to fetch user");
@@ -345,6 +347,7 @@ export async function fetchUsersByRegion(region: string, limit = 50) {
   return json.data;
 }
 
+// company by userID fetching
 export async function fetchCompanyByUserId(userId: number) {
   if (!userId) throw new Error("userId is required");
 

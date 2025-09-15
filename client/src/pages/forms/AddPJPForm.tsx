@@ -46,6 +46,7 @@ const PJPSchema = z.object({
   planDate: z.date({
     required_error: "Plan date is required.",
   }),
+  // FIX: areaToBeVisited should be the dealer ID (string)
   areaToBeVisited: z.string().min(1, "Destination dealer is required"),
   description: z.string().optional(),
   status: z.enum(PJP_STATUS, {
@@ -56,6 +57,7 @@ const PJPSchema = z.object({
 type PJPFormValues = z.infer<typeof PJPSchema>;
 
 interface Dealer {
+  id: string;
   name: string;
   address: string;
 }
@@ -114,19 +116,18 @@ export default function AddPJPForm() {
   const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<PJPFormValues>({
     resolver: zodResolver(PJPSchema) as unknown as Resolver<PJPFormValues, any>,
     mode: 'onChange',
-    // FIX: Set a default value that passes validation to make the button clickable
     defaultValues: {
       userId: user?.id,
       createdById: user?.id,
       planDate: new Date(),
-      areaToBeVisited: ' ', // Changed from '' to ' '
+      areaToBeVisited: '', // FIX: Empty string as default, will be replaced with ID
       description: '',
       status: 'planned',
     },
   });
 
-  const planDate = watch('planDate');
-  const selectedDealerName = watch('areaToBeVisited');
+  const selectedDealerId = watch('areaToBeVisited');
+  const selectedDealer = dealersData.find(d => d.id === selectedDealerId);
   const fullName = [user?.firstName, user?.lastName].filter(Boolean).join(" ");
 
   const filteredDealers = dealersData.filter(d =>
@@ -177,7 +178,6 @@ export default function AddPJPForm() {
           <h2 className="text-2xl font-bold text-center mb-1">Journey Details</h2>
           <p className="text-sm text-center text-gray-500 mb-6">Plan a visit for yourself.</p>
 
-          {/* ADDED: padding-bottom to the form container to ensure content is visible */}
           <form onSubmit={handleSubmit(submit)} className="space-y-6 pb-28">
             <div className="space-y-1">
               <Label htmlFor="salesperson">Salesperson</Label>
@@ -219,7 +219,7 @@ export default function AddPJPForm() {
               <Dialog open={dealerModalVisible} onOpenChange={setDealerModalVisible}>
                 <DialogTrigger asChild>
                   <Button variant="outline" className="w-full justify-between h-12">
-                    {selectedDealerName || "Select Destination Dealer"}
+                    {selectedDealer ? `${selectedDealer.name} - ${selectedDealer.id}` : "Select Destination Dealer"}
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                   </Button>
                 </DialogTrigger>
@@ -246,16 +246,17 @@ export default function AddPJPForm() {
                         {filteredDealers.length > 0 ? (
                           filteredDealers.map(d => (
                             <Button
-                              key={d.name} // Using name as key, assuming it's unique
+                              key={d.id}
                               variant="ghost"
                               className="w-full justify-start"
                               onClick={() => {
-                                setValue('areaToBeVisited', `${d.name} - ${d.address || ''}`, { shouldValidate: true });
+                                // FIX: Set the dealer's unique ID, not the name string
+                                setValue('areaToBeVisited', d.id, { shouldValidate: true });
                                 setDealerModalVisible(false);
                                 setSearchQuery('');
                               }}
                             >
-                              {d.name} - {d.address || ''}
+                              {d.name} - {d.id}
                             </Button>
                           ))
                         ) : (

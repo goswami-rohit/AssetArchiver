@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from "wouter";
-import { format } from 'date-fns';
+import { format, isToday, parseISO } from 'date-fns';
 import { toast } from 'sonner';
-import { Loader2, LogIn, LogOut, Plus, CalendarSearch } from 'lucide-react';
+import { Loader2, LogIn, LogOut, Plus, CalendarSearch, ChevronRight } from 'lucide-react';
 
 // --- Reusable Web Components ---
 import AppHeader from '@/components/AppHeader';
@@ -19,12 +19,23 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
 
 // --- Custom Hooks & Constants ---
-import { useAppStore, BASE_URL, StatCard, fetchUserById } from '../components/ReusableUI';
+import { useAppStore, BASE_URL, StatCard, fetchUserById, PJP_STATUS } from '../components/ReusableUI';
 
 // --- Type Definitions ---
 type PJP = {
   id: string;
+  areaToBeVisited: string;
+  status: string;
+  planDate: string;
   [key: string]: any;
+};
+
+type Dealer = {
+  id: string;
+  name: string;
+  address: string;
+  latitude: number;
+  longitude: number;
 };
 
 // --- Component ---
@@ -34,15 +45,13 @@ export default function HomePage() {
 
   const [isAttendanceModalVisible, setIsAttendanceModalVisible] = useState(false);
   const [attendanceFormType, setAttendanceFormType] = useState<'in' | 'out' | null>(null);
+
   const [todayPJPs, setTodayPJPs] = useState<PJP[]>([]);
   const [isLoadingPJPs, setIsLoadingPJPs] = useState(true);
 
   // --- Dynamic user data fetching ---
   useEffect(() => {
-    // Check if the user is already in the store to avoid refetching
     if (user) return;
-
-    // Get the user ID from a persistent source, e.g., localStorage
     const storedUserId = localStorage.getItem('userId');
     if (storedUserId) {
       const userId = parseInt(storedUserId);
@@ -50,10 +59,9 @@ export default function HomePage() {
         const fetchUserData = async () => {
           try {
             const userData = await fetchUserById(userId);
-            setUser(userData); // Update the global user state
+            setUser(userData);
           } catch (e) {
             console.error("Failed to fetch user data:", e);
-            // Optionally, handle error, e.g., clear localStorage and redirect to login
             localStorage.clear();
             navigate('/login');
           }
@@ -61,25 +69,52 @@ export default function HomePage() {
         fetchUserData();
       }
     } else {
-        // If no user ID is found, navigate to login
-        navigate('/login');
+      navigate('/login');
     }
   }, [user, setUser, navigate]);
 
-  // Fetch PJPs on load, now dependent on `user?.id` being set
+  // Fetch all PJPs and enrich with dealer data
   useEffect(() => {
     if (!user?.id) return;
     const fetchPJPs = async () => {
       setIsLoadingPJPs(true);
       try {
-        const formattedDate = format(new Date(), 'yyyy-MM-dd');
-        const url = `${BASE_URL}/api/pjp/user/${user.id}?startDate=${formattedDate}&endDate=${formattedDate}`;
-        const response = await fetch(url);
-        const result = await response.json();
-        if (response.ok && result.success) {
-          setTodayPJPs(result.data);
+        const pjpUrl = `${BASE_URL}/api/pjp/user/${user.id}`;
+        const pjpResponse = await fetch(pjpUrl);
+        const pjpResult = await pjpResponse.json();
+
+        if (pjpResponse.ok && pjpResult.success) {
+          const pjps: PJP[] = pjpResult.data;
+
+          const dealerIds = Array.from(new Set(pjps.map((p: PJP) => p.areaToBeVisited)));
+
+          if (dealerIds.length > 0) {
+            const dealerPromises = dealerIds.map(id =>
+              fetch(`${BASE_URL}/api/dealers/${id}`).then(res => res.json())
+            );
+            const dealerResults = await Promise.all(dealerPromises);
+
+            const dealersMap = new Map<string, Dealer>();
+            dealerResults.forEach(res => {
+              if (res.success) {
+                dealersMap.set(res.data.id, res.data);
+              }
+            });
+
+            const enrichedPjps = pjps.map((p: PJP) => {
+              const dealerInfo = dealersMap.get(p.areaToBeVisited);
+              return {
+                ...p,
+                dealerName: dealerInfo?.name || 'Unknown Dealer',
+                dealerAddress: dealerInfo?.address || 'Location TBD'
+              };
+            });
+            setTodayPJPs(enrichedPjps);
+          } else {
+            setTodayPJPs([]);
+          }
         } else {
-          throw new Error(result.error || "Failed to fetch today's PJPs.");
+          throw new Error(pjpResult.error || "Failed to fetch PJPs.");
         }
       } catch (e: any) {
         toast.error('Error fetching missions', { description: e.message });
@@ -114,28 +149,28 @@ export default function HomePage() {
     return 'Good Evening';
   };
 
-  const displayedPJPs = todayPJPs.slice(0, 3);
-  const hasMorePJPs = todayPJPs.length > 3;
+  // Logic to display up to 10 PJPs
+  const displayedPJPs = todayPJPs.slice(0, 10);
+  const hasMorePJPs = todayPJPs.length > 10;
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white">
       <AppHeader title="Home" />
-      
+
       <div className="container mx-auto px-8 pt-8 pb-28 space-y-4">
-        
+
         <LiquidGlassCard>
           <div className="text-center">
             <p className="font-semibold text-blue-300">{getGreeting()}</p>
-            {/* Dynamically display user's name and role */}
             <h2 className="text-2xl font-bold mt-1">{`${user?.firstName || 'Agent'} ${user?.lastName || ''}`}</h2>
             <p className="text-sm text-gray-300">{user?.role || 'Field Operations Specialist'}</p>
           </div>
         </LiquidGlassCard>
 
-        <div className="grid grid-cols-2 gap-4">
+        {/* <div className="grid grid-cols-2 gap-4">
           <StatCard title="Today's Tasks" value={String(dashboardStats?.todaysTasks ?? 0)} iconName="ClipboardList" />
           <StatCard title="Active PJPs" value={String(dashboardStats?.activePJPs ?? 0)} iconName="Navigation" />
-        </div>
+        </div> */}
 
         <LiquidGlassCard>
           <div className="flex justify-between gap-4">
@@ -167,16 +202,19 @@ export default function HomePage() {
             </LiquidGlassCard>
           ) : todayPJPs.length > 0 ? (
             <>
-              {displayedPJPs.map((pjp) => (
-                <LiquidGlassCard key={pjp.id} onPress={() => navigate('/journey', { state: { selectedPJP: pjp } })}>
-                  <PJPFloatingCard pjp={pjp} />
-                </LiquidGlassCard>
-              ))}
+              <div className="space-y-4">
+                {displayedPJPs.map((pjp) => (
+                  <LiquidGlassCard key={pjp.id} onPress={() => navigate('/crm/journey', { state: { selectedPJP: pjp } })}>
+                    <PJPFloatingCard pjp={pjp} />
+                  </LiquidGlassCard>
+                ))}
+              </div>
               {hasMorePJPs && (
-                <LiquidGlassCard onPress={() => navigate('/pjp-list', { state: { date: new Date().toISOString() } })}>
-                  <p className="text-center font-semibold text-blue-300">
-                    Show More ({todayPJPs.length - displayedPJPs.length})
-                  </p>
+                <LiquidGlassCard onPress={() => navigate('/crm/pjp-list')}>
+                  <div className="flex items-center justify-between font-semibold text-blue-300 p-2">
+                    <p>Show More ({todayPJPs.length - displayedPJPs.length})</p>
+                    <ChevronRight className="h-4 w-4" />
+                  </div>
                 </LiquidGlassCard>
               )}
             </>
@@ -184,7 +222,7 @@ export default function HomePage() {
             <LiquidGlassCard>
               <div className="text-center py-10">
                 <CalendarSearch className="mx-auto h-12 w-12 text-gray-400" />
-                <p className="mt-4 mb-4 text-sm text-gray-300">No missions planned for today.</p>
+                <p className="mt-4 mb-4 text-sm text-gray-300">No missions planned.</p>
                 <Button className="bg-blue-500/80 hover:bg-blue-600" onClick={() => navigate('/pjp-form')}>Plan a New Mission</Button>
               </div>
             </LiquidGlassCard>

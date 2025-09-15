@@ -132,7 +132,7 @@ export default function SideNavbar() {
       </nav>
 
       {/* User Profile & Logout */}
-      <div className="p-4 border-t border-white/10 mt-auto">
+      {/* <div className="p-4 border-t border-white/10 mt-auto">
         <div className="flex items-center space-x-3 p-3 bg-gray-800 rounded-lg">
           <div className="w-9 h-9 bg-gray-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
             <span>{initials}</span>
@@ -144,8 +144,8 @@ export default function SideNavbar() {
           <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-full transition-colors">
             <LogOut className="w-4 h-4" />
           </button>
-        </div>
-      </div>
+        </div> 
+      </div> */}
     </aside>
   );
 }

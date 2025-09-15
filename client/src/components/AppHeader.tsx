@@ -54,7 +54,7 @@ export default function AppHeader({ title }: AppHeaderProps) {
             onClick={() => console.log('Notifications clicked')}
             className="text-white hover:bg-white/10 hover:text-white"
           >
-            <Bell className="h-5 w-5" />
+            {/* <Bell className="h-5 w-5" /> */}
             <span className="sr-only">View notifications</span>
           </Button>
         </div>

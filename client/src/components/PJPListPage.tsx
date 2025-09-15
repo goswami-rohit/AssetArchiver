@@ -1,49 +1,47 @@
-import React, { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+// src/pages/PJPListPage.tsx
+
+import React, { useState, useEffect } from 'react';
+import { useLocation } from "wouter";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
-import { Loader2, CalendarX, Menu, Bell } from 'lucide-react';
+import { Loader2, CalendarX, ArrowLeft } from 'lucide-react';
 
-// --- UI Components ---
-import { Button } from '@/components/ui/button';
+// --- Reusable Web Components ---
+import AppHeader from '@/components/AppHeader';
+import LiquidGlassCard from '@/components/LiquidGlassCard';
+import PJPFloatingCard from '@/components/PJPFloatingCard';
+
+// --- UI Libraries ---
 import { Toaster } from '@/components/ui/sonner';
-import PJPFloatingCard from '@/components/PJPFloatingCard'; 
-import LiquidGlassCard from '@/components/LiquidGlassCard'; 
+import { Button } from '@/components/ui/button';
 
 // --- Custom Hooks & Constants ---
 import { useAppStore, BASE_URL } from '@/components/ReusableUI';
 
 // --- Type Definitions ---
-// Re-defining PJP type locally for clarity
 type PJP = {
   id: string;
-  [key: string]: any; // for other potential properties
+  areaToBeVisited: string;
+  [key: string]: any;
 };
 
-// --- A simple header placeholder ---
-const AppHeader = ({ title }: { title: string }) => (
-    <header className="sticky top-0 z-50 w-full border-b border-white/20 bg-gray-900/80 backdrop-blur-lg">
-      <div className="container mx-auto flex h-14 items-center justify-between px-4">
-        <h1 className="text-lg font-bold text-white truncate">{title}</h1>
-         <Button 
-            variant="ghost" 
-            size="icon" 
-            onClick={() => console.log('Notifications clicked')} 
-            className="text-white hover:bg-white/10 hover:text-white"
-          >
-            <Bell className="h-5 w-5" />
-            <span className="sr-only">View notifications</span>
-          </Button>
-      </div>
-    </header>
-);
+type Dealer = {
+  id: string;
+  name: string;
+  address: string;
+};
 
-// --- Component ---
 export default function PJPListPage() {
+  const [location, navigate] = useLocation();
   const { user } = useAppStore();
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { date } = (location.state as { date?: string }) || {};
+
+  // FIX: This line is incorrect in wouter. Wouter does not have location.state
+  // const { date } = (location.state as { date?: string }) || {};
+
+  // You will need to pass the date as a query parameter or from a different state management.
+  // Assuming the date is passed in the URL, e.g., /crm/pjp-list?date=YYYY-MM-DD
+  const urlParams = new URLSearchParams(window.location.search);
+  const date = urlParams.get('date');
 
   const [pjps, setPjps] = useState<PJP[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -60,17 +58,46 @@ export default function PJPListPage() {
       setIsLoading(true);
       setError(null);
       try {
+        // pjp fetching
         const targetDate = date ? new Date(date) : new Date();
         const formattedDate = format(targetDate, 'yyyy-MM-dd');
+        const pjpUrl = `${BASE_URL}/api/pjp/user/${user.id}?startDate=${formattedDate}&endDate=${formattedDate}`;
+        const pjpResponse = await fetch(pjpUrl);
+        const pjpResult = await pjpResponse.json();
 
-        const url = `${BASE_URL}/api/pjp/user/${user.id}?startDate=${formattedDate}&endDate=${formattedDate}`;
-        const response = await fetch(url);
-        const result = await response.json();
+        if (pjpResponse.ok && pjpResult.success) {
+          const pjps = pjpResult.data;
 
-        if (response.ok && result.success) {
-          setPjps(result.data);
+          // dealer fetching
+          const dealerIds = Array.from(new Set(pjps.map((p: PJP) => p.areaToBeVisited)));
+
+          if (dealerIds.length > 0) {
+            const dealerPromises = dealerIds.map(id =>
+              fetch(`${BASE_URL}/api/dealers/${id}`).then(res => res.json())
+            );
+            const dealerResults = await Promise.all(dealerPromises);
+
+            const dealersMap = new Map<string, Dealer>();
+            dealerResults.forEach(res => {
+              if (res.success) {
+                dealersMap.set(res.data.id, res.data);
+              }
+            });
+
+            const enrichedPjps = pjps.map((p: PJP) => {
+              const dealerInfo = dealersMap.get(p.areaToBeVisited);
+              return {
+                ...p,
+                dealerName: dealerInfo?.name || 'Unknown Dealer',
+                dealerAddress: dealerInfo?.address || 'Location TBD'
+              };
+            });
+            setPjps(enrichedPjps);
+          } else {
+            setPjps([]);
+          }
         } else {
-          throw new Error(result.error || "Failed to fetch PJPs.");
+          throw new Error(pjpResult.error || "Failed to fetch PJPs.");
         }
       } catch (e: any) {
         setError(e.message);
@@ -83,13 +110,13 @@ export default function PJPListPage() {
   }, [user?.id, date]);
 
   const handleCardPress = (pjp: PJP) => {
-    navigate('/journey', { state: { selectedPJP: pjp } });
+    navigate('/crm/journey', { state: { selectedPJP: pjp } });
   };
 
   const renderContent = () => {
     if (isLoading) {
       return (
-        <div className="flex flex-col items-center justify-center h-64">
+        <div className="flex flex-col items-center justify-center py-8">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
           <p className="mt-4 text-gray-300">Loading missions...</p>
         </div>
@@ -97,29 +124,30 @@ export default function PJPListPage() {
     }
     if (error) {
       return (
-        <div className="flex flex-col items-center justify-center h-64 text-center">
-            <CalendarX className="h-12 w-12 text-red-400" />
-            <p className="mt-4 text-red-400">Error: {error}</p>
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <CalendarX className="h-12 w-12 text-red-400" />
+          <p className="mt-4 text-red-400">Error: {error}</p>
         </div>
       );
     }
     if (pjps.length === 0) {
       return (
-        <div className="flex flex-col items-center justify-center h-64 text-center">
-            <CalendarX className="h-12 w-12 text-gray-400" />
-            <p className="mt-4 text-gray-300">No missions found for this day.</p>
+        <div className="flex flex-col items-center justify-center py-8 text-center">
+          <CalendarX className="h-12 w-12 text-gray-400" />
+          <p className="mt-4 text-gray-300">No missions found for this day.</p>
+          <Button onClick={() => navigate('/pjp-form')} className="mt-4">Plan a New Mission</Button>
         </div>
       );
     }
     return (
-      <div className="space-y-2">
+      <div className="space-y-4">
         {pjps.map((pjp) => (
-            <LiquidGlassCard key={pjp.id} onPress={() => handleCardPress(pjp)}>
-                <PJPFloatingCard
-                    pjp={pjp}
-                    onCardPress={() => handleCardPress(pjp)}
-                />
-            </LiquidGlassCard>
+          <LiquidGlassCard key={pjp.id} onPress={() => handleCardPress(pjp)}>
+            <PJPFloatingCard
+              pjp={pjp}
+              onCardPress={() => handleCardPress(pjp)}
+            />
+          </LiquidGlassCard>
         ))}
       </div>
     );
@@ -128,15 +156,12 @@ export default function PJPListPage() {
   const displayDate = date ? format(new Date(date), 'PPP') : format(new Date(), 'PPP');
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white bg-cover bg-center" style={{backgroundImage: "url('https://placehold.co/1080x1920/000000/FFFFFF?text=Mobile+Background')"}}>
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <AppHeader title={`Missions for ${displayDate}`} />
-      <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto px-4 py-4">
-            {renderContent()}
-        </div>
+      <main className="flex-1 p-8 pb-28">
+        {renderContent()}
       </main>
       <Toaster />
     </div>
   );
 }
-

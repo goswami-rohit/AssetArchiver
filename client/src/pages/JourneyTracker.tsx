@@ -1,7 +1,7 @@
-// src/pages/JourneyTracker.tsx - FIXED to use global user
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
+import { useLocation } from "wouter";
 
 import {
   ModernJourneyHeader,
@@ -58,10 +58,8 @@ async function radarStartTrip(options: {
   metadata?: Record<string, any>;
 }) {
   ensureRadarInitialized();
-  // Web SDK handles auth with the publishable key set in initialize()
-  // Expect shape: { status, trip, events }
   const result = await Radar.startTrip(options as any);
-  return result; // return { trip, ... }
+  return result;
 }
 
 async function radarUpdateTrip(options: {
@@ -71,26 +69,23 @@ async function radarUpdateTrip(options: {
   metadata?: Record<string, any>;
 }) {
   ensureRadarInitialized();
-  // Web SDK signature: Radar.updateTrip(options, status?)
   const result = await Radar.updateTrip(options as any);
-  return result; // { trip, ... }
+  return result;
 }
 
 const toDealerExternalId = (id?: string) =>
   id?.startsWith('dealer:') ? id : `dealer:${id}`;
 
-
-/* Server-side route proxy for route polyline (uses secret on backend) */
 async function radarGetTripRouteViaBackend(journeyId: string) {
   const res = await fetch(`/api/geo/trips/${journeyId}/route`);
   if (!res.ok) throw new Error(`Backend route fetch failed: ${res.status}`);
   const json = await res.json();
   if (!json.success) throw new Error(json.error || "Failed to fetch route");
-  return json.data; // mirrors Radar route response shape
+  return json.data;
 }
 
 export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
-  // 👇 global user from Zustand
+  const [location] = useLocation();
   const { user } = useAppStore();
   const userId = user?.id;
 
@@ -110,7 +105,24 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const mapRef = useRef<JourneyMapRef>(null);
   const trackingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize Radar + identify user when available
+  // Get selected PJP from navigation state (wouter)
+  const selectedPJP = (location as any).state?.selectedPJP;
+
+  // --- New useEffect to handle navigation state from HomePage ---
+  useEffect(() => {
+    if (selectedPJP) {
+      const dealer = {
+        id: selectedPJP.areaToBeVisited,
+        name: selectedPJP.dealerName,
+        address: selectedPJP.dealerAddress,
+        latitude: selectedPJP.dealerLatitude,
+        longitude: selectedPJP.dealerLongitude,
+      };
+      setSelectedDealer(dealer);
+    }
+  }, [selectedPJP]);
+
+
   useEffect(() => {
     try {
       ensureRadarInitialized();
@@ -118,12 +130,10 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         Radar.setUserId(String(userId));
       }
     } catch (e) {
-      // swallow init errors into UI message like the rest of your code
       setError((e as Error).message || 'Radar init failed');
     }
   }, [userId]);
 
-  // Fetch dealers only when userId is ready
   useEffect(() => {
     if (!userId) return;
     const fetchDealers = async () => {
@@ -138,7 +148,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     fetchDealers();
   }, [userId]);
 
-  // Get current location
   const getCurrentLocation = async () => {
     setIsLoadingLocation(true);
     try {
@@ -168,7 +177,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   };
 
-  // Start trip
   const startTrip = async () => {
     if (!currentLocation || !selectedDealer || !userId) {
       setError('Please select location and destination');
@@ -176,7 +184,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
 
     try {
-      // Start trip with Web SDK (publishable key already initialized)
       const { trip } = await radarStartTrip({
         externalId: `${userId}-${Date.now()}`,
         destinationGeofenceTag: "dealer",
@@ -189,7 +196,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         }
       });
 
-      // Create DB record via your backend
       const response = await fetch('/api/geo/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -222,7 +228,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   };
 
-  // Location tracking every 27 seconds
   const startLocationTracking = (journeyId: string) => {
     trackingIntervalRef.current = setInterval(async () => {
       try {
@@ -251,7 +256,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
         setCurrentLocation(newLocation);
 
-        // Get route data (via backend using secret)
         try {
           const routeData = await radarGetTripRouteViaBackend(journeyId);
 
@@ -262,8 +266,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
           if (routeData.geometry && routeData.geometry.coordinates) {
             const polylinePoints = routeData.geometry.coordinates.map((coord: any) => [
-              coord[1], // lat
-              coord[0]  // lng
+              coord[1],
+              coord[0]
             ]);
             setRoutePolyline(polylinePoints);
           }
@@ -271,7 +275,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           console.warn('Route fetch failed:', routeErr);
         }
 
-        // Also fetch from your backend for DB sync
         const response = await fetch(`/api/geo/trips/${journeyId}`);
         if (response.ok) {
           const data = await response.json();
@@ -289,19 +292,14 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }, 8000);
   };
 
-  // Change destination
   const changeDestination = async (newDealerId: string) => {
     if (!activeTripData) return;
 
     try {
-      // Update trip using Web SDK
       const { trip } = await radarUpdateTrip({
         destinationGeofenceExternalId: toDealerExternalId(newDealerId)
-
-        // No status override here; SDK manages started/approaching/arrived
       });
 
-      // Update your backend (DB sync)
       const response = await fetch(`/api/geo/trips/${activeTripData.journeyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -334,7 +332,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   };
 
-  // Complete trip
   const completeTrip = async () => {
     if (!activeTripData) return;
 
@@ -353,7 +350,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           trackingIntervalRef.current = null;
         }
 
-        // Allow SDK to stop trip client-side if desired
         try {
           ensureRadarInitialized();
           await Radar.completeTrip();
@@ -368,7 +364,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   };
 
-  // Reset for new journey
   const startNewJourney = () => {
     setTripStatus('idle');
     setActiveTripData(null);
@@ -379,7 +374,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     setShowDestinationChange(false);
   };
 
-  // Auto-hide messages
   useEffect(() => {
     if (success || error) {
       const timer = setTimeout(() => {
@@ -390,7 +384,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   }, [success, error]);
 
-  // Initialize
   useEffect(() => {
     getCurrentLocation();
 
@@ -403,16 +396,12 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <ModernJourneyHeader status={tripStatus} onBack={onBack} />
 
-      {/* Messages */}
       {success && <ModernMessageCard type="success" message={success} />}
       {error && <ModernMessageCard type="error" message={error} />}
 
-      {/* Main Content - Clean Layout */}
       <div className="container max-w-md mx-auto p-4 space-y-4">
-        {/* Contained Map */}
         <JourneyMap
           ref={mapRef}
           currentLocation={currentLocation}
@@ -421,7 +410,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           className="w-full"
         />
 
-        {/* Trip UI Cards */}
         {tripStatus === 'idle' && (
           <ModernTripPlanningCard
             currentLocation={currentLocation?.address}
