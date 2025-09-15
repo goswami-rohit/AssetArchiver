@@ -125,6 +125,57 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   const selectedPJP = (location as any).state?.selectedPJP;
 
+  /* ===============================
+     Wake Lock Logic
+     =============================== */
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+
+  const requestWakeLock = async () => {
+    if (!('wakeLock' in navigator)) {
+      console.warn("Wake Lock not supported in this browser.");
+      return { ok: false, reason: "not-supported" };
+    }
+
+    try {
+      const sentinel = await navigator.wakeLock.request("screen");
+      wakeLockRef.current = sentinel;
+      console.log("Wake Lock acquired");
+
+      sentinel.addEventListener("release", () => {
+        console.info("Wake Lock was released by the system/UA.");
+        wakeLockRef.current = null;
+      });
+
+      return { ok: true };
+    } catch (err: any) {
+      console.error("Wake Lock request failed:", err.name, err.message);
+      return { ok: false, reason: err.name, error: err };
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    try {
+      if (wakeLockRef.current) {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log("Wake Lock manually released");
+      }
+    } catch (err) {
+      console.warn("Error releasing wake lock:", err);
+    }
+  };
+
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState === "visible" && tripStatus === 'active' && !wakeLockRef.current) {
+        await requestWakeLock();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [tripStatus]);
+
+
   // useEffect to handle navigation state from HomePage
   useEffect(() => {
     // If a PJP is pre-selected, set the dealer details and bypass the dropdown
@@ -133,8 +184,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         id: selectedPJP.areaToBeVisited,
         name: selectedPJP.dealerName,
         address: selectedPJP.dealerAddress,
-        latitude: selectedPJP.dealerLatitude || 0, // Provide a default value
-        longitude: selectedPJP.dealerLongitude || 0, // Provide a default value
+        latitude: selectedPJP.dealerLatitude || 0,
+        longitude: selectedPJP.dealerLongitude || 0,
       };
       setSelectedDealer(dealer);
       // Set the trip status to idle but with a selected dealer
@@ -231,6 +282,9 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
 
     try {
+      // Request wake lock before starting the trip
+      await requestWakeLock();
+
       const { trip } = await radarStartTrip({
         externalId: `${userId}-${Date.now()}`,
         destinationGeofenceTag: "dealer",
@@ -363,8 +417,8 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
             id: newPjp.areaToBeVisited,
             name: newPjp.dealerName,
             address: newPjp.dealerAddress,
-            latitude: newPjp.dealerLatitude || 0, // Provide a default value
-            longitude: newPjp.dealerLongitude || 0, // Provide a default value
+            latitude: newPjp.dealerLatitude || 0,
+            longitude: newPjp.dealerLongitude || 0,
           };
           setSelectedDealer(newDealer);
           setActiveTripData(prev => prev ? {
@@ -389,6 +443,9 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     if (!activeTripData) return;
 
     try {
+      // Release wake lock when the trip is completed
+      await releaseWakeLock();
+      
       const response = await fetch(`/api/geo/finish/${activeTripData.journeyId}`, {
         method: 'POST'
       });
@@ -441,6 +498,9 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     getCurrentLocation();
 
     return () => {
+      // Ensure wake lock is released when the component unmounts
+      releaseWakeLock();
+      
       if (trackingIntervalRef.current) {
         clearInterval(trackingIntervalRef.current);
       }
