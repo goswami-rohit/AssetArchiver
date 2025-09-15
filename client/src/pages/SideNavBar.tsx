@@ -26,7 +26,7 @@ const navSections = [
       { id: "sales-order-form", label: "Sales Order", icon: ShoppingCart },
       { id: "pjp-form", label: "Add PJP", icon: PlusCircle },
       { id: "dealer-form", label: "Add Dealer", icon: Building },
-      { id: "site-form", label: "Add Site", icon: MapPin },
+      // { id: "site-form", label: "Add Site", icon: MapPin },
       { id: "daily-tasks-form", label: "Daily Tasks", icon: ClipboardList },
       { id: "competition-form", label: "Competition Form", icon: LineChart },
       { id: "leave-form", label: "Apply For Leave", icon: CalendarX },
