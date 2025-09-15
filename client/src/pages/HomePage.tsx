@@ -164,8 +164,8 @@ export default function HomePage() {
         <LiquidGlassCard>
           <div className="text-center">
             <p className="font-semibold text-blue-300">{getGreeting()}</p>
-            <h2 className="text-2xl font-bold mt-1">{`${user?.firstName || 'Agent'} ${user?.lastName || ''}`}</h2>
-            <p className="text-sm text-gray-300">{user?.role || 'Field Operations Specialist'}</p>
+            <h2 className="text-2xl font-bold mt-1">{`${user?.firstName || 'User'} ${user?.lastName || 'User'}`}</h2>
+            <p className="text-sm text-gray-300">{user?.role || 'User Role'}</p>
           </div>
         </LiquidGlassCard>
 

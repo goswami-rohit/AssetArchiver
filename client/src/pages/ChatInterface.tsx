@@ -11,6 +11,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
+// Import your forms from the forms index (user requested)
+import DVRForm from '@/pages/forms/DVRForm';
+import TVRForm from '@/pages/forms/TVRForm';
+import AddDealerForm from '@/pages/forms/AddDealerForm';
+import SalesOrderForm from '@/pages/forms/SalesOrderForm';
+
 interface Message {
   id: string;
   content: string;
@@ -42,7 +48,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'fallback' | 'error'>('connected');
-  const [currentFlow, setCurrentFlow] = useState<'chat' | 'dvr' | 'tvr' | 'dealer' | null>(null);
+  const [currentFlow, setCurrentFlow] = useState<'chat' | 'dvr' | 'tvr' | 'dealer' | 'salesOrder' | null>(null);
   const [formData, setFormData] = useState<FormData>({});
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [showQuickActions, setShowQuickActions] = useState(true);
@@ -60,6 +66,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
     }
   })();
 
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [messages, currentFlow, isLoading]);
 
   // Fetch dealers on component mount
   useEffect(() => {
@@ -203,7 +215,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
       } else {
         throw new Error(result.error || 'Submission failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage: Message = {
         id: Date.now().toString(),
         content: `❌ Error: ${error instanceof Error ? error.message : 'Submission failed'}`,
@@ -259,348 +271,32 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
     }
   }, [callVectorRAGChat]);
 
-  // Render DVR Form
+  // Render DVR Form wrapper (delegates to imported component)
   const renderDVRForm = () => (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileText className="w-5 h-5" />
-          Daily Visit Report
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Dealer Selection */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Select Dealer</label>
-          {dealers.length > 0 ? (
-            <Select
-              value={formData.dealerName || ''}
-              onValueChange={(value) => {
-                const dealer = dealers.find(d => d.dealerName === value);
-                setFormData(prev => ({
-                  ...prev,
-                  dealerName: value,
-                  location: dealer?.location || '',
-                  contactPerson: dealer?.contactPerson || '',
-                  contactPersonPhoneNo: dealer?.contactPersonPhoneNo || ''
-                }));
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Choose a dealer" />
-              </SelectTrigger>
-              <SelectContent>
-                {dealers.map(dealer => (
-                  <SelectItem key={dealer.id} value={dealer.dealerName}>
-                    {dealer.dealerName} - {dealer.location}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="text-center p-4 border rounded-lg">
-              <p className="text-sm text-gray-600 mb-2">No dealers found</p>
-              <Button onClick={startDealerFlow} size="sm">
-                <Plus className="w-4 h-4 mr-2" />
-                Create New Dealer
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {/* Visit Type */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Visit Type</label>
-          <div className="flex gap-2">
-            {['Regular', 'Follow-up', 'Emergency'].map(type => (
-              <Button
-                key={type}
-                variant={formData.visitType === type ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFormData(prev => ({ ...prev, visitType: type }))}
-              >
-                {type}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {/* Order Amount */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Today's Order (MT)</label>
-          <Input
-            type="number"
-            placeholder="Enter amount"
-            value={formData.todayOrderMt || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, todayOrderMt: e.target.value }))}
-          />
-        </div>
-
-        {/* Collection */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Collection (Rupees)</label>
-          <Input
-            type="number"
-            placeholder="Enter amount"
-            value={formData.todayCollectionRupees || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, todayCollectionRupees: e.target.value }))}
-          />
-        </div>
-
-        {/* Feedback */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Dealer Feedback</label>
-          <div className="flex gap-2">
-            <Button
-              variant={formData.feedbacks === 'Interested' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFormData(prev => ({ ...prev, feedbacks: 'Interested' }))}
-            >
-              <ThumbsUp className="w-4 h-4 mr-1" />
-              Interested
-            </Button>
-            <Button
-              variant={formData.feedbacks === 'Not Interested' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setFormData(prev => ({ ...prev, feedbacks: 'Not Interested' }))}
-            >
-              <ThumbsDown className="w-4 h-4 mr-1" />
-              Not Interested
-            </Button>
-          </div>
-        </div>
-
-        {/* Remarks */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Remarks</label>
-          <Textarea
-            placeholder="Any additional comments..."
-            value={formData.remarks || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, remarks: e.target.value }))}
-          />
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              setCurrentFlow(null);
-              setShowQuickActions(true);
-              setFormData({});
-            }}
-            variant="outline"
-            className="flex-1"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => submitFormData('/api/dvr', formData)}
-            disabled={!formData.dealerName || !formData.visitType || isLoading}
-            className="flex-1"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isLoading ? 'Saving...' : 'Save DVR'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="w-full max-w-md mx-auto">
+      <DVRForm />
+    </div>
   );
 
-  // Render TVR Form
+  // Render TVR Form wrapper
   const renderTVRForm = () => (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <FileText className="w-5 h-5" />
-          Technical Visit Report
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Site Name */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Site Name / Concerned Person</label>
-          <Input
-            placeholder="Enter site name or person"
-            value={formData.siteNameConcernedPerson || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, siteNameConcernedPerson: e.target.value }))}
-          />
-        </div>
-
-        {/* Phone Number */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Phone Number</label>
-          <Input
-            placeholder="Enter phone number"
-            value={formData.phoneNo || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, phoneNo: e.target.value }))}
-          />
-        </div>
-
-        {/* Visit Type */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Visit Type</label>
-          <div className="flex gap-2 flex-wrap">
-            {['Installation', 'Maintenance', 'Troubleshooting', 'Upgrade'].map(type => (
-              <Button
-                key={type}
-                variant={formData.visitType === type ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFormData(prev => ({ ...prev, visitType: type }))}
-              >
-                {type}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {/* Email */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Email (Optional)</label>
-          <Input
-            type="email"
-            placeholder="Enter email"
-            value={formData.emailId || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, emailId: e.target.value }))}
-          />
-        </div>
-
-        {/* Client Remarks */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Client Remarks</label>
-          <Textarea
-            placeholder="Client feedback or comments..."
-            value={formData.clientsRemarks || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, clientsRemarks: e.target.value }))}
-          />
-        </div>
-
-        {/* Salesperson Remarks */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Your Remarks</label>
-          <Textarea
-            placeholder="Your technical notes..."
-            value={formData.salespersonRemarks || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, salespersonRemarks: e.target.value }))}
-          />
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              setCurrentFlow(null);
-              setShowQuickActions(true);
-              setFormData({});
-            }}
-            variant="outline"
-            className="flex-1"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => submitFormData('/api/tvr', formData)}
-            disabled={!formData.siteNameConcernedPerson || !formData.phoneNo || !formData.visitType || isLoading}
-            className="flex-1"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isLoading ? 'Saving...' : 'Save TVR'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="w-full max-w-md mx-auto">
+      <TVRForm />
+    </div>
   );
 
-  // Render Dealer Form
+  // Render Dealer Form wrapper
   const renderDealerForm = () => (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Building2 className="w-5 h-5" />
-          New Dealer
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Dealer Name */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Dealer Name *</label>
-          <Input
-            placeholder="Enter dealer name"
-            value={formData.dealerName || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, dealerName: e.target.value }))}
-          />
-        </div>
+    <div className="w-full max-w-md mx-auto">
+      <AddDealerForm />
+    </div>
+  );
 
-        {/* Location */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Location *</label>
-          <Input
-            placeholder="Enter location"
-            value={formData.location || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
-          />
-        </div>
-
-        {/* Dealer Type */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Dealer Type</label>
-          <div className="flex gap-2">
-            {['Distributor', 'Retailer', 'Wholesaler'].map(type => (
-              <Button
-                key={type}
-                variant={formData.dealerType === type ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFormData(prev => ({ ...prev, dealerType: type }))}
-              >
-                {type}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        {/* Contact Person */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Contact Person</label>
-          <Input
-            placeholder="Enter contact person name"
-            value={formData.contactPerson || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, contactPerson: e.target.value }))}
-          />
-        </div>
-
-        {/* Phone */}
-        <div>
-          <label className="text-sm font-medium mb-2 block">Phone Number</label>
-          <Input
-            placeholder="Enter phone number"
-            value={formData.contactPersonPhoneNo || ''}
-            onChange={(e) => setFormData(prev => ({ ...prev, contactPersonPhoneNo: e.target.value }))}
-          />
-        </div>
-
-        {/* Submit Button */}
-        <div className="flex gap-2">
-          <Button
-            onClick={() => {
-              setCurrentFlow(null);
-              setShowQuickActions(true);
-              setFormData({});
-            }}
-            variant="outline"
-            className="flex-1"
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => submitFormData('/api/dealers', formData)}
-            disabled={!formData.dealerName || !formData.location || isLoading}
-            className="flex-1"
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {isLoading ? 'Creating...' : 'Create Dealer'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+  // Render Sales Order Form wrapper
+  const renderSalesOrderForm = () => (
+    <div className="w-full max-w-md mx-auto">
+      <SalesOrderForm />
+    </div>
   );
 
   // Enhanced Quick Actions
@@ -731,8 +427,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* Messages: the scrollable region */}
+      <div
+        className="flex-1 overflow-y-auto p-6 space-y-6"
+        style={{ paddingBottom: `calc(7rem + env(safe-area-inset-bottom))` }}
+      >
         {messages.length === 0 && showQuickActions && (
           <div className="text-center py-12">
             <div className="w-16 h-16 mx-auto mb-4 rounded-3xl bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center shadow-xl">
@@ -751,20 +450,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
         {currentFlow === 'dvr' && renderDVRForm()}
         {currentFlow === 'tvr' && renderTVRForm()}
         {currentFlow === 'dealer' && renderDealerForm()}
+        {currentFlow === 'salesOrder' && renderSalesOrderForm()}
 
         {messages.map((message) => (
           <div
             key={message.id}
-            className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} py-1`}
           >
             <div className={`flex max-w-[80%] ${message.sender === 'user' ? 'flex-row-reverse' : 'flex-row'} items-end space-x-3`}>
               <div className={`w-8 h-8 rounded-2xl flex items-center justify-center shadow-lg ${message.sender === 'user'
-                  ? 'bg-gradient-to-r from-blue-500 to-purple-600'
-                  : message.type === 'error'
-                    ? 'bg-gradient-to-r from-red-500 to-red-600'
-                    : message.type === 'success'
-                      ? 'bg-gradient-to-r from-green-500 to-emerald-600'
-                      : 'bg-gradient-to-r from-emerald-500 to-teal-600'
+                ? 'bg-gradient-to-r from-blue-500 to-purple-600'
+                : message.type === 'error'
+                  ? 'bg-gradient-to-r from-red-500 to-red-600'
+                  : message.type === 'success'
+                    ? 'bg-gradient-to-r from-green-500 to-emerald-600'
+                    : 'bg-gradient-to-r from-emerald-500 to-teal-600'
                 }`}>
                 {message.sender === 'user' ? (
                   <User className="w-4 h-4 text-white" />
@@ -777,12 +477,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
                 )}
               </div>
               <div className={`backdrop-blur-xl shadow-xl rounded-3xl px-6 py-4 ${message.sender === 'user'
-                  ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white'
-                  : message.type === 'error'
-                    ? 'bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
-                    : message.type === 'success'
-                      ? 'bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800'
-                      : 'bg-white/70 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 border border-white/20'
+                ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white'
+                : message.type === 'error'
+                  ? 'bg-red-50 dark:bg-red-900/30 text-red-800 dark:text-red-200 border border-red-200 dark:border-red-800'
+                  : message.type === 'success'
+                    ? 'bg-green-50 dark:bg-green-900/30 text-green-800 dark:text-green-200 border border-green-200 dark:border-green-800'
+                    : 'bg-white/70 dark:bg-slate-800/70 text-slate-800 dark:text-slate-200 border border-white/20'
                 }`}>
                 <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
                 {message.metadata?.endpoint && (
@@ -798,8 +498,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
                   </div>
                 )}
                 <p className={`text-xs mt-2 ${message.sender === 'user'
-                    ? 'text-blue-100'
-                    : 'text-slate-500 dark:text-slate-400'
+                  ? 'text-blue-100'
+                  : 'text-slate-500 dark:text-slate-400'
                   }`}>
                   {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
@@ -809,7 +509,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
         ))}
 
         {isLoading && (
-          <div className="flex justify-start">
+          <div className="flex justify-start py-1">
             <div className="flex items-end space-x-3">
               <div className="w-8 h-8 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg">
                 <Bot className="w-4 h-4 text-white" />
@@ -824,12 +524,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
 
       {/* Enhanced Quick Actions */}
       {showQuickActions && !currentFlow && (
-        <div className="flex-shrink-0 px-6 py-4 border-t border-white/20">
+        <div className="flex-shrink-0 px-6 py-4 border-t border-white/20 backdrop-blur-xl bg-white/5 dark:bg-black/5">
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {quickActions.map((action, index) => (
               <button
@@ -848,9 +549,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ userId, onBack }) => {
         </div>
       )}
 
-      {/* Input */}
+      {/* Input (anchored) */}
       {!currentFlow && (
-        <div className="flex-shrink-0 p-6 border-t border-white/20 backdrop-blur-xl bg-white/5 dark:bg-black/5">
+        <div
+          className="flex-shrink-0 p-6 border-t border-white/20 backdrop-blur-xl bg-white/5 dark:bg-black/5"
+          style={{ paddingBottom: `env(safe-area-inset-bottom)` }}
+        >
           <div className="relative flex items-center space-x-4">
             <div className="flex-1 relative">
               <input

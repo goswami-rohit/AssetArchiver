@@ -128,11 +128,11 @@ export default function ProfilePage() {
               <Avatar className="w-24 h-24 mb-4 bg-blue-500">
                 <AvatarFallback className="text-3xl font-bold bg-blue-500 text-white">{initials}</AvatarFallback>
               </Avatar>
-              <h2 className="text-2xl font-bold">{`${user?.firstName || 'Agent'} ${user?.lastName || 'User'}`}</h2>
+              <h2 className="text-2xl font-bold">{`${user?.firstName || 'User'} ${user?.lastName || 'User'}`}</h2>
               <p className="text-sm text-gray-300 mb-3">{user?.email ?? 'loading...'}</p>
               <div className="flex items-center px-4 py-2 rounded-full gap-2 bg-blue-500/30">
                 <Briefcase size={16} className="text-blue-300" />
-                <p className="text-xs font-semibold text-blue-300 tracking-wide">{user?.role ?? 'Field Operations Specialist'}</p>
+                <p className="text-xs font-semibold text-blue-300 tracking-wide">{user?.role ?? 'User Role'}</p>
               </div>
             </div>
           </LiquidGlassCard>
