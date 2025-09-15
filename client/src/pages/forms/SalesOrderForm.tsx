@@ -141,7 +141,7 @@ export default function SalesOrderForm() {
       }
 
       toast.success('Order Submitted', { description: 'The sales order has been sent successfully.' });
-      setTimeout(() => navigate('/crm'), 1500);
+      setTimeout(() => navigate('/'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });

@@ -206,13 +206,13 @@ export default function HomePage() {
             <>
               <div className="space-y-4">
                 {displayedPJPs.map((pjp) => (
-                  <LiquidGlassCard key={pjp.id} onPress={() => navigate('/crm/journey', { state: { selectedPJP: pjp } })}>
+                  <LiquidGlassCard key={pjp.id} onPress={() => navigate('/journey', { state: { selectedPJP: pjp } })}>
                     <PJPFloatingCard pjp={pjp} />
                   </LiquidGlassCard>
                 ))}
               </div>
               {hasMorePJPs && (
-                <LiquidGlassCard onPress={() => navigate('/crm/pjp-list')}>
+                <LiquidGlassCard onPress={() => navigate('/pjp-list')}>
                   <div className="flex items-center justify-between font-semibold text-blue-300 p-2">
                     <p>Show More ({todayPJPs.length - displayedPJPs.length})</p>
                     <ChevronRight className="h-4 w-4" />

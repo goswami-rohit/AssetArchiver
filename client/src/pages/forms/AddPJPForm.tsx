@@ -154,7 +154,7 @@ export default function AddPJPForm() {
       toast.success('PJP Created', {
         description: 'The new journey plan has been saved.'
       });
-      setTimeout(() => navigate('/crm'), 1500);
+      setTimeout(() => navigate('/'), 1500);
     } catch (error: any) {
       toast.error('Submission Failed', {
         description: error.message

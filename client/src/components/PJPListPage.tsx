@@ -105,7 +105,7 @@ export default function PJPListPage() {
   }, [user?.id, date]);
 
   const handleCardPress = (pjp: PJP) => {
-    navigate('/crm/journey', { state: { selectedPJP: pjp } });
+    navigate('/journey', { state: { selectedPJP: pjp } });
   };
 
   const renderContent = () => {

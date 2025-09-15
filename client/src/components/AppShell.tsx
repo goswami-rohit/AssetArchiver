@@ -6,10 +6,10 @@ import { Home, MessageCircle, MapPin, User } from "lucide-react";
 
 function BottomNav({ current, go }: { current: string; go: (p: string) => void }) {
   const items = [
-    { key: "/crm",         icon: Home,           label: "Home" },
-    { key: "/crm/ai",      icon: MessageCircle,  label: "AIChat" },
-    { key: "/crm/journey", icon: MapPin,         label: "Journey" },
-    { key: "/crm/profile", icon: User,           label: "Profile" },
+    { key: "/",         icon: Home,           label: "Home" },
+    { key: "/ai",      icon: MessageCircle,  label: "AIChat" },
+    { key: "/journey", icon: MapPin,         label: "Journey" },
+    { key: "/profile", icon: User,           label: "Profile" },
   ] as const;
 
   return (

@@ -19,13 +19,7 @@ type TabType =
 // --- Navigation Sections ---
 const navSections = [
   {
-    title: "Main",
-    items: [
-      { id: "crm", label: "Home Page", icon: LayoutDashboard },
-    ]
-  },
-  {
-    title: "Create",
+    title: "Create Reports/Orders",
     items: [
       { id: "dvr-form", label: "Create DVR", icon: FilePlus },
       { id: "tvr-form", label: "Create TVR", icon: File },
@@ -38,23 +32,6 @@ const navSections = [
       { id: "leave-form", label: "Apply For Leave", icon: CalendarX },
     ]
   },
-  // Add more sections here for the remaining items if needed
-  // {
-  //   title: "Admin",
-  //   items: [
-  //     { id: "employees", label: "Employees", icon: Users },
-  //     { id: "office-management", label: "Office Management", icon: Building2 },
-  //     { id: "attendance-reports", label: "Attendance Reports", icon: BarChart3 },
-  //   ]
-  // },
-  // {
-  //   title: "System",
-  //   items: [
-  //     { id: "bot-config", label: "Bot Config", icon: Settings },
-  //     { id: "api-keys", label: "API Keys", icon: Key },
-  //     { id: "api-docs", label: "API Docs", icon: Book },
-  //   ]
-  // },
 ];
 
 // --- Main Sidebar Component ---

@@ -92,7 +92,7 @@ export default function CompetitionReportForm() {
       }
 
       toast.success('Report Submitted', { description: 'Competition report has been saved.' });
-      setTimeout(() => navigate('/crm'), 1500);
+      setTimeout(() => navigate('/'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message || 'Please try again.' });

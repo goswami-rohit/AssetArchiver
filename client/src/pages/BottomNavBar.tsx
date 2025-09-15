@@ -12,10 +12,10 @@ type Item = {
 };
 
 const ITEMS: Item[] = [
-  { key: "/crm",         label: "Home",    Icon: Home,           isActive: p => p === "/crm" },
-  { key: "/crm/ai",      label: "AI",      Icon: MessageCircle,  isActive: p => p.startsWith("/crm/ai") },
-  { key: "/crm/journey", label: "Journey", Icon: MapPin,         isActive: p => p.startsWith("/crm/journey") },
-  { key: "/crm/profile", label: "Profile", Icon: User,           isActive: p => p.startsWith("/crm/profile") },
+  { key: "/",         label: "Home",    Icon: Home,           isActive: p => p === "/" },
+  { key: "/ai",      label: "AI",      Icon: MessageCircle,  isActive: p => p.startsWith("/ai") },
+  { key: "/journey", label: "Journey", Icon: MapPin,         isActive: p => p.startsWith("/journey") },
+  { key: "/profile", label: "Profile", Icon: User,           isActive: p => p.startsWith("/profile") },
 ];
 
 export default function BottomNavBar() {

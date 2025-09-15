@@ -62,8 +62,8 @@ export default function Login() {
         localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('userId', data.user.id.toString());
         
-        // Navigate to CRM Dashboard
-        setLocation('/crm'); // ← CHANGED
+        // Navigate to HOME PAGE
+        setLocation('/'); 
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Invalid credentials');

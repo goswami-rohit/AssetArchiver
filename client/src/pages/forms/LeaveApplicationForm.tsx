@@ -91,7 +91,7 @@ export default function LeaveApplicationForm() {
       }
 
       toast.success("Success", { description: "Your leave application has been submitted." });
-      setTimeout(() => navigate('/crm'), 1500);
+      setTimeout(() => navigate('/'), 1500);
 
     } catch (error: any) {
       toast.error("Submission Failed", { description: error.message || "An unexpected error occurred." });

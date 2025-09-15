@@ -6,8 +6,8 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Dashboard from "@/pages/dashboard";
-import VendorsTable from "./components/vendors-table";
+//import Dashboard from "@/pages/dashboard";
+//import VendorsTable from "./components/vendors-table";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
 
@@ -38,7 +38,7 @@ function Router() {
       <Route path="/login" component={Login} />
 
       {/* Protected Routes */}
-      <Route path="/crm">
+      <Route path="/"> {/* removed /crm and put / to load Home Page at root */}
         <ProtectedRoute>
           <AppShell>
             <HomePage />
@@ -46,7 +46,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/crm/ai">
+      <Route path="/ai">
         <ProtectedRoute>
           <AppShell>
             <ChatInterface />
@@ -54,7 +54,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/crm/journey">
+      <Route path="/journey">
         <ProtectedRoute>
           <AppShell>
             <JourneyTracker />
@@ -62,7 +62,7 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/crm/profile">
+      <Route path="/profile">
         <ProtectedRoute>
           <AppShell>
             <ProfilePage />
@@ -153,9 +153,9 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      {/* Your Existing Routes */}
-      <Route path="/" component={Dashboard} />
-      <Route path="/vendors" component={VendorsTable} />
+      {/* Your Existing OLD UNUSED Routes */}
+      {/* <Route path="/" component={Dashboard} />
+      <Route path="/vendors" component={VendorsTable} /> */}
 
       {/* 404 */}
       <Route component={NotFound} />

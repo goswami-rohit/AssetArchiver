@@ -224,7 +224,7 @@ export default function AddDealerForm() {
       toast.success("Dealer Created", {
         description: "The new dealer has been saved and geofence upserted."
       });
-      navigate('/crm');
+      navigate('/');
     } catch (error: any) {
       toast.error("Submission Failed", {
         description: error?.message || "An unexpected error occurred."

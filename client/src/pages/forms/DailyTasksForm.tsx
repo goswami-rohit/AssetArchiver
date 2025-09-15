@@ -138,7 +138,7 @@ export default function DailyTasksForm() {
       }
 
       toast.success('Task Created', { description: 'The daily task has been created successfully.' });
-      setTimeout(() => navigate('/crm'), 1500);
+      setTimeout(() => navigate('/'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });
