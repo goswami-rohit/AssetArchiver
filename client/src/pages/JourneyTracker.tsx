@@ -178,9 +178,9 @@ class RadarPolylineTracker {
   constructor(options?: PolylineOptions) {
     this.options = {
       trackingInterval: 8000, // default 8s for your app (match previous behavior)
-      onLocationUpdate: () => {},
-      onPolylineUpdate: () => {},
-      onError: () => {},
+      onLocationUpdate: () => { },
+      onPolylineUpdate: () => { },
+      onError: () => { },
       ...(options || {})
     };
   }
@@ -850,36 +850,180 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }
   };
 
+  const getBatteryInfo = async (): Promise<{ level: number | null; charging: boolean | null }> => {
+    try {
+      // navigator.getBattery is not available in all browsers, so wrap in try/catch
+      const navAny = navigator as any;
+      if (navAny && typeof navAny.getBattery === 'function') {
+        const battery: any = await navAny.getBattery();
+        return {
+          level: typeof battery.level === 'number' ? battery.level * 100 : null, // percent
+          charging: typeof battery.charging === 'boolean' ? battery.charging : null
+        };
+      }
+    } catch (e) {
+      // ignore
+    }
+    return { level: null, charging: null };
+  };
+
   const completeTrip = async () => {
     if (!activeTripData) return;
 
+    // best-effort: release wake lock early
     await releaseWakeLock();
 
+    // Stop local interval tracking (will also stop further trackOnce calls)
     try {
-      const response = await fetch(`/api/geo/finish/${activeTripData.journeyId}`, {
-        method: 'POST'
-      });
+      stopPolylineTracker();
+    } catch (e) {
+      console.warn('stopLocationTracking failed', e);
+    }
 
-      const data = await response.json();
-      if (data.success) {
-        setTripStatus('completed');
-        setSuccess('Journey completed! 🎉');
+    const journeyId = activeTripData.journeyId;
+    const externalIdFallback = `${userId ?? 'unknown'}-${Date.now()}`;
 
-        stopPolylineTracker();
-
-        try {
-          if (radarSDK.isSDKInitialized()) {
-            await radarSDK.completeTrip().catch(() => { /* non-fatal */ });
-          }
-        } catch {
-          // non-fatal
+    try {
+      // 1) Get latest Radar location (final point)
+      let latestLocation: any = null;
+      try {
+        const trackResult = await radarSDK.trackOnce({});
+        latestLocation = trackResult?.location ?? null;
+      } catch (trackErr) {
+        console.warn('radarSDK.trackOnce() failed on completeTrip (non-fatal):', trackErr);
+        // fallback to previously known currentLocation state
+        if (currentLocation) {
+          latestLocation = {
+            latitude: currentLocation.lat,
+            longitude: currentLocation.lng,
+            accuracy: undefined,
+            speed: undefined,
+            altitude: undefined,
+            course: undefined
+          };
         }
-      } else {
-        setError('Failed to complete trip');
       }
-    } catch (err) {
+
+      // 2) Get latest trip record from backend to fetch distance/duration (if available)
+      let tripDistanceMeters: number | null = null;
+      let tripDurationSec: number | null = null;
+      try {
+        const syncResp = await fetch(`/api/geo/trips/${journeyId}`);
+        if (syncResp.ok) {
+          const syncJson = await syncResp.json();
+          if (syncJson.success && syncJson.data?.radarTrip) {
+            const trip = syncJson.data.radarTrip;
+            // radarTrip.distance.value used elsewhere; assume meters
+            tripDistanceMeters = trip.distance?.value ?? null;
+            tripDurationSec = trip.duration?.value ?? null;
+          }
+        } else {
+          console.warn('Trip sync request failed on completeTrip', syncResp.status);
+        }
+      } catch (syncErr) {
+        console.warn('Error fetching trip sync on completeTrip (non-fatal):', syncErr);
+      }
+
+      // 3) battery / network info (best-effort)
+      const battery = await getBatteryInfo();
+      const networkStatus = typeof navigator !== 'undefined' ? (navigator.onLine ? 'online' : 'offline') : null;
+
+      // 4) Build final payload matching your geo_tracking schema
+      const nowIso = new Date().toISOString();
+      const lat = latestLocation?.latitude ?? currentLocation?.lat ?? null;
+      const lng = latestLocation?.longitude ?? currentLocation?.lng ?? null;
+      const accuracy = latestLocation?.accuracy ?? null;
+      const speed = latestLocation?.speed ?? null;
+      const heading = latestLocation?.course ?? (latestLocation?.heading ?? null);
+      const altitude = latestLocation?.altitude ?? null;
+
+      // Ensure numeric formatting to match DB types:
+      const payload: any = {
+        // required
+        userId: userId ? Number(userId) : null,
+        latitude: lat !== null ? Number(Number(lat).toFixed(7)) : null,
+        longitude: lng !== null ? Number(Number(lng).toFixed(7)) : null,
+        recordedAt: nowIso,
+        // optional numeric fields with DB precision
+        accuracy: typeof accuracy === 'number' ? Number(Number(accuracy).toFixed(2)) : null,
+        speed: typeof speed === 'number' ? Number(Number(speed).toFixed(2)) : null,
+        heading: typeof heading === 'number' ? Number(Number(heading).toFixed(2)) : null,
+        altitude: typeof altitude === 'number' ? Number(Number(altitude).toFixed(2)) : null,
+        locationType: 'radar',
+        activityType: null,
+        appState: 'foreground',
+        batteryLevel: typeof battery.level === 'number' ? Number(Number(battery.level).toFixed(2)) : null,
+        isCharging: typeof battery.charging === 'boolean' ? battery.charging : null,
+        networkStatus: networkStatus,
+        ipAddress: null,
+        siteName: selectedDealer?.name ?? null,
+        checkInTime: null,
+        checkOutTime: nowIso,
+        totalDistanceTravelled: tripDistanceMeters !== null ? Number(Number(tripDistanceMeters).toFixed(3)) : null,
+        journeyId: journeyId ?? externalIdFallback,
+        isActive: false,
+        destLat: selectedDealer?.latitude ?? null,
+        destLng: selectedDealer?.longitude ?? null
+      };
+
+      // 5) POST single final record to your geo-tracking POST endpoint
+      try {
+        const saveResp = await fetch('/api/geotracking', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const saveJson = await saveResp.json().catch(() => null);
+        if (!saveResp.ok || (saveJson && saveJson.success === false)) {
+          console.warn('Final geotracking POST failed', saveResp.status, saveJson);
+          toast.error('Failed to persist final journey summary (will continue).');
+        } else {
+          // success
+          console.info('Final journey summary saved', saveJson?.data ?? saveJson);
+        }
+      } catch (postErr) {
+        console.warn('Network error posting final geotracking', postErr);
+        toast.error('Network error while saving final journey (will continue).');
+      }
+
+      // 6) Tell backend we're finishing the trip (existing endpoint)
+      try {
+        const finishResp = await fetch(`/api/geo/finish/${journeyId}`, {
+          method: 'POST'
+        });
+        const finishJson = await finishResp.json().catch(() => null);
+        if (finishResp.ok && finishJson && finishJson.success) {
+          setTripStatus('completed');
+          setSuccess('Journey completed! 🎉');
+        } else {
+          console.warn('Finish trip endpoint returned non-success', finishResp.status, finishJson);
+          // still set completed locally, but surface error
+          setTripStatus('completed');
+          setSuccess('Journey completed (server finish returned a warning).');
+        }
+      } catch (finishErr) {
+        console.error('completeTrip: finish endpoint failed', finishErr);
+        // mark completed locally but warn user
+        setTripStatus('completed');
+        setError('Journey completed locally but server finish failed.');
+      }
+
+      // final cleanup
+      try {
+        if (radarSDK.isSDKInitialized()) {
+          await radarSDK.completeTrip().catch(() => { /* non-fatal */ });
+        }
+      } catch (e) {
+        // ignore
+      }
+
+    } catch (err: any) {
       console.error('completeTrip error', err);
       setError('Failed to complete trip');
+    } finally {
+      // Ensure local tracking interval fully stopped
+      try { stopPolylineTracker(); } catch { /* ignore */ }
     }
   };
 

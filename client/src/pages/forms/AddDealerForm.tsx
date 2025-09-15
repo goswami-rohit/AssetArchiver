@@ -36,7 +36,7 @@ import { useAppStore, DEALER_TYPES, BRANDS, FEEDBACKS, BASE_URL } from '../../co
 
 // Zod Schema to match the database table
 const DealerSchema = z.object({
-  userId: z.number(),
+  userId: z.number().optional(),
   type: z.string().min(1, "Dealer type is required"),
   isSubDealer: z.boolean(),
   parentDealerId: z.string().optional().nullable(),
@@ -84,7 +84,7 @@ export default function AddDealerForm() {
     mode: 'onChange',
     // FIX: Reverted to empty strings for a better user experience
     defaultValues: {
-      userId: user?.id ?? 0,
+      userId: undefined,
       type: '',
       isSubDealer: false,
       parentDealerId: null,
@@ -140,44 +140,52 @@ export default function AddDealerForm() {
     fetchDealers();
   }, [user?.id]);
 
-  const useMyLocation = () => {
+  const fetchLocation = () => {
     setIsLoadingLocation(true);
+
     if (!("geolocation" in navigator)) {
-      toast.error("Geolocation not supported", {
-        description: "Your browser does not support location services."
-      });
+      toast.error("Geolocation not supported", { description: "Your browser does not support location services." });
       setIsLoadingLocation(false);
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
-        setValue('latitude', position.coords.latitude, { shouldValidate: true });
-        setValue('longitude', position.coords.longitude, { shouldValidate: true });
-        toast.success("Location Captured", {
-          description: "Your current location has been saved."
-        });
+        const { latitude, longitude } = position.coords;
+        setValue("latitude", latitude, { shouldValidate: true });
+        setValue("longitude", longitude, { shouldValidate: true });
+        toast.success("Location Captured", { description: `Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}` });
         setIsLoadingLocation(false);
       },
       (error) => {
-        console.error("Geolocation error:", error);
-        toast.error("Error getting location", {
-          description: error.message || "Could not fetch location."
-        });
+        toast.error("Location Error", { description: error.message || "Unable to fetch location." });
         setIsLoadingLocation(false);
       },
       {
         enableHighAccuracy: true,
-        timeout: 5000,
-        maximumAge: 0
+        timeout: 10000,
+        maximumAge: 0,
       }
     );
   };
 
+
   const submit: SubmitHandler<DealerFormValues> = async (values) => {
     try {
-      const payload = {
-        userId: values.userId,
+      // Build numbers/null in a way server expects
+      const latNum = values.latitude !== null && values.latitude !== undefined ? Number(values.latitude) : null;
+      const lngNum = values.longitude !== null && values.longitude !== undefined ? Number(values.longitude) : null;
+
+      // If your flow requires geofence creation on insert, enforce lat/lng presence client-side
+      if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+        toast.error("Please capture dealer location (Use My Current Location) before saving.");
+        return;
+      }
+
+      // Build payload to match server schema (numbers for numeric columns)
+      const payload: any = {
+        // only include userId if available (server allows optional)
+        ...(user?.id ? { userId: Number(user.id) } : {}),
         type: values.type,
         parentDealerId: values.isSubDealer ? values.parentDealerId || null : null,
         name: values.name,
@@ -186,15 +194,18 @@ export default function AddDealerForm() {
         phoneNo: values.phoneNo,
         address: values.address,
         pinCode: values.pinCode || null,
-        latitude: values.latitude !== null && values.latitude !== undefined ? String(values.latitude) : null,
-        longitude: values.longitude !== null && values.longitude !== undefined ? String(values.longitude) : null,
+        // keep as numbers so server Number(...) works and zod/DB receive numeric input
+        latitude: latNum,
+        longitude: lngNum,
         dateOfBirth: values.dateOfBirth || null,
         anniversaryDate: values.anniversaryDate || null,
-        totalPotential: String(values.totalPotential),
-        bestPotential: String(values.bestPotential),
+        totalPotential: Number(values.totalPotential ?? 0),
+        bestPotential: Number(values.bestPotential ?? 0),
         brandSelling: values.brandSelling,
         feedbacks: values.feedbacks,
         remarks: values.remarks || null,
+        // optional: allow client to specify custom geofence radius in meters
+        radius: 25
       };
 
       const response = await fetch(`${BASE_URL}/api/dealers`, {
@@ -203,13 +214,15 @@ export default function AddDealerForm() {
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to create dealer');
+      const result = await response.json().catch(() => null);
+      if (!response.ok || (result && result.success === false)) {
+        // Server might return helpful Zod details in result.details
+        const errMsg = result?.error || (result?.details ? JSON.stringify(result.details) : 'Failed to create dealer');
+        throw new Error(errMsg);
       }
 
       toast.success("Dealer Created", {
-        description: "The new dealer has been saved."
+        description: "The new dealer has been saved and geofence upserted."
       });
       navigate('/crm');
     } catch (error: any) {
@@ -449,7 +462,7 @@ export default function AddDealerForm() {
             <Button
               type="button"
               variant="outline"
-              onClick={useMyLocation}
+              onClick={fetchLocation}
               disabled={isLoadingLocation}
               className="w-full h-12"
             >
