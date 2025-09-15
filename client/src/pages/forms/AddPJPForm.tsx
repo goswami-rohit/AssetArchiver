@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
+import React, { useState, useEffect, useCallback } from 'react';
 import type { SubmitHandler, Resolver } from 'react-hook-form';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { format } from 'date-fns';
 import { toast } from 'sonner';
+import { format } from 'date-fns';
+import { useLocation } from "wouter";
 
 // Shadcn UI Components
 import { Toaster } from "@/components/ui/sonner";
@@ -32,7 +32,8 @@ import {
   CalendarIcon,
   ChevronsUpDown,
   Search,
-  ArrowLeft
+  ArrowLeft,
+  Loader2
 } from "lucide-react";
 
 // Reusable Constants & State Management
@@ -61,7 +62,7 @@ interface Dealer {
 
 // --- Component ---
 export default function AddPJPForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const [dealerModalVisible, setDealerModalVisible] = useState(false);
@@ -113,11 +114,12 @@ export default function AddPJPForm() {
   const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<PJPFormValues>({
     resolver: zodResolver(PJPSchema) as unknown as Resolver<PJPFormValues, any>,
     mode: 'onChange',
+    // FIX: Set a default value that passes validation to make the button clickable
     defaultValues: {
       userId: user?.id,
       createdById: user?.id,
       planDate: new Date(),
-      areaToBeVisited: '',
+      areaToBeVisited: ' ', // Changed from '' to ' '
       description: '',
       status: 'planned',
     },
@@ -151,7 +153,7 @@ export default function AddPJPForm() {
       toast.success('PJP Created', {
         description: 'The new journey plan has been saved.'
       });
-      window.history.back(); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => navigate('/crm'), 1500);
     } catch (error: any) {
       toast.error('Submission Failed', {
         description: error.message
@@ -160,22 +162,23 @@ export default function AddPJPForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-lg font-bold ml-2">Plan New Journey (PJP)</h1>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 p-6">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold text-center mb-1">Journey Details</h2>
           <p className="text-sm text-center text-gray-500 mb-6">Plan a visit for yourself.</p>
 
-          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+          {/* ADDED: padding-bottom to the form container to ensure content is visible */}
+          <form onSubmit={handleSubmit(submit)} className="space-y-6 pb-28">
             <div className="space-y-1">
               <Label htmlFor="salesperson">Salesperson</Label>
               <Input id="salesperson" value={fullName} disabled />
@@ -236,7 +239,7 @@ export default function AddPJPForm() {
                   <div className="h-[200px] overflow-y-auto">
                     {isDealersLoading ? (
                       <div className="flex justify-center items-center h-full">
-                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+                        <Loader2 className="h-8 w-8 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
                       </div>
                     ) : (
                       <div className="space-y-1">

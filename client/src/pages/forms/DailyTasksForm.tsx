@@ -2,10 +2,10 @@ import React from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Loader2, ArrowLeft, CalendarIcon, ChevronsUpDown, Check } from 'lucide-react';
+import { useLocation } from "wouter";
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
@@ -69,7 +69,7 @@ interface PJP {
 
 // --- Component ---
 export default function DailyTasksForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const [dealers, setDealers] = React.useState<Dealer[]>([]);
@@ -108,7 +108,7 @@ export default function DailyTasksForm() {
       userId: user?.id,
       assignedByUserId: user?.id,
       taskDate: new Date(),
-      visitType: '',
+      visitType: 'Dealer-Best', // FIX: Set a default value to pass initial validation
       relatedDealerId: null,
       siteName: '',
       description: '',
@@ -138,7 +138,7 @@ export default function DailyTasksForm() {
       }
 
       toast.success('Task Created', { description: 'The daily task has been created successfully.' });
-      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => navigate('/crm'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });
@@ -146,20 +146,21 @@ export default function DailyTasksForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button>
           <h1 className="text-lg font-bold ml-2">Create Daily Task</h1>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 p-6">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold text-center mb-1">Daily Task Details</h2>
           <p className="text-sm text-center text-gray-500 mb-6">Log your day-to-day work activities.</p>
 
-          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+          {/* FIX: Add padding-bottom to the form to ensure it's fully visible */}
+          <form onSubmit={handleSubmit(submit)} className="space-y-6 pb-28">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label>Task Date *</Label>

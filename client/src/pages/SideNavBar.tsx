@@ -1,30 +1,27 @@
 import React from 'react';
-import { useLocation } from 'wouter'; // Changed from react-router-dom to wouter
+import { useLocation } from 'wouter';
 import { toast } from 'sonner';
 import { cn } from "@/lib/utils";
 import { useAppStore } from '../components/ReusableUI';
-import { 
-  LayoutDashboard, FilePlus, File, ShoppingCart, PlusCircle, Building, MapPin, 
-  ClipboardList, LineChart, CalendarX, Users, Building2, BarChart3, Settings, 
-  Key, Book, LogOut 
+import {
+  LayoutDashboard, FilePlus, File, ShoppingCart, PlusCircle, Building, MapPin,
+  ClipboardList, LineChart, CalendarX, Users, Building2, BarChart3, Settings,
+  Key, Book, LogOut
 } from "lucide-react";
 
 // --- Type Definitions ---
-type TabType = 
-  | "dashboard" | "dvr-form" | "tvr-form" | "sales-order-form" | "pjp-form" 
+type TabType =
+  | "dashboard" | "dvr-form" | "tvr-form" | "sales-order-form" | "pjp-form"
   | "dealer-form" | "site-form" | "daily-tasks-form" | "competition-form" | "leave-form"
   | "employees" | "office-management" | "attendance-reports"
   | "bot-config" | "api-keys" | "api-docs";
 
-// The SidebarProps interface is no longer needed.
-
 // --- Navigation Sections ---
 const navSections = [
-    // ... (no changes in this array)
   {
     title: "Main",
     items: [
-      { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { id: "crm", label: "Home Page", icon: LayoutDashboard },
     ]
   },
   {
@@ -41,15 +38,29 @@ const navSections = [
       { id: "leave-form", label: "Apply For Leave", icon: CalendarX },
     ]
   },
+  // Add more sections here for the remaining items if needed
+  // {
+  //   title: "Admin",
+  //   items: [
+  //     { id: "employees", label: "Employees", icon: Users },
+  //     { id: "office-management", label: "Office Management", icon: Building2 },
+  //     { id: "attendance-reports", label: "Attendance Reports", icon: BarChart3 },
+  //   ]
+  // },
+  // {
+  //   title: "System",
+  //   items: [
+  //     { id: "bot-config", label: "Bot Config", icon: Settings },
+  //     { id: "api-keys", label: "API Keys", icon: Key },
+  //     { id: "api-docs", label: "API Docs", icon: Book },
+  //   ]
+  // },
 ];
 
 // --- Main Sidebar Component ---
-export default function SideNavbar() { // Removed props
+export default function SideNavbar() {
   const [location, navigate] = useLocation();
   const { user, setUser } = useAppStore();
-  
-  // Determine the active tab from the URL path
-  const activeTab = location.substring(1) || 'dashboard'; // Default to dashboard if path is "/"
 
   const handleLogout = () => {
     toast("Are you sure you want to log out?", {
@@ -64,50 +75,50 @@ export default function SideNavbar() { // Removed props
       },
       cancel: {
         label: "Cancel",
-        onClick: () => {},
+        onClick: () => { },
       }
     });
   };
 
   const initials = `${user?.firstName?.[0] || 'A'}${user?.lastName?.[0] || 'D'}`;
+  const activeTab = location.substring(1) || 'dashboard';
 
   return (
-    <aside className="w-64 bg-white shadow-lg border-r border-slate-200 h-screen flex flex-col fixed">
-      {/* Logo */}
-      <div className="p-6 border-b border-slate-200">
+    <aside className="w-64 h-full flex flex-col bg-gray-950 text-white border-r border-white/10">
+      {/* Logo Section */}
+      <div className="p-6 border-b border-white/10">
         <div className="flex items-center space-x-3">
-          <img 
-            src="/BEST_CEMENT_LOGO.webp" 
-            alt="Best Cement Logo" 
+          <img
+            src="/BEST_CEMENT_LOGO.webp"
+            alt="Best Cement Logo"
             className="w-12 h-12 rounded-xl shadow-lg object-cover"
           />
           <div>
-            <h1 className="text-lg font-semibold text-slate-900">Best Cement</h1>
-            <p className="text-xs text-slate-500">Employee Management</p>
+            <h1 className="text-lg font-semibold text-white">Best Cement</h1>
+            <p className="text-xs text-gray-400">Employee Management</p>
           </div>
         </div>
       </div>
-      
-      {/* Navigation */}
-      <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
+
+      {/* Navigation Links */}
+      <nav className="flex-1 p-4 space-y-4 overflow-y-auto custom-scrollbar">
         {navSections.map((section) => (
           <div key={section.title}>
-            <h2 className="px-3 py-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">{section.title}</h2>
+            <h2 className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">{section.title}</h2>
             <div className="space-y-1">
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
-                
+
                 return (
                   <button
                     key={item.id}
-                    // The button now handles navigation directly
                     onClick={() => navigate(`/${item.id}`)}
                     className={cn(
                       "w-full flex items-center space-x-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors",
                       isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+                        ? "bg-slate-700 text-white shadow-sm"
+                        : "text-gray-300 hover:bg-slate-800 hover:text-white"
                     )}
                   >
                     <Icon className="w-4 h-4" />
@@ -119,18 +130,18 @@ export default function SideNavbar() { // Removed props
           </div>
         ))}
       </nav>
-      
+
       {/* User Profile & Logout */}
-      <div className="p-4 border-t border-slate-200 mt-auto">
-        <div className="flex items-center space-x-3 p-3 bg-slate-100 rounded-lg">
-          <div className="w-9 h-9 bg-slate-800 rounded-full flex items-center justify-center text-white font-bold">
+      <div className="p-4 border-t border-white/10 mt-auto">
+        <div className="flex items-center space-x-3 p-3 bg-gray-800 rounded-lg">
+          <div className="w-9 h-9 bg-gray-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
             <span>{initials}</span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-slate-900 truncate">{`${user?.firstName || 'Admin'} ${user?.lastName || 'User'}`}</p>
-            <p className="text-xs text-slate-500 truncate">{user?.email || 'admin@bestcement.com'}</p>
+            <p className="text-sm font-medium text-white truncate">{`${user?.firstName || 'Admin'} ${user?.lastName || 'User'}`}</p>
+            <p className="text-xs text-gray-400 truncate">{user?.email || 'admin@bestcement.com'}</p>
           </div>
-          <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-100 rounded-full transition-colors">
+          <button onClick={handleLogout} className="p-2 text-gray-400 hover:text-red-400 hover:bg-gray-700 rounded-full transition-colors">
             <LogOut className="w-4 h-4" />
           </button>
         </div>

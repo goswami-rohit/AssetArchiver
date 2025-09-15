@@ -4,6 +4,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
+import { useLocation } from "wouter";
 
 // Shadcn UI Components
 import { Button } from "@/components/ui/button";
@@ -68,7 +69,7 @@ const DealerSchema = z.object({
 type DealerFormValues = z.infer<typeof DealerSchema>;
 
 export default function AddDealerForm() {
-  // Removed `useNavigate` and `Maps` from state/hooks
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
@@ -81,6 +82,7 @@ export default function AddDealerForm() {
   const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<DealerFormValues>({
     resolver: zodResolver(DealerSchema) as unknown as Resolver<DealerFormValues, any>,
     mode: 'onChange',
+    // FIX: Reverted to empty strings for a better user experience
     defaultValues: {
       userId: user?.id ?? 0,
       type: '',
@@ -91,11 +93,11 @@ export default function AddDealerForm() {
       area: '',
       phoneNo: '',
       address: '',
-      pinCode: null,
+      pinCode: '',
       latitude: null,
       longitude: null,
-      dateOfBirth: null,
-      anniversaryDate: null,
+      dateOfBirth: '',
+      anniversaryDate: '',
       totalPotential: 0,
       bestPotential: 0,
       brandSelling: [],
@@ -209,8 +211,7 @@ export default function AddDealerForm() {
       toast.success("Dealer Created", {
         description: "The new dealer has been saved."
       });
-      // Replaced `Maps(-1)` with `window.history.back()`
-      window.history.back();
+      navigate('/crm');
     } catch (error: any) {
       toast.error("Submission Failed", {
         description: error?.message || "An unexpected error occurred."
@@ -219,10 +220,9 @@ export default function AddDealerForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          {/* Replaced `Maps(-1)` with `window.history.back()` */}
           <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -230,12 +230,12 @@ export default function AddDealerForm() {
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 p-6">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold text-center mb-1">Dealer Information</h2>
           <p className="text-sm text-center text-gray-500 mb-6">Fill in the details for the new dealer.</p>
 
-          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+          <form onSubmit={handleSubmit(submit)} className="space-y-6 pb-28">
             <div className="flex items-center justify-between rounded-lg border p-4">
               <Label htmlFor="is-sub-dealer">Is this a Sub-Dealer?</Label>
               <Controller
@@ -253,10 +253,11 @@ export default function AddDealerForm() {
 
             {isSubDealer && (
               <div className="space-y-1">
+                <Label>Parent Dealer *</Label>
                 <Dialog open={dealerModalOpen} onOpenChange={setDealerModalOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" className="w-full justify-between h-12">
-                      {selectedParentDealerName || "Select Parent Dealer *"}
+                      {selectedParentDealerName || "Select Parent Dealer"}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </DialogTrigger>
@@ -311,6 +312,7 @@ export default function AddDealerForm() {
             )}
 
             <div className="space-y-1">
+              <Label>Dealer Type *</Label>
               <Controller
                 control={control}
                 name="type"
@@ -331,11 +333,12 @@ export default function AddDealerForm() {
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="name">Dealer Name *</Label>
               <Controller
                 control={control}
                 name="name"
                 render={({ field }) => (
-                  <Input {...field} placeholder="Dealer Name *" className="h-12" />
+                  <Input {...field} id="name" placeholder="Enter dealer's full name" className="h-12" />
                 )}
               />
               {errors.name && <p className="text-sm text-red-500 mt-1">{errors.name.message}</p>}
@@ -343,21 +346,23 @@ export default function AddDealerForm() {
 
             <div className="flex gap-4">
               <div className="flex-1 space-y-1">
+                <Label htmlFor="region">Region *</Label>
                 <Controller
                   control={control}
                   name="region"
                   render={({ field }) => (
-                    <Input {...field} placeholder="Region *" className="h-12" />
+                    <Input {...field} id="region" placeholder="Enter region" className="h-12" />
                   )}
                 />
                 {errors.region && <p className="text-sm text-red-500 mt-1">{errors.region.message}</p>}
               </div>
               <div className="flex-1 space-y-1">
+                <Label htmlFor="area">Area *</Label>
                 <Controller
                   control={control}
                   name="area"
                   render={({ field }) => (
-                    <Input {...field} placeholder="Area *" className="h-12" />
+                    <Input {...field} id="area" placeholder="Enter area name" className="h-12" />
                   )}
                 />
                 {errors.area && <p className="text-sm text-red-500 mt-1">{errors.area.message}</p>}
@@ -365,35 +370,39 @@ export default function AddDealerForm() {
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="address">Address *</Label>
               <Controller
                 control={control}
                 name="address"
                 render={({ field }) => (
-                  <textarea {...field} placeholder="Address *" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+                  <textarea {...field} id="address" placeholder="Enter full address" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
                 )}
               />
               {errors.address && <p className="text-sm text-red-500 mt-1">{errors.address.message}</p>}
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="phoneNo">Phone No *</Label>
               <Controller
                 control={control}
                 name="phoneNo"
                 render={({ field }) => (
-                  <Input {...field} placeholder="Phone No *" type="tel" className="h-12" />
+                  <Input {...field} id="phoneNo" placeholder="Enter 10-digit phone number" type="tel" className="h-12" />
                 )}
               />
               {errors.phoneNo && <p className="text-sm text-red-500 mt-1">{errors.phoneNo.message}</p>}
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="pinCode">PIN Code</Label>
               <Controller
                 control={control}
                 name="pinCode"
                 render={({ field: { value, ...field } }) => (
                   <Input
                     {...field}
-                    placeholder="PIN Code"
+                    id="pinCode"
+                    placeholder="Enter 6-digit PIN code"
                     type="number"
                     className="h-12"
                     value={value !== null && value !== undefined ? String(value) : ''}
@@ -405,12 +414,14 @@ export default function AddDealerForm() {
 
             <div className="flex gap-4">
               <div className="flex-1">
+                <Label htmlFor="latitude">Latitude</Label>
                 <Controller
                   control={control}
                   name="latitude"
                   render={({ field: { value, ...field } }) => (
                     <Input
                       {...field}
+                      id="latitude"
                       placeholder="Latitude"
                       value={value !== null && value !== undefined ? String(value) : ''}
                       disabled
@@ -419,12 +430,14 @@ export default function AddDealerForm() {
                 />
               </div>
               <div className="flex-1">
+                <Label htmlFor="longitude">Longitude</Label>
                 <Controller
                   control={control}
                   name="longitude"
                   render={({ field: { value, ...field } }) => (
                     <Input
                       {...field}
+                      id="longitude"
                       placeholder="Longitude"
                       value={value !== null && value !== undefined ? String(value) : ''}
                       disabled
@@ -453,10 +466,11 @@ export default function AddDealerForm() {
               )}
             </Button>
 
-            ---
+            <div className="my-8 h-px bg-white/10" />
 
             <div className="flex gap-4">
               <div className="flex-1 space-y-1">
+                <Label htmlFor="dateOfBirth">Date of Birth</Label>
                 <Controller
                   control={control}
                   name="dateOfBirth"
@@ -464,7 +478,8 @@ export default function AddDealerForm() {
                     <div className="relative">
                       <Input
                         {...field}
-                        placeholder="Date of Birth (YYYY-MM-DD)"
+                        id="dateOfBirth"
+                        placeholder="YYYY-MM-DD"
                         className="h-12"
                         value={value || ''}
                       />
@@ -475,6 +490,7 @@ export default function AddDealerForm() {
                 {errors.dateOfBirth && <p className="text-sm text-red-500 mt-1">{errors.dateOfBirth.message}</p>}
               </div>
               <div className="flex-1 space-y-1">
+                <Label htmlFor="anniversaryDate">Anniversary Date</Label>
                 <Controller
                   control={control}
                   name="anniversaryDate"
@@ -482,7 +498,8 @@ export default function AddDealerForm() {
                     <div className="relative">
                       <Input
                         {...field}
-                        placeholder="Anniversary Date (YYYY-MM-DD)"
+                        id="anniversaryDate"
+                        placeholder="YYYY-MM-DD"
                         className="h-12"
                         value={value || ''}
                       />
@@ -496,21 +513,23 @@ export default function AddDealerForm() {
 
             <div className="flex gap-4">
               <div className="flex-1 space-y-1">
+                <Label htmlFor="totalPotential">Total Potential *</Label>
                 <Controller
                   control={control}
                   name="totalPotential"
                   render={({ field }) => (
-                    <Input {...field} placeholder="Total Potential *" type="number" className="h-12" />
+                    <Input {...field} id="totalPotential" placeholder="Enter total potential" type="number" className="h-12" />
                   )}
                 />
                 {errors.totalPotential && <p className="text-sm text-red-500 mt-1">{errors.totalPotential.message}</p>}
               </div>
               <div className="flex-1 space-y-1">
+                <Label htmlFor="bestPotential">Best Potential *</Label>
                 <Controller
                   control={control}
                   name="bestPotential"
                   render={({ field }) => (
-                    <Input {...field} placeholder="Best Potential *" type="number" className="h-12" />
+                    <Input {...field} id="bestPotential" placeholder="Enter best potential" type="number" className="h-12" />
                   )}
                 />
                 {errors.bestPotential && <p className="text-sm text-red-500 mt-1">{errors.bestPotential.message}</p>}
@@ -518,6 +537,7 @@ export default function AddDealerForm() {
             </div>
 
             <div className="space-y-1">
+              <Label>Brands Selling *</Label>
               <Dialog open={brandsModalOpen} onOpenChange={setBrandsModalOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" className="w-full justify-between h-12">
@@ -556,6 +576,7 @@ export default function AddDealerForm() {
             </div>
 
             <div className="space-y-1">
+              <Label>Feedback *</Label>
               <Controller
                 control={control}
                 name="feedbacks"
@@ -576,11 +597,12 @@ export default function AddDealerForm() {
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="remarks">Remarks</Label>
               <Controller
                 control={control}
                 name="remarks"
                 render={({ field }) => (
-                  <textarea {...field} placeholder="Remarks" rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
+                  <textarea {...field} id="remarks" placeholder="Add remarks or notes..." rows={3} className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50" />
                 )}
               />
               {errors.remarks && <p className="text-sm text-red-500 mt-1">{errors.remarks.message}</p>}

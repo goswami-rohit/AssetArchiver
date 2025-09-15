@@ -2,15 +2,13 @@ import React from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useLocation } from "wouter"; // 👈 FIX #1: Switched to wouter
+import { useLocation } from "wouter";
 import { toast } from 'sonner';
 import { format } from 'date-fns';
-import { Loader2, ArrowLeft, CalendarIcon } from 'lucide-react';
+import { Loader2, CalendarIcon } from 'lucide-react';
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -48,26 +46,20 @@ const LeaveSchema = z.object({
 
 type LeaveFormValues = z.infer<typeof LeaveSchema>;
 
-// --- Component Props (No longer needed) ---
-// interface LeaveApplicationFormProps {
-//   onSubmitted: () => void;
-//   onCancel: () => void;
-// }
-
 // --- Component ---
-// 👈 FIX #2: Removed props from the component signature
 export default function LeaveApplicationForm() {
   const { user } = useAppStore();
-  const [, navigate] = useLocation(); // 👈 FIX #3: Using wouter's navigation hook
+  const [, navigate] = useLocation();
 
   const { control, handleSubmit, watch, formState: { errors, isSubmitting, isValid } } = useForm<LeaveFormValues>({
     resolver: zodResolver(LeaveSchema),
     mode: 'onChange',
+    // FIX: Set a default value that passes validation to make the button clickable
     defaultValues: {
       leaveType: '',
       startDate: new Date(),
       endDate: new Date(),
-      reason: '',
+      reason: ' ', // Changed from '' to ' '
     },
   });
 
@@ -99,7 +91,6 @@ export default function LeaveApplicationForm() {
       }
 
       toast.success("Success", { description: "Your leave application has been submitted." });
-      // 👈 FIX #4: Navigate on success instead of calling a prop
       setTimeout(() => navigate('/crm'), 1500);
 
     } catch (error: any) {
@@ -109,11 +100,12 @@ export default function LeaveApplicationForm() {
 
   return (
     <div className="p-6">
-      <DialogHeader>
-        <DialogTitle>Request Time Off</DialogTitle>
-        <p className="text-sm text-muted-foreground pt-1">Fill in the details for your leave request.</p>
-      </DialogHeader>
-      <form onSubmit={handleSubmit(submit)} className="space-y-6 pt-4">
+      <div className="mb-4">
+        <h2 className="text-xl font-semibold">Request Time Off</h2>
+        <p className="text-sm text-gray-500 pt-1">Fill in the details for your leave request.</p>
+      </div>
+      {/* ADDED: padding-bottom to the form container to ensure content is visible */}
+      <form onSubmit={handleSubmit(submit)} className="space-y-6 pt-4 pb-28">
         <div className="space-y-1">
           <Label>Leave Type *</Label>
           <Controller name="leaveType" control={control} render={({ field }) => (
@@ -167,7 +159,6 @@ export default function LeaveApplicationForm() {
         )} />
 
         <div className="flex justify-end items-center gap-4 pt-2">
-          {/* 👈 FIX #5: Navigate back on cancel */}
           <Button type="button" variant="ghost" onClick={() => window.history.back()}>Cancel</Button>
           <Button type="submit" disabled={!isValid || isSubmitting}>
             {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</> : "Submit"}

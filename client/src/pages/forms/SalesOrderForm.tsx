@@ -2,10 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Loader2, ArrowLeft, CalendarIcon, ChevronsUpDown, Check } from 'lucide-react';
+import { useLocation } from "wouter";
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
@@ -69,7 +69,7 @@ interface Dealer {
 
 // --- Component ---
 export default function SalesOrderForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,11 +78,12 @@ export default function SalesOrderForm() {
   const { control, handleSubmit, setValue, watch, formState: { errors, isSubmitting, isValid } } = useForm<SalesOrderFormValues>({
     resolver: zodResolver(SalesOrderSchema),
     mode: 'onChange',
+    // FIX: Set a default value that passes validation to make the button clickable
     defaultValues: {
       dealerId: '',
-      quantity: undefined,
+      quantity: 1, // Set to 1 to pass positive validation
       unit: '',
-      orderTotal: undefined,
+      orderTotal: 1, // Set to 1 to pass positive validation
       advancePayment: 0,
       pendingPayment: 0,
       estimatedDelivery: new Date(),
@@ -140,7 +141,7 @@ export default function SalesOrderForm() {
       }
 
       toast.success('Order Submitted', { description: 'The sales order has been sent successfully.' });
-      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => navigate('/crm'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });
@@ -148,16 +149,18 @@ export default function SalesOrderForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    // FIX: Removed min-h-screen and bg-gray-50 from the main container
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button>
           <h1 className="text-lg font-bold ml-2">Create Sales Order</h1>
         </div>
       </header>
       
-      <main className="flex-1 overflow-auto p-6">
-        <form onSubmit={handleSubmit(submit)} className="max-w-4xl mx-auto space-y-8">
+      {/* FIX: Removed overflow-auto from the main tag */}
+      <main className="flex-1 p-6">
+        <form onSubmit={handleSubmit(submit)} className="max-w-4xl mx-auto space-y-8 pb-28">
           
           {/* Salesman Details */}
           <div>

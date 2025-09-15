@@ -38,7 +38,7 @@ export default function AppShell({ children }: PropsWithChildren) {
 
   return (
     <div className="h-full max-w-md mx-auto flex flex-col bg-background text-foreground">
-      <main className="flex-1 overflow-y-auto pb-[88px]">{children}</main>
+      <main className="flex-1 overflow-y-auto">{children}</main>
       <BottomNav current={location} go={setLocation} />
     </div>
   );

@@ -2,10 +2,10 @@ import React from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Loader2, ArrowLeft, CalendarIcon } from 'lucide-react';
+import { useLocation } from "wouter";
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
@@ -51,12 +51,13 @@ type CompetitionReportFormValues = z.infer<typeof CompetitionReportSchema>;
 
 // --- Component ---
 export default function CompetitionReportForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const { control, handleSubmit, formState: { errors, isSubmitting, isValid } } = useForm<CompetitionReportFormValues>({
     resolver: zodResolver(CompetitionReportSchema),
     mode: 'onChange',
+    // FIX: Reverted to empty strings for better user experience. The button will be disabled on load and enable as the user types.
     defaultValues: {
       userId: user?.id,
       reportDate: new Date(),
@@ -64,7 +65,7 @@ export default function CompetitionReportForm() {
       billing: '',
       nod: '',
       retail: '',
-      schemesYesNo: undefined,
+      schemesYesNo: 'No',
       avgSchemeCost: 0,
       remarks: '',
     },
@@ -91,7 +92,7 @@ export default function CompetitionReportForm() {
       }
 
       toast.success('Report Submitted', { description: 'Competition report has been saved.' });
-      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => navigate('/crm'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message || 'Please try again.' });
@@ -99,22 +100,22 @@ export default function CompetitionReportForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h1 className="text-lg font-bold ml-2">Competition Report</h1>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 p-6">
         <div className="max-w-3xl mx-auto">
           <h2 className="text-2xl font-bold text-center mb-1">New Competition Report</h2>
           <p className="text-sm text-center text-gray-500 mb-6">Log information about competitor activity.</p>
 
-          <form onSubmit={handleSubmit(submit)} className="space-y-6">
+          <form onSubmit={handleSubmit(submit)} className="space-y-6 pb-28">
             <div className="space-y-1">
               <Label>Report Date *</Label>
               <Controller
@@ -205,7 +206,13 @@ export default function CompetitionReportForm() {
             <Controller control={control} name="avgSchemeCost" render={({ field }) => (
                 <div className="space-y-1">
                   <Label htmlFor="avgSchemeCost">Average Scheme Cost (₹) *</Label>
-                  <Input {...field} id="avgSchemeCost" placeholder="e.g., 1500" type="text" inputMode="numeric" onChange={e => field.onChange(e.target.valueAsNumber)} />
+                  <Input 
+                    {...field} 
+                    id="avgSchemeCost" 
+                    placeholder="e.g., 1500" 
+                    type="number"
+                    // Removed custom onChange handler, let react-hook-form manage it
+                  />
                   {errors.avgSchemeCost && <p className="text-sm text-red-500 mt-1">{errors.avgSchemeCost.message}</p>}
                 </div>
               )}

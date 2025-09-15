@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useLocation } from "wouter"; // 👈 FIX #1: Changed import
+import { useLocation } from "wouter";
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { Loader2, LogIn, LogOut, Plus, CalendarSearch } from 'lucide-react';
 
 // --- Reusable Web Components ---
 import AppHeader from '@/components/AppHeader';
-import SideNavBar from '@/pages/SideNavBar';
 import LiquidGlassCard from '@/components/LiquidGlassCard';
 import PJPFloatingCard from '@/components/PJPFloatingCard';
 
@@ -20,7 +19,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
 
 // --- Custom Hooks & Constants ---
-import { useAppStore, BASE_URL, StatCard } from '../components/ReusableUI';
+import { useAppStore, BASE_URL, StatCard, fetchUserById } from '../components/ReusableUI';
 
 // --- Type Definitions ---
 type PJP = {
@@ -30,15 +29,44 @@ type PJP = {
 
 // --- Component ---
 export default function HomePage() {
-  const [, navigate] = useLocation(); // 👈 FIX #2: Changed hook
-  const { user, attendanceStatus, setAttendanceStatus, dashboardStats } = useAppStore();
+  const [, navigate] = useLocation();
+  const { user, setUser, attendanceStatus, setAttendanceStatus, dashboardStats } = useAppStore();
 
   const [isAttendanceModalVisible, setIsAttendanceModalVisible] = useState(false);
   const [attendanceFormType, setAttendanceFormType] = useState<'in' | 'out' | null>(null);
   const [todayPJPs, setTodayPJPs] = useState<PJP[]>([]);
   const [isLoadingPJPs, setIsLoadingPJPs] = useState(true);
 
-  // Fetch PJPs on load
+  // --- Dynamic user data fetching ---
+  useEffect(() => {
+    // Check if the user is already in the store to avoid refetching
+    if (user) return;
+
+    // Get the user ID from a persistent source, e.g., localStorage
+    const storedUserId = localStorage.getItem('userId');
+    if (storedUserId) {
+      const userId = parseInt(storedUserId);
+      if (!isNaN(userId)) {
+        const fetchUserData = async () => {
+          try {
+            const userData = await fetchUserById(userId);
+            setUser(userData); // Update the global user state
+          } catch (e) {
+            console.error("Failed to fetch user data:", e);
+            // Optionally, handle error, e.g., clear localStorage and redirect to login
+            localStorage.clear();
+            navigate('/login');
+          }
+        };
+        fetchUserData();
+      }
+    } else {
+        // If no user ID is found, navigate to login
+        navigate('/login');
+    }
+  }, [user, setUser, navigate]);
+
+  // Fetch PJPs on load, now dependent on `user?.id` being set
   useEffect(() => {
     if (!user?.id) return;
     const fetchPJPs = async () => {
@@ -90,81 +118,79 @@ export default function HomePage() {
   const hasMorePJPs = todayPJPs.length > 3;
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white bg-cover bg-center" style={{backgroundImage: "url('https://placehold.co/1080x1920/000000/FFFFFF?text=Mobile+Background')"}}>
-      <SideNavBar/>
-      <AppHeader title="Home" onMenuClick={() => alert("Menu clicked!")} />
+    <div className="flex flex-col h-full bg-gray-950 text-white">
+      <AppHeader title="Home" />
       
-      <main className="flex-1 overflow-y-auto">
-        <div className="container mx-auto px-4 py-4 space-y-4">
-          
-          <LiquidGlassCard>
-            <div className="text-center">
-              <p className="font-semibold text-blue-300">{getGreeting()}</p>
-              <h2 className="text-2xl font-bold mt-1">{`${user?.firstName || 'Agent'} ${user?.lastName || ''}`}</h2>
-              <p className="text-sm text-gray-300">{user?.role || 'Field Operations Specialist'}</p>
-            </div>
-          </LiquidGlassCard>
-
-          <div className="grid grid-cols-2 gap-4">
-             <StatCard title="Today's Tasks" value={String(dashboardStats?.todaysTasks ?? 0)} iconName="ClipboardList" />
-             <StatCard title="Active PJPs" value={String(dashboardStats?.activePJPs ?? 0)} iconName="Navigation" />
+      <div className="container mx-auto px-8 pt-8 pb-28 space-y-4">
+        
+        <LiquidGlassCard>
+          <div className="text-center">
+            <p className="font-semibold text-blue-300">{getGreeting()}</p>
+            {/* Dynamically display user's name and role */}
+            <h2 className="text-2xl font-bold mt-1">{`${user?.firstName || 'Agent'} ${user?.lastName || ''}`}</h2>
+            <p className="text-sm text-gray-300">{user?.role || 'Field Operations Specialist'}</p>
           </div>
+        </LiquidGlassCard>
 
+        <div className="grid grid-cols-2 gap-4">
+          <StatCard title="Today's Tasks" value={String(dashboardStats?.todaysTasks ?? 0)} iconName="ClipboardList" />
+          <StatCard title="Active PJPs" value={String(dashboardStats?.activePJPs ?? 0)} iconName="Navigation" />
+        </div>
+
+        <LiquidGlassCard>
+          <div className="flex justify-between gap-4">
+            <Button onClick={() => handleAttendanceAction('in')} disabled={attendanceStatus === 'in'} className="flex-1 bg-green-500/80 hover:bg-green-600 disabled:opacity-50 h-12">
+              <LogIn className="mr-2 h-4 w-4" /> Check In
+            </Button>
+            <Button onClick={() => handleAttendanceAction('out')} disabled={attendanceStatus !== 'in'} className="flex-1 bg-red-500/80 hover:bg-red-600 disabled:opacity-50 h-12">
+              <LogOut className="mr-2 h-4 w-4" /> Check Out
+            </Button>
+          </div>
+        </LiquidGlassCard>
+
+        <div>
           <LiquidGlassCard>
-            <div className="flex justify-between gap-4">
-              <Button onClick={() => handleAttendanceAction('in')} disabled={attendanceStatus === 'in'} className="flex-1 bg-green-500/80 hover:bg-green-600 disabled:opacity-50 h-12">
-                <LogIn className="mr-2 h-4 w-4" /> Check In
-              </Button>
-              <Button onClick={() => handleAttendanceAction('out')} disabled={attendanceStatus !== 'in'} className="flex-1 bg-red-500/80 hover:bg-red-600 disabled:opacity-50 h-12">
-                <LogOut className="mr-2 h-4 w-4" /> Check Out
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold">Today's Missions</h3>
+              <Button size="icon" className="bg-blue-500/50 hover:bg-blue-500" onClick={() => navigate('/pjp-form')}>
+                <Plus className="h-5 w-5" />
               </Button>
             </div>
           </LiquidGlassCard>
 
-          <div>
+          {isLoadingPJPs ? (
             <LiquidGlassCard>
-              <div className="flex justify-between items-center">
-                <h3 className="text-xl font-bold">Today's Missions</h3>
-                <Button size="icon" className="bg-blue-500/50 hover:bg-blue-500" onClick={() => navigate('/add-pjp')}>
-                  <Plus className="h-5 w-5" />
-                </Button>
+              <div className="flex flex-col items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-300" />
+                <p className="mt-4 text-sm text-gray-300">Loading missions...</p>
               </div>
             </LiquidGlassCard>
-
-            {isLoadingPJPs ? (
-              <LiquidGlassCard>
-                <div className="flex flex-col items-center justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-blue-300" />
-                  <p className="mt-4 text-sm text-gray-300">Loading missions...</p>
-                </div>
-              </LiquidGlassCard>
-            ) : todayPJPs.length > 0 ? (
-              <>
-                {displayedPJPs.map((pjp) => (
-                  <LiquidGlassCard key={pjp.id} onPress={() => navigate('/journey', { state: { selectedPJP: pjp } })}>
-                    <PJPFloatingCard pjp={pjp} />
-                  </LiquidGlassCard>
-                ))}
-                {hasMorePJPs && (
-                  <LiquidGlassCard onPress={() => navigate('/pjp-list', { state: { date: new Date().toISOString() } })}>
-                    <p className="text-center font-semibold text-blue-300">
-                      Show More ({todayPJPs.length - displayedPJPs.length})
-                    </p>
-                  </LiquidGlassCard>
-                )}
-              </>
-            ) : (
-              <LiquidGlassCard>
-                <div className="text-center py-10">
-                  <CalendarSearch className="mx-auto h-12 w-12 text-gray-400" />
-                  <p className="mt-4 mb-4 text-sm text-gray-300">No missions planned for today.</p>
-                  <Button className="bg-blue-500/80 hover:bg-blue-600" onClick={() => navigate('/add-pjp')}>Plan a New Mission</Button>
-                </div>
-              </LiquidGlassCard>
-            )}
-          </div>
+          ) : todayPJPs.length > 0 ? (
+            <>
+              {displayedPJPs.map((pjp) => (
+                <LiquidGlassCard key={pjp.id} onPress={() => navigate('/journey', { state: { selectedPJP: pjp } })}>
+                  <PJPFloatingCard pjp={pjp} />
+                </LiquidGlassCard>
+              ))}
+              {hasMorePJPs && (
+                <LiquidGlassCard onPress={() => navigate('/pjp-list', { state: { date: new Date().toISOString() } })}>
+                  <p className="text-center font-semibold text-blue-300">
+                    Show More ({todayPJPs.length - displayedPJPs.length})
+                  </p>
+                </LiquidGlassCard>
+              )}
+            </>
+          ) : (
+            <LiquidGlassCard>
+              <div className="text-center py-10">
+                <CalendarSearch className="mx-auto h-12 w-12 text-gray-400" />
+                <p className="mt-4 mb-4 text-sm text-gray-300">No missions planned for today.</p>
+                <Button className="bg-blue-500/80 hover:bg-blue-600" onClick={() => navigate('/pjp-form')}>Plan a New Mission</Button>
+              </div>
+            </LiquidGlassCard>
+          )}
         </div>
-      </main>
+      </div>
 
       <Dialog open={isAttendanceModalVisible} onOpenChange={setIsAttendanceModalVisible}>
         <DialogContent className="bg-gray-900/80 backdrop-blur-xl border-white/20 text-white p-0">

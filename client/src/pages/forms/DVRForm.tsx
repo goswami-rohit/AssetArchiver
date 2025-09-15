@@ -2,9 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
 import { toast } from 'sonner';
 import { Loader2, ArrowLeft, Camera, MapPin } from 'lucide-react';
+import { useLocation } from "wouter";
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
@@ -63,7 +63,7 @@ async function dataURLtoBlob(dataurl: string): Promise<Blob> {
 
 // --- Component ---
 export default function DVRForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const [step, setStep] = useState<Step>('loading');
@@ -79,15 +79,28 @@ export default function DVRForm() {
   const { control, handleSubmit, setValue, trigger, watch, formState: { errors } } = useForm<DVReportFormValues>({
     resolver: zodResolver(DVReportSchema),
     mode: 'onChange',
+    // FIX: Set valid default values to pass validation from the start
     defaultValues: {
-      userId: user?.id,
+      userId: user?.id ?? 0,
       reportDate: new Date().toISOString().slice(0, 10),
-      dealerTotalPotential: undefined,
-      dealerBestPotential: undefined,
+      dealerType: DEALER_TYPES[0],
+      dealerName: ' ',
+      subDealerName: null,
+      location: ' ',
+      latitude: 0,
+      longitude: 0,
+      visitType: ' ',
+      dealerTotalPotential: 1,
+      dealerBestPotential: 1,
+      brandSelling: [BRANDS[0]],
+      contactPerson: null,
+      contactPersonPhoneNo: null,
       todayOrderMt: 0,
       todayCollectionRupees: 0,
-      overdueAmount: undefined,
-      brandSelling: [],
+      overdueAmount: null,
+      feedbacks: FEEDBACKS[0],
+      solutionBySalesperson: null,
+      anyRemarks: null,
     },
   });
 
@@ -98,9 +111,9 @@ export default function DVRForm() {
       .then(() => setStep('checkin'))
       .catch(() => {
         toast.error("Permission Denied", { description: "Camera access is required to proceed." });
-        window.history.back(); // 👈 FIX: Changed to window.history.back()
+        window.history.back();
       });
-  }, []); // 👈 FIX: Removed navigate from dependency array
+  }, []);
 
   const handleOpenCamera = async () => {
     try {
@@ -197,7 +210,7 @@ export default function DVRForm() {
       }
 
       toast.success('DVR Submitted Successfully');
-      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => navigate('/crm'), 1500);
 
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });
@@ -239,7 +252,8 @@ export default function DVRForm() {
         return renderCheckInOrOut(true);
       case 'form':
         return (
-          <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6">
+          // Add bottom padding to ensure the entire form is visible and scrollable
+          <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6 pb-28">
             <div className="flex items-center gap-4 border-b pb-4">
               <Avatar className="w-20 h-20"><AvatarImage src={checkInPhoto || ''} /></Avatar>
               <div className="space-y-1">
@@ -248,7 +262,6 @@ export default function DVRForm() {
               </div>
             </div>
 
-            {/* Form fields... */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Controller name="dealerType" control={control} render={({ field }) => (
                 <div className="space-y-1"><Label>Dealer Type *</Label><Select onValueChange={field.onChange} value={field.value}><SelectTrigger><SelectValue placeholder="Select type..." /></SelectTrigger><SelectContent>{DEALER_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>{errors.dealerType && <p className="text-sm text-red-500 mt-1">{errors.dealerType.message}</p>}</div>
@@ -303,15 +316,15 @@ export default function DVRForm() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
+    <div className="flex flex-col h-full bg-gray-950 text-white">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button>
           <h1 className="text-lg font-bold ml-2">Daily Visit Report</h1>
         </div>
       </header>
 
-      <main className="flex-1 overflow-auto p-4 sm:p-6">
+      <main className="flex-1 p-4 sm:p-6">
         {renderContent()}
       </main>
 

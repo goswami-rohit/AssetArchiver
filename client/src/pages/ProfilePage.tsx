@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useLocation } from "wouter"; // 👈 FIX #1: Switched to wouter
+import { useLocation } from "wouter";
 import { toast } from 'sonner';
 import {
   FileText, Store, Map, CheckCircle, User, Trophy, Clock,
@@ -8,13 +8,10 @@ import {
 
 // --- Reusable Web Components ---
 import AppHeader from '@/components/AppHeader';
-import SideNavBar from '@/pages/SideNavBar';
 import LiquidGlassCard from '@/components/LiquidGlassCard';
-import LeaveApplicationForm from '@/pages/forms/LeaveApplicationForm';
 
 // --- UI Libraries ---
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
@@ -29,7 +26,6 @@ const iconMap = {
 };
 
 // --- Sub-components for Profile Page ---
-
 const StatTile: React.FC<{ iconName: IconName; value: string | number; label: string; color: string; }> = ({ iconName, value, label, color }) => {
   const Icon = iconMap[iconName] || FileText;
   return (
@@ -71,12 +67,10 @@ const ActionButton: React.FC<{ icon: IconName; title: string; onPress: () => voi
   );
 };
 
-
 // --- Main Profile Page Component ---
 export default function ProfilePage() {
-  const [, navigate] = useLocation(); // 👈 FIX #2: Using wouter's navigation hook
+  const [, navigate] = useLocation();
   const { user, reports, dealers, pjps, dailyTasks, dashboardStats, userTargets, setUser } = useAppStore();
-  const [openLeave, setOpenLeave] = useState(false);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -89,11 +83,12 @@ export default function ProfilePage() {
           }
         } catch (err) {
           console.error('Failed to fetch user from storage', err);
+          navigate('/login');
         }
       }
     };
     loadUser();
-  }, [user, setUser]);
+  }, [user, setUser, navigate]);
 
   const handleLogout = useCallback(() => {
     toast("Are you sure you want to log out?", {
@@ -122,23 +117,22 @@ export default function ProfilePage() {
   ];
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white bg-cover bg-center" style={{ backgroundImage: "url('https://placehold.co/1080x1920/000000/FFFFFF?text=Mobile+Background')" }}>
-     <SideNavBar/>
-      <AppHeader title="Profile" onMenuClick={() => alert("Menu clicked!")} />
+    <div className="flex flex-col h-full bg-gray-950 text-white">
+      <AppHeader title="Profile" />
 
-      <main className="flex-1 overflow-y-auto pb-8">
-        <div className="container mx-auto px-4 py-4 space-y-4">
+      <main className="flex-1">
+        <div className="container mx-auto px-8 pt-8 pb-28 space-y-4">
 
           <LiquidGlassCard>
             <div className="flex flex-col items-center">
               <Avatar className="w-24 h-24 mb-4 bg-blue-500">
                 <AvatarFallback className="text-3xl font-bold bg-blue-500 text-white">{initials}</AvatarFallback>
               </Avatar>
-              <h2 className="text-2xl font-bold">{`${user?.firstName || ''} ${user?.lastName || ''}`}</h2>
-              <p className="text-sm text-gray-300 mb-3">{user?.email}</p>
+              <h2 className="text-2xl font-bold">{`${user?.firstName || 'Agent'} ${user?.lastName || 'User'}`}</h2>
+              <p className="text-sm text-gray-300 mb-3">{user?.email ?? 'loading...'}</p>
               <div className="flex items-center px-4 py-2 rounded-full gap-2 bg-blue-500/30">
                 <Briefcase size={16} className="text-blue-300" />
-                <p className="text-xs font-semibold text-blue-300 tracking-wide">{user?.role ?? 'Agent'}</p>
+                <p className="text-xs font-semibold text-blue-300 tracking-wide">{user?.role ?? 'Field Operations Specialist'}</p>
               </div>
             </div>
           </LiquidGlassCard>
@@ -178,7 +172,7 @@ export default function ProfilePage() {
           </LiquidGlassCard>
 
           <div className="flex justify-between gap-3">
-            <ActionButton icon="ClipboardList" title="Apply for Leave" onPress={() => setOpenLeave(true)} color="#3b82f6" />
+            <ActionButton icon="ClipboardList" title="Apply for Leave" onPress={() => navigate('/leave-form')} color="#3b82f6" />
             <ActionButton icon="Package" title="Brand Mapping" onPress={() => toast.info("Brand Mapping Coming Soon!")} color="#10b981" />
           </div>
 
@@ -190,11 +184,6 @@ export default function ProfilePage() {
         </div>
       </main>
 
-      <Dialog open={openLeave} onOpenChange={setOpenLeave}>
-        <DialogContent className="bg-gray-900/80 backdrop-blur-xl border-white/20 text-white p-0">
-          <LeaveApplicationForm/>
-        </DialogContent>
-      </Dialog>
       <Toaster theme="dark" />
     </div>
   );

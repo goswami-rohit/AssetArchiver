@@ -29,6 +29,7 @@ import SalesOrderForm from "./pages/forms/SalesOrderForm";
 
 //import CRMDashboard from "@/pages/CRMDashboard"; 
 import ProtectedRoute from "@/components/ProtectedRoute";
+import PJPListPage from "./components/PJPListPage";
 
 function Router() {
   return (
@@ -142,6 +143,15 @@ function Router() {
         </ProtectedRoute>
       </Route>
       {/*End of form routes */}
+
+    {/*Direct buttons routing from Home/Profile/Journey Pages */}
+      <Route path="/pjp-list">
+        <ProtectedRoute>
+          <AppShell>
+            <PJPListPage />
+          </AppShell>
+        </ProtectedRoute>
+      </Route>
 
       {/* Your Existing Routes */}
       <Route path="/" component={Dashboard} />

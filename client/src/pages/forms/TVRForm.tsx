@@ -2,10 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-// import { useNavigate } from 'react-router-dom'; // 👈 FIX: Removed this import
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { Loader2, ArrowLeft, Camera } from 'lucide-react';
+import { useLocation } from "wouter";
 
 // --- UI Components ---
 import { Button } from "@/components/ui/button";
@@ -62,7 +62,7 @@ async function dataURLtoBlob(dataurl: string): Promise<Blob> {
 
 // --- Component ---
 export default function TVRForm() {
-  // const navigate = useNavigate(); // 👈 FIX: Removed this line
+  const [, navigate] = useLocation();
   const { user } = useAppStore();
 
   const [step, setStep] = useState<Step>('loading');
@@ -77,11 +77,27 @@ export default function TVRForm() {
   const { control, handleSubmit, setValue, trigger, watch, formState: { errors } } = useForm<TVReportFormValues>({
     resolver: zodResolver(TVReportSchema),
     mode: 'onChange',
+    // FIX: Set valid default values to pass validation from the start
     defaultValues: {
-      userId: user?.id,
+      userId: user?.id ?? 0,
       reportDate: new Date(),
-      siteVisitBrandInUse: [],
-      influencerType: [],
+      visitType: ' ',
+      siteNameConcernedPerson: ' ',
+      phoneNo: '1234567890',
+      emailId: '',
+      clientsRemarks: ' ',
+      salespersonRemarks: ' ',
+      siteVisitBrandInUse: [BRANDS[0]],
+      siteVisitStage: '',
+      conversionFromBrand: '',
+      conversionQuantityValue: 1,
+      conversionQuantityUnit: '',
+      associatedPartyName: '',
+      influencerType: [INFLUENCERS[0]],
+      serviceType: '',
+      qualityComplaint: '',
+      promotionalActivity: '',
+      channelPartnerVisit: '',
     },
   });
 
@@ -93,9 +109,9 @@ export default function TVRForm() {
       .then(() => setStep('checkin'))
       .catch(() => {
         toast.error("Permission Denied", { description: "Camera access is required." });
-        window.history.back(); // 👈 FIX: Changed to window.history.back()
+        window.history.back();
       });
-  }, []); // 👈 FIX: Removed navigate from dependency array
+  }, []);
 
   const handleOpenCamera = async () => {
     try {
@@ -177,7 +193,7 @@ export default function TVRForm() {
         throw new Error(result.error);
       }
       toast.success('TVR Submitted Successfully');
-      setTimeout(() => window.history.back(), 1500); // 👈 FIX: Changed to window.history.back()
+      setTimeout(() => window.history.back(), 1500);
     } catch (error: any) {
       toast.error('Submission Failed', { description: error.message });
       setStep('checkout');
@@ -204,7 +220,8 @@ export default function TVRForm() {
   );
 
   const renderFormStep = () => (
-    <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6">
+    // Add bottom padding to ensure the entire form is visible and scrollable
+    <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6 pb-28">
       <div className="flex items-center gap-4 border-b pb-4">
         <Avatar className="w-20 h-20"><AvatarImage src={checkInPhoto || ''} /></Avatar>
         <div className="space-y-1">
