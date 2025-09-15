@@ -152,61 +152,75 @@ export default function AddDealerForm() {
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const { latitude, longitude } = position.coords;
+        // Set numeric lat/lng on form (zod expects numeric)
         setValue("latitude", latitude, { shouldValidate: true });
         setValue("longitude", longitude, { shouldValidate: true });
+
+        // Optional: show a friendly label in toast (you don't need a `location` DB column)
         toast.success("Location Captured", { description: `Lat: ${latitude.toFixed(5)}, Lon: ${longitude.toFixed(5)}` });
+
         setIsLoadingLocation(false);
       },
       (error) => {
-        toast.error("Location Error", { description: error.message || "Unable to fetch location." });
+        // log full object for debugging in devtools
+        // eslint-disable-next-line no-console
+        console.error("Geolocation error:", error);
+        // safe messaging
+        const msg = (error && (error as any).message) ? (error as any).message : "Unable to fetch location.";
+        toast.error("Location Error", { description: msg });
         setIsLoadingLocation(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
       }
     );
   };
 
+  const sanitizePhone = (raw: unknown) => {
+    const s = String(raw ?? '').replace(/\D/g, '');
+    return s.length > 10 ? s.slice(-10) : s;
+  };
 
   const submit: SubmitHandler<DealerFormValues> = async (values) => {
     try {
-      // Build numbers/null in a way server expects
+      // Coerce lat/lng to numbers to validate presence, but send as strings
       const latNum = values.latitude !== null && values.latitude !== undefined ? Number(values.latitude) : null;
-      const lngNum = values.longitude !== null && values.longitude !== undefined ? Number(values.longitude) : null;
+      const lonNum = values.longitude !== null && values.longitude !== undefined ? Number(values.longitude) : null;
 
-      // If your flow requires geofence creation on insert, enforce lat/lng presence client-side
-      if (!Number.isFinite(latNum) || !Number.isFinite(lngNum)) {
+      if (!Number.isFinite(latNum) || !Number.isFinite(lonNum)) {
         toast.error("Please capture dealer location (Use My Current Location) before saving.");
         return;
       }
 
-      // Build payload to match server schema (numbers for numeric columns)
-      const payload: any = {
-        // only include userId if available (server allows optional)
-        ...(user?.id ? { userId: Number(user.id) } : {}),
-        type: values.type,
-        parentDealerId: values.isSubDealer ? values.parentDealerId || null : null,
-        name: values.name,
-        region: values.region,
-        area: values.area,
-        phoneNo: values.phoneNo,
-        address: values.address,
-        pinCode: values.pinCode || null,
-        // keep as numbers so server Number(...) works and zod/DB receive numeric input
-        latitude: latNum,
-        longitude: lngNum,
-        dateOfBirth: values.dateOfBirth || null,
-        anniversaryDate: values.anniversaryDate || null,
-        totalPotential: Number(values.totalPotential ?? 0),
-        bestPotential: Number(values.bestPotential ?? 0),
-        brandSelling: values.brandSelling,
-        feedbacks: values.feedbacks,
-        remarks: values.remarks || null,
-        // optional: allow client to specify custom geofence radius in meters
-        radius: 25
+      const brands = Array.isArray(values.brandSelling) ? values.brandSelling.map(b => String(b)) : [];
+
+      const phoneSan = sanitizePhone(values.phoneNo);
+      if (!/^\d{10}$/.test(phoneSan)) {
+        toast.error("Phone must be a 10-digit number (digits only).");
+        return;
+      }
+
+      // --- SEND AS STRINGS for the four fields server expects as string ---
+      const payload: Record<string, any> = {
+        ...(typeof user?.id === 'number' && Number.isFinite(Number(user.id)) ? { userId: Number(user.id) } : {}),
+        type: String(values.type),
+        parentDealerId: values.isSubDealer ? (values.parentDealerId ?? null) : null,
+        name: String(values.name),
+        region: String(values.region),
+        area: String(values.area),
+        phoneNo: phoneSan,
+        address: String(values.address),
+        pinCode: (values.pinCode ?? '') === '' ? null : String(values.pinCode),
+        latitude: String(latNum),        // << send string
+        longitude: String(lonNum),       // << send string
+        dateOfBirth: values.dateOfBirth ? String(values.dateOfBirth) : null,
+        anniversaryDate: values.anniversaryDate ? String(values.anniversaryDate) : null,
+        totalPotential: String(Number(values.totalPotential ?? 0)), // << send string
+        bestPotential: String(Number(values.bestPotential ?? 0)),   // << send string
+        brandSelling: brands,
+        feedbacks: String(values.feedbacks),
+        remarks: (values.remarks ?? '') === '' ? null : String(values.remarks),
+        radius: 25,
       };
+
+      console.debug('POST /api/dealers payload:', payload);
 
       const response = await fetch(`${BASE_URL}/api/dealers`, {
         method: 'POST',
@@ -215,22 +229,29 @@ export default function AddDealerForm() {
       });
 
       const result = await response.json().catch(() => null);
-      if (!response.ok || (result && result.success === false)) {
-        // Server might return helpful Zod details in result.details
-        const errMsg = result?.error || (result?.details ? JSON.stringify(result.details) : 'Failed to create dealer');
+
+      if (!response.ok) {
+        if (result?.details && Array.isArray(result.details)) {
+          const messages = result.details.map((d: any) => {
+            const path = Array.isArray(d.path) ? d.path.join('.') : String(d.path);
+            return `${path}: ${d.message}`;
+          }).join('\n');
+          console.error('Server Zod details:', result.details);
+          toast.error("Validation failed", { description: messages, duration: 8000 });
+          return;
+        }
+        const errMsg = result?.error || result?.message || 'Failed to create dealer';
         throw new Error(errMsg);
       }
 
-      toast.success("Dealer Created", {
-        description: "The new dealer has been saved and geofence upserted."
-      });
+      toast.success("Dealer Created", { description: "Saved and geofence upserted." });
       navigate('/');
-    } catch (error: any) {
-      toast.error("Submission Failed", {
-        description: error?.message || "An unexpected error occurred."
-      });
+    } catch (err: any) {
+      console.error('Submit error:', err);
+      toast.error("Submission Failed", { description: err?.message || "An unexpected error occurred." });
     }
   };
+
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white">
