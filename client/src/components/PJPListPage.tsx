@@ -1,5 +1,3 @@
-// src/pages/PJPListPage.tsx
-
 import React, { useState, useEffect } from 'react';
 import { useLocation } from "wouter";
 import { format } from 'date-fns';
@@ -29,17 +27,14 @@ type Dealer = {
   id: string;
   name: string;
   address: string;
+  latitude: number;
+  longitude: number;
 };
 
 export default function PJPListPage() {
   const [location, navigate] = useLocation();
   const { user } = useAppStore();
 
-  // FIX: This line is incorrect in wouter. Wouter does not have location.state
-  // const { date } = (location.state as { date?: string }) || {};
-
-  // You will need to pass the date as a query parameter or from a different state management.
-  // Assuming the date is passed in the URL, e.g., /crm/pjp-list?date=YYYY-MM-DD
   const urlParams = new URLSearchParams(window.location.search);
   const date = urlParams.get('date');
 
@@ -58,7 +53,6 @@ export default function PJPListPage() {
       setIsLoading(true);
       setError(null);
       try {
-        // pjp fetching
         const targetDate = date ? new Date(date) : new Date();
         const formattedDate = format(targetDate, 'yyyy-MM-dd');
         const pjpUrl = `${BASE_URL}/api/pjp/user/${user.id}?startDate=${formattedDate}&endDate=${formattedDate}`;
@@ -68,7 +62,6 @@ export default function PJPListPage() {
         if (pjpResponse.ok && pjpResult.success) {
           const pjps = pjpResult.data;
 
-          // dealer fetching
           const dealerIds = Array.from(new Set(pjps.map((p: PJP) => p.areaToBeVisited)));
 
           if (dealerIds.length > 0) {
@@ -89,7 +82,9 @@ export default function PJPListPage() {
               return {
                 ...p,
                 dealerName: dealerInfo?.name || 'Unknown Dealer',
-                dealerAddress: dealerInfo?.address || 'Location TBD'
+                dealerAddress: dealerInfo?.address || 'Location TBD',
+                dealerLatitude: dealerInfo?.latitude,
+                dealerLongitude: dealerInfo?.longitude,
               };
             });
             setPjps(enrichedPjps);

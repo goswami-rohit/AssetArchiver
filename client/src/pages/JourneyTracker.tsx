@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
 import { useLocation } from "wouter";
+import { BASE_URL } from '@/components/ReusableUI';
 
 import {
   ModernJourneyHeader,
@@ -10,6 +11,7 @@ import {
   ModernCompletedTripCard,
   ModernMessageCard
 } from '@/components/ReusableUI';
+import { Button } from '@/components/ui/button';
 
 /* Radar Web SDK */
 import Radar from 'radar-sdk-js';
@@ -34,6 +36,19 @@ interface TripData {
   dbJourneyId: number;
   dealer: Dealer;
   radarTrip: any;
+}
+
+// New PJP type, including enriched dealer info from HomePage
+interface PJP {
+  id: string;
+  areaToBeVisited: string;
+  status: string;
+  planDate: string;
+  dealerName: string;
+  dealerAddress: string;
+  dealerLatitude?: number;
+  dealerLongitude?: number;
+  [key: string]: any;
 }
 
 /* ===============================
@@ -91,7 +106,10 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
   const [selectedDealer, setSelectedDealer] = useState<Dealer | null>(null);
-  const [dealers, setDealers] = useState<Dealer[]>([]);
+  
+  // State to hold the list of PJPs instead of dealers
+  const [pjps, setPjps] = useState<PJP[]>([]);
+  
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
   const [tripStatus, setTripStatus] = useState<'idle' | 'active' | 'completed'>('idle');
   const [activeTripData, setActiveTripData] = useState<TripData | null>(null);
@@ -105,48 +123,77 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const mapRef = useRef<JourneyMapRef>(null);
   const trackingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get selected PJP from navigation state (wouter)
   const selectedPJP = (location as any).state?.selectedPJP;
 
-  // --- New useEffect to handle navigation state from HomePage ---
+  // useEffect to handle navigation state from HomePage
   useEffect(() => {
-    if (selectedPJP) {
-      const dealer = {
+    // If a PJP is pre-selected, set the dealer details and bypass the dropdown
+    if (selectedPJP && selectedPJP.dealerName) {
+      const dealer: Dealer = {
         id: selectedPJP.areaToBeVisited,
         name: selectedPJP.dealerName,
         address: selectedPJP.dealerAddress,
-        latitude: selectedPJP.dealerLatitude,
-        longitude: selectedPJP.dealerLongitude,
+        latitude: selectedPJP.dealerLatitude || 0, // Provide a default value
+        longitude: selectedPJP.dealerLongitude || 0, // Provide a default value
       };
       setSelectedDealer(dealer);
+      // Set the trip status to idle but with a selected dealer
+      setTripStatus('idle');
     }
   }, [selectedPJP]);
 
-
-  useEffect(() => {
-    try {
-      ensureRadarInitialized();
-      if (userId) {
-        Radar.setUserId(String(userId));
-      }
-    } catch (e) {
-      setError((e as Error).message || 'Radar init failed');
-    }
-  }, [userId]);
-
+  // New useEffect to fetch PJPs from the backend
   useEffect(() => {
     if (!userId) return;
-    const fetchDealers = async () => {
+    const fetchPJPs = async () => {
       try {
-        const response = await fetch(`/api/dealers/user/${userId}`);
-        const data = await response.json();
-        if (data.success) setDealers(data.data || []);
-      } catch {
-        setError('Failed to load dealers');
+        const pjpUrl = `${BASE_URL}/api/pjp/user/${userId}`;
+        const pjpResponse = await fetch(pjpUrl);
+        const pjpResult = await pjpResponse.json();
+
+        if (pjpResponse.ok && pjpResult.success) {
+          const pjps: PJP[] = pjpResult.data;
+
+          const dealerIds = Array.from(new Set(pjps.map((p: PJP) => p.areaToBeVisited)));
+
+          if (dealerIds.length > 0) {
+            const dealerPromises = dealerIds.map(id =>
+              fetch(`${BASE_URL}/api/dealers/${id}`).then(res => res.json())
+            );
+            const dealerResults = await Promise.all(dealerPromises);
+
+            const dealersMap = new Map<string, Dealer>();
+            dealerResults.forEach(res => {
+              if (res.success) {
+                dealersMap.set(res.data.id, res.data);
+              }
+            });
+
+            const enrichedPjps = pjps.map((p: PJP) => {
+               const dealerInfo = dealersMap.get(p.areaToBeVisited);
+              return {
+                ...p,
+                dealerName: dealerInfo?.name || 'Unknown Dealer',
+                dealerAddress: dealerInfo?.address || 'Location TBD',
+                dealerLatitude: dealerInfo?.latitude,
+                dealerLongitude: dealerInfo?.longitude,
+              };
+            });
+            setPjps(enrichedPjps);
+          } else {
+            setPjps([]);
+          }
+        } else {
+          throw new Error(pjpResult.error || "Failed to fetch PJPs.");
+        }
+      } catch (e: any) {
+        console.error('Error fetching PJPs:', e);
+        setError('Failed to load PJPs');
       }
     };
-    fetchDealers();
+    fetchPJPs();
   }, [userId]);
+
 
   const getCurrentLocation = async () => {
     setIsLoadingLocation(true);
@@ -179,7 +226,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   const startTrip = async () => {
     if (!currentLocation || !selectedDealer || !userId) {
-      setError('Please select location and destination');
+      setError('Please select a destination');
       return;
     }
 
@@ -188,7 +235,6 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         externalId: `${userId}-${Date.now()}`,
         destinationGeofenceTag: "dealer",
         destinationGeofenceExternalId: toDealerExternalId(selectedDealer.id),
-
         mode: "car",
         metadata: {
           originLatitude: currentLocation.lat,
@@ -292,27 +338,34 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     }, 8000);
   };
 
-  const changeDestination = async (newDealerId: string) => {
+  const changeDestination = async (newPjpId: string) => {
     if (!activeTripData) return;
 
     try {
       const { trip } = await radarUpdateTrip({
-        destinationGeofenceExternalId: toDealerExternalId(newDealerId)
+        destinationGeofenceExternalId: toDealerExternalId(newPjpId)
       });
 
       const response = await fetch(`/api/geo/trips/${activeTripData.journeyId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          destinationGeofenceExternalId: newDealerId,
+          destinationGeofenceExternalId: newPjpId,
           status: "destination_updated"
         })
       });
 
       const data = await response.json();
       if (data.success) {
-        const newDealer = dealers.find(d => d.id === newDealerId);
-        if (newDealer) {
+        const newPjp = pjps.find(p => p.areaToBeVisited === newPjpId);
+        if (newPjp) {
+          const newDealer = {
+            id: newPjp.areaToBeVisited,
+            name: newPjp.dealerName,
+            address: newPjp.dealerAddress,
+            latitude: newPjp.dealerLatitude || 0, // Provide a default value
+            longitude: newPjp.dealerLongitude || 0, // Provide a default value
+          };
           setSelectedDealer(newDealer);
           setActiveTripData(prev => prev ? {
             ...prev,
@@ -410,19 +463,52 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           className="w-full"
         />
 
+        {/* Conditional rendering for the initial idle state */}
         {tripStatus === 'idle' && (
-          <ModernTripPlanningCard
-            currentLocation={currentLocation?.address}
-            selectedDealer={selectedDealer}
-            dealers={dealers}
-            isLoadingLocation={isLoadingLocation}
-            onGetCurrentLocation={getCurrentLocation}
-            onDealerSelect={(dealerId) => {
-              const dealer = dealers.find(d => d.id === dealerId);
-              setSelectedDealer(dealer || null);
-            }}
-            onStartTrip={startTrip}
-          />
+          selectedDealer ? (
+            // New card to display pre-selected PJP and start button
+            <div className="mx-4 mb-4 border-0 shadow-xl p-6 bg-background/95 backdrop-blur-md rounded-lg">
+              <h2 className="text-xl font-bold text-center mb-4">Ready to Start Journey</h2>
+              <p className="text-lg font-medium text-white mb-1">{selectedDealer.name}</p>
+              <p className="text-sm text-muted-foreground">{selectedDealer.address}</p>
+              <Button
+                onClick={startTrip}
+                disabled={!currentLocation}
+                className="w-full h-12 mt-4 text-base font-semibold"
+              >
+                Start Journey to {selectedDealer.name}
+              </Button>
+            </div>
+          ) : (
+            // Original card for manual PJP selection
+            <ModernTripPlanningCard
+              currentLocation={currentLocation?.address}
+              selectedDealer={selectedDealer}
+              // Pass the enriched PJPs to the component
+              dealers={pjps.map(pjp => ({
+                id: pjp.areaToBeVisited, // Use areaToBeVisited as the unique ID
+                name: pjp.dealerName,
+                address: pjp.dealerAddress,
+                latitude: pjp.dealerLatitude || 0,
+                longitude: pjp.dealerLongitude || 0
+              }))}
+              isLoadingLocation={isLoadingLocation}
+              onGetCurrentLocation={getCurrentLocation}
+              onDealerSelect={(pjpId) => {
+                const pjp = pjps.find(p => p.areaToBeVisited === pjpId);
+                if (pjp) {
+                  setSelectedDealer({
+                    id: pjp.areaToBeVisited,
+                    name: pjp.dealerName,
+                    address: pjp.dealerAddress,
+                    latitude: pjp.dealerLatitude || 0,
+                    longitude: pjp.dealerLongitude || 0,
+                  });
+                }
+              }}
+              onStartTrip={startTrip}
+            />
+          )
         )}
 
         {tripStatus === 'active' && activeTripData && (
@@ -433,7 +519,14 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
             onChangeDestination={() => setShowDestinationChange(true)}
             onCompleteTrip={completeTrip}
             showDestinationChange={showDestinationChange}
-            dealers={dealers}
+            // Pass the PJPs here too for the change destination dropdown
+            dealers={pjps.map(pjp => ({
+              id: pjp.areaToBeVisited,
+              name: pjp.dealerName,
+              address: pjp.dealerAddress,
+              latitude: pjp.dealerLatitude || 0,
+              longitude: pjp.dealerLongitude || 0
+            }))}
             onDestinationChange={changeDestination}
             onCancelChange={() => setShowDestinationChange(false)}
           />

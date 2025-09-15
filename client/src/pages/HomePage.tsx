@@ -102,11 +102,13 @@ export default function HomePage() {
             });
 
             const enrichedPjps = pjps.map((p: PJP) => {
-              const dealerInfo = dealersMap.get(p.areaToBeVisited);
+               const dealerInfo = dealersMap.get(p.areaToBeVisited);
               return {
                 ...p,
                 dealerName: dealerInfo?.name || 'Unknown Dealer',
-                dealerAddress: dealerInfo?.address || 'Location TBD'
+                dealerAddress: dealerInfo?.address || 'Location TBD',
+                dealerLatitude: dealerInfo?.latitude,
+                dealerLongitude: dealerInfo?.longitude,
               };
             });
             setTodayPJPs(enrichedPjps);
