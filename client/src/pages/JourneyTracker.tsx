@@ -4,7 +4,7 @@ import { useAppStore, BASE_URL } from "@/components/ReusableUI";
 import JourneyMap, { JourneyMapRef } from '@/components/journey-map';
 import { useLocation } from "wouter";
 import { toast } from 'sonner';
-
+import z from 'zod';
 import {
   ModernJourneyHeader,
   ModernTripPlanningCard,
@@ -17,6 +17,43 @@ import { Button } from '@/components/ui/button';
 /* Radar Web SDK init only */
 import 'radar-sdk-js/dist/radar.css';
 import Radar from 'radar-sdk-js';
+
+export const insertGeoTrackingSchema = z.object({
+  // required
+  userId: z.coerce.number().int().positive(),
+  // coordinates are required but allow numeric or numeric-string input
+  latitude: z.coerce.number().refine(v => Number.isFinite(v), { message: "Invalid latitude" }),
+  longitude: z.coerce.number().refine(v => Number.isFinite(v), { message: "Invalid longitude" }),
+  recordedAt: z.date().optional(),
+  // optional numerics
+  accuracy: z.number().optional().nullable(),
+  speed: z.number().optional().nullable(),
+  heading: z.number().optional().nullable(),
+  altitude: z.number().optional().nullable(),
+  // optional strings
+  locationType: z.string().max(50).optional().nullable(),
+  activityType: z.string().max(50).optional().nullable(),
+  appState: z.string().max(50).optional().nullable(),
+  // battery / charging
+  batteryLevel: z.number().optional().nullable(),
+  isCharging: z.boolean().optional().nullable(),
+  networkStatus: z.string().max(50).optional().nullable(),
+  ipAddress: z.string().max(45).optional().nullable(),
+  siteName: z.string().max(255).optional().nullable(),
+  // accepts ISO strings or Date objects
+  checkInTime: z.date().optional().nullable(),
+  checkOutTime: z.date().optional().nullable(),
+  // distance — DB has scale 10,3 — accept number or numeric string, stored as number
+  totalDistanceTravelled: z.coerce.number().optional().nullable(),
+  journeyId: z.string().max(255).optional().nullable(),
+  isActive: z.boolean().optional().default(true),
+  // destination coords
+  destLat: z.coerce.number().optional().nullable(),
+  destLng: z.coerce.number().optional().nullable(),
+});
+
+// export also a partial for PATCH usage (you may already have this)
+export const insertGeoTrackingSchemaPartial = insertGeoTrackingSchema.partial();
 
 /* =============
    Minimal Radar wrapper for init only (keep as you had it)
@@ -581,28 +618,43 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
     const totalDistanceMeters = Number(distance ?? 0);
     const totalDistanceKm = Math.round((totalDistanceMeters / 1000) * 1000) / 1000;
     const totalDurationSec = Number(duration ?? 0);
-    const nowDate = new Date();
+    const now = new Date();
+    const Datenow = now.toISOString();
 
     // ✅ Correct schema-matching payload
     const payload = {
-      userId: userId ? Number(userId) : null,
-      latitude: lat !== null ? String(Number(lat).toFixed(7)) : null,
-      longitude: lng !== null ? String(Number(lng).toFixed(7)) : null,
-      recorded_at: nowDate,
-      location_type: radarSDK.isSDKInitialized() ? 'radar' : 'browser',
-      app_state: 'foreground',
-      site_name: activeTripData.dealer?.name ?? null,
-      check_in_time: null,
-      check_out_time: nowDate,
-      total_distance_travelled: totalDistanceKm,
-      journey_id: journeyId ?? externalIdFallback,
-      is_active: false,
-      dest_lat: activeTripData.dealer?.latitude ?? null,
-      dest_lng: activeTripData.dealer?.longitude ?? null,
-
-      // extras (not validated in schema, but useful)
-      tripDurationSeconds: totalDurationSec,
-      routePolyline: routePolyline,
+      // Required
+      userId: userId ? Number(userId) : undefined,
+      latitude: lat !== null ? String(Number(lat.toFixed(7))) : undefined,
+      longitude: lng !== null ? String(Number(lng.toFixed(7))) : undefined,
+      recordedAt: Datenow,
+      // Optional numerics
+      accuracy: null,
+      speed: null,
+      heading: null,
+      altitude: null,
+      // Optional strings
+      locationType: radarSDK.isSDKInitialized() ? 'radar' : 'browser',
+      activityType: null,
+      appState: 'foreground',
+      // Battery / charging
+      batteryLevel: null,
+      isCharging: null,
+      networkStatus: null,
+      ipAddress: null,
+      // Site info
+      siteName: activeTripData.dealer?.name ?? null,
+      // Times
+      checkInTime: null,
+      checkOutTime: Datenow,
+      // Distance
+      totalDistanceTravelled: totalDistanceKm ? Number(totalDistanceKm) : null,
+      // Journey
+      journeyId: String(journeyId ?? externalIdFallback),
+      isActive: false,
+      // Destination coords
+      destLat: activeTripData.dealer?.latitude ? String(Number(activeTripData.dealer.latitude)) : null,
+      destLng: activeTripData.dealer?.longitude ? String(Number(activeTripData.dealer.longitude)) : null,
     };
 
     console.log("📦 Final payload to POST:", payload);
