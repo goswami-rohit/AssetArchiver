@@ -3,7 +3,7 @@ import { useLocation } from "wouter";
 import { toast } from 'sonner';
 import {
   FileText, Store, Map, CheckCircle, User, Trophy, Clock,
-  ClipboardList, Package, LogOut, Target, Briefcase
+  ClipboardList, Package, LogOut, Target, Briefcase, Loader2
 } from 'lucide-react';
 
 // --- Reusable Web Components ---
@@ -16,9 +16,9 @@ import { Toaster } from '@/components/ui/sonner';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 // --- Custom Hooks & Constants ---
-import { useAppStore, fetchUserById } from '../components/ReusableUI';
+import { useAppStore, fetchUserById, BASE_URL } from '../components/ReusableUI';
 
-// --- Type Definitions for Icon Mapping ---
+// --- Type Definitions ---
 type IconName = keyof typeof iconMap;
 const iconMap = {
   FileText, Store, Map, CheckCircle, User, Trophy, Clock, Target,
@@ -26,17 +26,17 @@ const iconMap = {
 };
 
 // --- Sub-components for Profile Page ---
-const StatTile: React.FC<{ iconName: IconName; value: string | number; label: string; color: string; }> = ({ iconName, value, label, color }) => {
+const StatTile: React.FC<{ iconName: IconName; value: string | number; label: string; color: string; isLoading: boolean; }> = ({ iconName, value, label, color, isLoading }) => {
   const Icon = iconMap[iconName] || FileText;
   return (
     <div className="w-[48%] mb-3">
       <LiquidGlassCard>
         <div className="flex items-center">
           <div className="w-9 h-9 rounded-full flex items-center justify-center mr-3" style={{ backgroundColor: color }}>
-            <Icon size={20} className="text-white" />
+            {isLoading ? <Loader2 size={16} className="text-white animate-spin" /> : <Icon size={20} className="text-white" />}
           </div>
           <div className="flex-1">
-            <p className="text-xl font-bold text-white">{value}</p>
+            <p className="text-xl font-bold text-white">{isLoading ? '--' : value}</p>
             <p className="text-xs mt-1 text-gray-300">{label}</p>
           </div>
         </div>
@@ -70,25 +70,70 @@ const ActionButton: React.FC<{ icon: IconName; title: string; onPress: () => voi
 // --- Main Profile Page Component ---
 export default function ProfilePage() {
   const [, navigate] = useLocation();
-  const { user, reports, dealers, pjps, dailyTasks, dashboardStats, userTargets, setUser } = useAppStore();
+  const { user, setData, reports, dealers, pjps, dailyTasks, dashboardStats, userTargets, setUser } = useAppStore();
+  const [isLoadingStats, setIsLoadingStats] = useState(true);
 
+  // --- User data fetching ---
   useEffect(() => {
-    const loadUser = async () => {
-      if (!user?.id) {
-        try {
-          const storedUserId = localStorage.getItem('userId');
-          if (storedUserId) {
-            const fetched = await fetchUserById(Number(storedUserId));
-            if (fetched) setUser(fetched);
-          }
-        } catch (err) {
-          console.error('Failed to fetch user from storage', err);
-          navigate('/login');
-        }
+    if (!user?.id) {
+      const storedUserId = localStorage.getItem('userId');
+      if (storedUserId) {
+        fetchUserById(Number(storedUserId))
+          .then(fetched => fetched && setUser(fetched))
+          .catch(err => {
+            console.error('Failed to fetch user from storage', err);
+            navigate('/login');
+          });
+      }
+    }
+  }, [user, setUser, navigate]);
+
+  // --- ✅ NEW: Fetch all dashboard stats ---
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const fetchStats = async () => {
+      setIsLoadingStats(true);
+      const today = new Date().toISOString().split('T')[0];
+
+      // Helper function to fetch data and handle errors
+      const safeFetch = (url: string) => fetch(url)
+        .then(res => res.ok ? res.json() : Promise.resolve({ success: false, data: [] }))
+        .then(result => result.success ? result.data : [])
+        .catch(() => []);
+
+      try {
+        const [
+          dealersData,
+          completedPjps,
+          completedTasks,
+          dvrData,
+          tvrData,
+          competitionData
+        ] = await Promise.all([
+          safeFetch(`${BASE_URL}/api/dealers?userId=${user.id}`),
+          safeFetch(`${BASE_URL}/api/pjp/user/${user.id}?status=Completed`),
+          safeFetch(`${BASE_URL}/api/daily-tasks/user/${user.id}?status=Completed`),
+          safeFetch(`${BASE_URL}/api/daily-visit-reports/user/${user.id}?startDate=${today}&endDate=${today}`),
+          safeFetch(`${BASE_URL}/api/technical-visit-reports/user/${user.id}?startDate=${today}&endDate=${today}`),
+          safeFetch(`${BASE_URL}/api/competition-reports/user/${user.id}?startDate=${today}&endDate=${today}`)
+        ]);
+
+        // Update the global store with the fetched data
+        setData('dealers', dealersData);
+        setData('pjps', completedPjps);
+        setData('dailyTasks', completedTasks);
+        setData('reports', [...dvrData, ...tvrData, ...competitionData]);
+
+      } catch (error) {
+        toast.error("Failed to load dashboard stats.");
+      } finally {
+        setIsLoadingStats(false);
       }
     };
-    loadUser();
-  }, [user, setUser, navigate]);
+
+    fetchStats();
+  }, [user?.id, setData]);
 
   const handleLogout = useCallback(() => {
     toast("Are you sure you want to log out?", {
@@ -102,7 +147,7 @@ export default function ProfilePage() {
       },
       cancel: {
         label: "Cancel",
-        onClick: () => {},
+        onClick: () => { },
       }
     });
   }, [navigate, setUser]);
@@ -138,7 +183,7 @@ export default function ProfilePage() {
           </LiquidGlassCard>
 
           <div className="flex flex-row flex-wrap justify-between">
-            {statsData.map((stat) => <StatTile key={stat.label} {...stat} />)}
+            {statsData.map((stat) => <StatTile key={stat.label} {...stat} isLoading={isLoadingStats} />)}
           </div>
 
           <LiquidGlassCard>

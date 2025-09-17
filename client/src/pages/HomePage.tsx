@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from "wouter";
-import { format, isToday, parseISO } from 'date-fns';
 import { toast } from 'sonner';
 import { Loader2, LogIn, LogOut, Plus, CalendarSearch, ChevronRight } from 'lucide-react';
 
@@ -19,7 +18,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Toaster } from '@/components/ui/sonner';
 
 // --- Custom Hooks & Constants ---
-import { useAppStore, BASE_URL, StatCard, fetchUserById, PJP_STATUS } from '../components/ReusableUI';
+import { useAppStore, BASE_URL, fetchUserById, PJP_STATUS } from '../components/ReusableUI';
 
 // --- Type Definitions ---
 type PJP = {
@@ -41,40 +40,71 @@ type Dealer = {
 // --- Component ---
 export default function HomePage() {
   const [, navigate] = useLocation();
-  const { user, setUser, attendanceStatus, setAttendanceStatus, dashboardStats } = useAppStore();
+  const { user, setUser, attendanceStatus, setAttendanceStatus } = useAppStore();
 
   const [isAttendanceModalVisible, setIsAttendanceModalVisible] = useState(false);
-  const [attendanceFormType, setAttendanceFormType] = useState<'in' | 'out' | null>(null);
-
+  const [attendanceFormType, setAttendanceFormType] = useState<'in' | 'out' | '' | null>(null);
   const [todayPJPs, setTodayPJPs] = useState<PJP[]>([]);
   const [isLoadingPJPs, setIsLoadingPJPs] = useState(true);
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(true); // New loading state
 
-  // --- Dynamic user data fetching ---
+  // --- User data fetching ---
   useEffect(() => {
     if (user) return;
     const storedUserId = localStorage.getItem('userId');
     if (storedUserId) {
       const userId = parseInt(storedUserId);
       if (!isNaN(userId)) {
-        const fetchUserData = async () => {
-          try {
-            const userData = await fetchUserById(userId);
-            setUser(userData);
-          } catch (e) {
+        fetchUserById(userId)
+          .then(userData => setUser(userData))
+          .catch(e => {
             console.error("Failed to fetch user data:", e);
             localStorage.clear();
             navigate('/login');
-          }
-        };
-        fetchUserData();
+          });
       }
     } else {
       navigate('/login');
     }
   }, [user, setUser, navigate]);
 
-  // Fetch all PJPs and enrich with dealer data
+  // --- NEW: Fetch real-time attendance status from the database ---
   useEffect(() => {
+    if (!user?.id) return;
+
+    const checkAttendanceStatus = async () => {
+      setIsLoadingAttendance(true);
+      try {
+        const response = await fetch(`${BASE_URL}/api/attendance/user/${user.id}/today`);
+
+        if (response.ok) {
+          const result = await response.json();
+          const attendanceRecord = result.data;
+
+          if (attendanceRecord && !attendanceRecord.outTimeTimestamp) {
+            setAttendanceStatus('in');
+          } else if (attendanceRecord && attendanceRecord.outTimeTimestamp) {
+            setAttendanceStatus('out');
+          }
+        } else if (response.status === 404) {
+          setAttendanceStatus(null);
+        } else {
+          throw new Error("Failed to fetch attendance status.");
+        }
+      } catch (error: any) {
+        toast.error("Network Error", { description: "Could not verify attendance status." });
+        setAttendanceStatus(null);
+      } finally {
+        setIsLoadingAttendance(false);
+      }
+    };
+
+    checkAttendanceStatus();
+  }, [user?.id, setAttendanceStatus]);
+
+  // --- Fetch PJPs ---
+  useEffect(() => {
+    // ... no changes to this useEffect ...
     if (!user?.id) return;
     const fetchPJPs = async () => {
       setIsLoadingPJPs(true);
@@ -82,35 +112,23 @@ export default function HomePage() {
         const pjpUrl = `${BASE_URL}/api/pjp/user/${user.id}`;
         const pjpResponse = await fetch(pjpUrl);
         const pjpResult = await pjpResponse.json();
-
         if (pjpResponse.ok && pjpResult.success) {
           const pjps: PJP[] = pjpResult.data;
-
           const dealerIds = Array.from(new Set(pjps.map((p: PJP) => p.areaToBeVisited)));
-
           if (dealerIds.length > 0) {
             const dealerPromises = dealerIds.map(id =>
               fetch(`${BASE_URL}/api/dealers/${id}`).then(res => res.json())
             );
             const dealerResults = await Promise.all(dealerPromises);
-
             const dealersMap = new Map<string, Dealer>();
             dealerResults.forEach(res => {
-              if (res.success) {
-                dealersMap.set(res.data.id, res.data);
-              }
+              if (res.success) dealersMap.set(res.data.id, res.data);
             });
-
-            const enrichedPjps = pjps.map((p: PJP) => {
-               const dealerInfo = dealersMap.get(p.areaToBeVisited);
-              return {
-                ...p,
-                dealerName: dealerInfo?.name || 'Unknown Dealer',
-                dealerAddress: dealerInfo?.address || 'Location TBD',
-                dealerLatitude: dealerInfo?.latitude,
-                dealerLongitude: dealerInfo?.longitude,
-              };
-            });
+            const enrichedPjps = pjps.map((p: PJP) => ({
+              ...p,
+              dealerName: dealersMap.get(p.areaToBeVisited)?.name || 'Unknown Dealer',
+              dealerAddress: dealersMap.get(p.areaToBeVisited)?.address || 'Location TBD',
+            }));
             setTodayPJPs(enrichedPjps);
           } else {
             setTodayPJPs([]);
@@ -134,6 +152,8 @@ export default function HomePage() {
   }, []);
 
   const handleAttendanceSubmitted = useCallback(() => {
+    // After submitting, immediately update the state for a responsive feel.
+    // The next time the component loads, the useEffect will fetch the true state anyway.
     setAttendanceStatus(attendanceFormType === 'in' ? 'in' : 'out');
     setIsAttendanceModalVisible(false);
     setAttendanceFormType(null);
@@ -144,14 +164,18 @@ export default function HomePage() {
     setAttendanceFormType(null);
   }, []);
 
-  const getGreeting = () => {
+  const getGreeting = (): string => {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
+
+    if (hour < 12) {
+      return 'Good Morning';
+    }
+    if (hour < 17) {
+      return 'Good Afternoon';
+    }
     return 'Good Evening';
   };
 
-  // Logic to display up to 10 PJPs
   const displayedPJPs = todayPJPs.slice(0, 10);
   const hasMorePJPs = todayPJPs.length > 10;
 
@@ -160,7 +184,6 @@ export default function HomePage() {
       <AppHeader title="Home" />
 
       <div className="container mx-auto px-8 pt-8 pb-28 space-y-4">
-
         <LiquidGlassCard>
           <div className="text-center">
             <p className="font-semibold text-blue-300">{getGreeting()}</p>
@@ -169,22 +192,27 @@ export default function HomePage() {
           </div>
         </LiquidGlassCard>
 
-        {/* <div className="grid grid-cols-2 gap-4">
-          <StatCard title="Today's Tasks" value={String(dashboardStats?.todaysTasks ?? 0)} iconName="ClipboardList" />
-          <StatCard title="Active PJPs" value={String(dashboardStats?.activePJPs ?? 0)} iconName="Navigation" />
-        </div> */}
-
         <LiquidGlassCard>
           <div className="flex justify-between gap-4">
-            <Button onClick={() => handleAttendanceAction('in')} disabled={attendanceStatus === 'in'} className="flex-1 bg-green-500/80 hover:bg-green-600 disabled:opacity-50 h-12">
-              <LogIn className="mr-2 h-4 w-4" /> Check In
+            {/* ✅ UPDATED BUTTON LOGIC */}
+            <Button
+              onClick={() => handleAttendanceAction('in')}
+              disabled={isLoadingAttendance || attendanceStatus === 'in'}
+              className="flex-1 bg-green-500/80 hover:bg-green-600 disabled:opacity-50 h-12"
+            >
+              {isLoadingAttendance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogIn className="mr-2 h-4 w-4" />} Check In
             </Button>
-            <Button onClick={() => handleAttendanceAction('out')} disabled={attendanceStatus !== 'in'} className="flex-1 bg-red-500/80 hover:bg-red-600 disabled:opacity-50 h-12">
-              <LogOut className="mr-2 h-4 w-4" /> Check Out
+            <Button
+              onClick={() => handleAttendanceAction('out')}
+              disabled={isLoadingAttendance || attendanceStatus !== 'in'}
+              className="flex-1 bg-red-500/80 hover:bg-red-600 disabled:opacity-50 h-12"
+            >
+              {isLoadingAttendance ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <LogOut className="mr-2 h-4 w-4" />} Check Out
             </Button>
           </div>
         </LiquidGlassCard>
 
+        {/* --- No changes to the PJP section below --- */}
         <div>
           <LiquidGlassCard>
             <div className="flex justify-between items-center">

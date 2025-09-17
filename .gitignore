@@ -5,3 +5,7 @@ server/public
 vite.config.ts.*
 *.tar.gz
 .env
+.txt
+*.txt
+env.txt
+client/src/lib/env.txt

@@ -53,7 +53,7 @@ export interface AppState {
   user: UserShape | null
   isAuthenticated: boolean;
   currentPage: "home" | "ai" | "journey" | "profile"
-  attendanceStatus: "in" | "out"
+  attendanceStatus: "in" | "out" | null
   isLoading: boolean
   isOnline: boolean
   lastSync: Date | null

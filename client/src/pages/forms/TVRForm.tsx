@@ -60,15 +60,38 @@ async function dataURLtoBlob(dataurl: string): Promise<Blob> {
   return await res.blob();
 }
 
+// --- New Helper: Upload Image to R2 ---
+async function uploadImage(blob: Blob, fileName: string): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', blob, fileName);
+
+  const response = await fetch(`${BASE_URL}/api/r2/upload-direct`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error("Image upload failed. Please check your connection and try again.");
+  }
+  const { publicUrl } = await response.json();
+  if (!publicUrl) {
+    throw new Error("Server did not return a valid image URL.");
+  }
+  return publicUrl;
+}
+
 // --- Component ---
 export default function TVRForm() {
   const [, navigate] = useLocation();
   const { user } = useAppStore();
 
-  const [step, setStep] = useState<Step>('loading');
-  const [checkInPhoto, setCheckInPhoto] = useState<string | null>(null);
-  const [checkOutPhoto, setCheckOutPhoto] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>('checkin');
+  const [checkInPhotoPreview, setCheckInPhotoPreview] = useState<string | null>(null);
+  const [checkOutPhotoPreview, setCheckOutPhotoPreview] = useState<string | null>(null);
+  const [checkInPhotoUrl, setCheckInPhotoUrl] = useState<string | null>(null);
+  const [checkOutPhotoUrl, setCheckOutPhotoUrl] = useState<string | null>(null);
   const [checkInTime, setCheckInTime] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [modals, setModals] = useState({ brands: false, influencers: false });
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -77,27 +100,11 @@ export default function TVRForm() {
   const { control, handleSubmit, setValue, trigger, watch, formState: { errors } } = useForm<TVReportFormValues>({
     resolver: zodResolver(TVReportSchema),
     mode: 'onChange',
-    // FIX: Set valid default values to pass validation from the start
     defaultValues: {
       userId: user?.id ?? 0,
       reportDate: new Date(),
-      visitType: ' ',
-      siteNameConcernedPerson: ' ',
-      phoneNo: '1234567890',
-      emailId: '',
-      clientsRemarks: ' ',
-      salespersonRemarks: ' ',
-      siteVisitBrandInUse: [BRANDS[0]],
-      siteVisitStage: '',
-      conversionFromBrand: '',
-      conversionQuantityValue: 1,
-      conversionQuantityUnit: '',
-      associatedPartyName: '',
-      influencerType: [INFLUENCERS[0]],
-      serviceType: '',
-      qualityComplaint: '',
-      promotionalActivity: '',
-      channelPartnerVisit: '',
+      visitType: '', siteNameConcernedPerson: '', phoneNo: '', clientsRemarks: '', salespersonRemarks: '',
+      siteVisitBrandInUse: [], influencerType: [],
     },
   });
 
@@ -117,39 +124,55 @@ export default function TVRForm() {
     try {
       setIsCameraOpen(true);
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) {
       toast.error("Camera Error", { description: "Could not start the camera." });
-      setIsCameraOpen(false);
     }
   };
 
-  const handleCapture = () => {
-    if (videoRef.current && canvasRef.current) {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const context = canvas.getContext('2d');
-      context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-      const dataUrl = canvas.toDataURL('image/jpeg');
+  const handleCapture = async () => {
+    if (!videoRef.current || !canvasRef.current) return;
 
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const context = canvas.getContext('2d');
+    context?.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
+    if (video.srcObject) {
+      const stream = video.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
+    }
+    setIsCameraOpen(false);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+    const blob = await dataURLtoBlob(dataUrl);
+
+    setIsUploading(true);
+    toast.info("Uploading photo, please wait...");
+
+    try {
       if (step === 'checkin') {
-        setCheckInPhoto(dataUrl);
+        const fileName = `tvr-checkin-${user?.id}-${Date.now()}.jpg`;
+        const publicUrl = await uploadImage(blob, fileName);
+        setCheckInPhotoUrl(publicUrl);
+        setCheckInPhotoPreview(dataUrl);
         setCheckInTime(new Date().toISOString());
+        toast.success("Check-in photo uploaded!");
         setStep('form');
       } else if (step === 'checkout') {
-        setCheckOutPhoto(dataUrl);
+        const fileName = `tvr-checkout-${user?.id}-${Date.now()}.jpg`;
+        const publicUrl = await uploadImage(blob, fileName);
+        setCheckOutPhotoUrl(publicUrl);
+        setCheckOutPhotoPreview(dataUrl);
+        toast.success("Check-out photo uploaded!");
       }
-
-      if (video.srcObject) {
-        const stream = video.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-        video.srcObject = null;
-      }
-      setIsCameraOpen(false);
+    } catch (error: any) {
+      toast.error("Upload Failed", { description: error.message });
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -160,116 +183,151 @@ export default function TVRForm() {
   };
 
   const submit = async (data: TVReportFormValues) => {
-    if (!checkInPhoto || !checkOutPhoto) {
-      toast.error('Photo Missing', { description: 'Check-in and Check-out photos are required.' });
-      setStep('checkout');
-      return;
+    if (!checkInPhotoUrl || !checkOutPhotoUrl) {
+      return toast.error('Photo Missing', { description: 'Check-in and Check-out photos must be uploaded first.' });
     }
     setStep('submitting');
 
-    const payload = {
-      ...data,
-      reportDate: format(data.reportDate, 'yyyy-MM-dd'),
-    };
-
-    const formData = new FormData();
-    Object.entries(payload).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
-        formData.append(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
-      }
-    });
-    formData.append('checkInTime', checkInTime!);
-    formData.append('checkOutTime', new Date().toISOString());
-    formData.append('inTimeImage', await dataURLtoBlob(checkInPhoto), 'checkin.jpg');
-    formData.append('outTimeImage', await dataURLtoBlob(checkOutPhoto), 'checkout.jpg');
-
     try {
+      // ✅ FIX IS HERE: Build the payload carefully
+      const finalPayload: any = {
+        // Required fields
+        userId: data.userId,
+        reportDate: format(data.reportDate, 'yyyy-MM-dd'),
+        visitType: data.visitType,
+        siteNameConcernedPerson: data.siteNameConcernedPerson,
+        phoneNo: data.phoneNo,
+        clientsRemarks: data.clientsRemarks,
+        salespersonRemarks: data.salespersonRemarks,
+        siteVisitBrandInUse: data.siteVisitBrandInUse,
+        influencerType: data.influencerType,
+        checkInTime: new Date(checkInTime!),
+        checkOutTime: new Date(),
+        inTimeImageUrl: checkInPhotoUrl,
+        outTimeImageUrl: checkOutPhotoUrl,
+      };
+
+      // Conditionally add optional fields ONLY if they have a valid value
+      if (data.emailId) finalPayload.emailId = data.emailId;
+      if (data.siteVisitStage) finalPayload.siteVisitStage = data.siteVisitStage;
+      if (data.conversionFromBrand) finalPayload.conversionFromBrand = data.conversionFromBrand;
+      if (data.conversionQuantityUnit) finalPayload.conversionQuantityUnit = data.conversionQuantityUnit;
+      if (data.associatedPartyName) finalPayload.associatedPartyName = data.associatedPartyName;
+      if (data.serviceType) finalPayload.serviceType = data.serviceType;
+      if (data.qualityComplaint) finalPayload.qualityComplaint = data.qualityComplaint;
+      if (data.promotionalActivity) finalPayload.promotionalActivity = data.promotionalActivity;
+      if (data.channelPartnerVisit) finalPayload.channelPartnerVisit = data.channelPartnerVisit;
+      // Specifically check if the numeric value is valid before adding it
+      if (typeof data.conversionQuantityValue === 'number' && !isNaN(data.conversionQuantityValue)) {
+        finalPayload.conversionQuantityValue = data.conversionQuantityValue;
+      }
+
+      // Specifically check if the numeric value is valid before adding it
+      if (typeof data.conversionQuantityValue === 'number' && !isNaN(data.conversionQuantityValue)) {
+        finalPayload.conversionQuantityValue = data.conversionQuantityValue;
+      }
+
+      //console.log("Submitting Final TVR Payload:", JSON.stringify(finalPayload, null, 2));
+
       const response = await fetch(`${BASE_URL}/api/technical-visit-reports`, {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(finalPayload),
       });
+
       if (!response.ok) {
-        const result = await response.json().catch(() => ({ error: 'Failed to submit report.' }));
-        throw new Error(result.error);
+        let errorDetails = "An unknown error occurred.";
+        try {
+          const result = await response.json();
+          console.error("Server validation error:", result);
+          if (result.details && Array.isArray(result.details) && result.details.length > 0) {
+            const specificError = result.details[0];
+            errorDetails = `${specificError.field}: ${specificError.message}`;
+          } else if (result.error) {
+            errorDetails = result.error;
+          }
+        } catch (e) {
+          errorDetails = "Failed to parse server error response.";
+        }
+        throw new Error('Submission Failed. Check console for details.');
       }
+
       toast.success('TVR Submitted Successfully');
       setTimeout(() => window.history.back(), 1500);
+
     } catch (error: any) {
-      toast.error('Submission Failed', { description: error.message });
+      toast.error(error.message || 'Submission Failed');
       setStep('checkout');
     }
   };
 
-  const renderCameraStep = (isCheckin: boolean) => (
-    <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-      <h1 className="text-2xl font-bold">{isCheckin ? 'Site Check-in' : 'Site Checkout'}</h1>
-      <p className="text-muted-foreground mb-6">Take a selfie to {isCheckin ? 'begin' : 'complete'} the technical visit.</p>
-      <Avatar className="w-48 h-48 mb-6 border-2">
-        <AvatarImage src={(isCheckin ? checkInPhoto : checkOutPhoto) || ''} alt="Selfie" />
-        <AvatarFallback><Camera className="w-16 h-16 text-muted-foreground" /></AvatarFallback>
-      </Avatar>
-      <Button onClick={handleOpenCamera} className="w-full max-w-sm mb-4">
-        <Camera className="mr-2 h-4 w-4" /> Open Camera
-      </Button>
-      {!isCheckin && checkOutPhoto && (
-        <Button onClick={() => handleSubmit(submit)()} className="w-full max-w-sm">
-          Complete & Submit Report
+  const renderCameraStep = (isCheckin: boolean) => {
+    const photoPreview = isCheckin ? checkInPhotoPreview : checkOutPhotoPreview;
+    const photoUrl = isCheckin ? checkInPhotoUrl : checkOutPhotoUrl;
+
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
+        <h1 className="text-2xl font-bold">{isCheckin ? 'Site Check-in' : 'Site Checkout'}</h1>
+        <p className="text-muted-foreground mb-6">Take a selfie to {isCheckin ? 'begin' : 'complete'} the technical visit.</p>
+        <Avatar className="w-48 h-48 mb-6 border-2">
+          <AvatarImage src={photoPreview || ''} alt="Selfie" />
+          <AvatarFallback><Camera className="w-16 h-16 text-muted-foreground" /></AvatarFallback>
+        </Avatar>
+        <Button onClick={handleOpenCamera} className="w-full max-w-sm mb-4" disabled={isUploading}>
+          {isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Camera className="mr-2 h-4 w-4" />}
+          {photoUrl ? 'Retake Photo' : 'Open Camera'}
         </Button>
-      )}
-    </div>
-  );
+        {!isCheckin && photoUrl && (
+          <Button onClick={handleSubmit(submit)} className="w-full max-w-sm" disabled={step === 'submitting'}>
+            {step === 'submitting' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Complete & Submit Report
+          </Button>
+        )}
+      </div>
+    );
+  };
 
   const renderFormStep = () => (
-    // Add bottom padding to ensure the entire form is visible and scrollable
     <form onSubmit={(e) => { e.preventDefault(); handleProceedToCheckout(); }} className="space-y-6 pb-28">
       <div className="flex items-center gap-4 border-b pb-4">
-        <Avatar className="w-20 h-20"><AvatarImage src={checkInPhoto || ''} /></Avatar>
+        <Avatar className="w-20 h-20"><AvatarImage src={checkInPhotoPreview || ''} /></Avatar>
         <div className="space-y-1">
           <h2 className="text-xl font-bold">Technical Visit Details</h2>
           <p className="text-sm text-muted-foreground">Fill in all the required information.</p>
         </div>
       </div>
-
+      {/* ... The rest of your form fields are unchanged ... */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Controller name="visitType" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="visitType">Visit Type *</Label><Input id="visitType" {...field} />{errors.visitType && <p className="text-sm text-red-500 mt-1">{errors.visitType.message}</p>}</div>)} />
         <Controller name="siteNameConcernedPerson" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="siteNameConcernedPerson">Site/Person Name *</Label><Input id="siteNameConcernedPerson" {...field} />{errors.siteNameConcernedPerson && <p className="text-sm text-red-500 mt-1">{errors.siteNameConcernedPerson.message}</p>}</div>)} />
       </div>
-
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Controller name="phoneNo" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="phoneNo">Phone No *</Label><Input id="phoneNo" type="tel" {...field} />{errors.phoneNo && <p className="text-sm text-red-500 mt-1">{errors.phoneNo.message}</p>}</div>)} />
         <Controller name="emailId" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="emailId">Email ID</Label><Input id="emailId" type="email" {...field} value={field.value || ''} />{errors.emailId && <p className="text-sm text-red-500 mt-1">{errors.emailId.message}</p>}</div>)} />
       </div>
-
       <Controller name="clientsRemarks" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="clientsRemarks">Client's Remarks *</Label><Textarea id="clientsRemarks" {...field} />{errors.clientsRemarks && <p className="text-sm text-red-500 mt-1">{errors.clientsRemarks.message}</p>}</div>)} />
       <Controller name="salespersonRemarks" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="salespersonRemarks">Salesperson Remarks *</Label><Textarea id="salespersonRemarks" {...field} />{errors.salespersonRemarks && <p className="text-sm text-red-500 mt-1">{errors.salespersonRemarks.message}</p>}</div>)} />
-
       <div className="space-y-1">
         <Label>Site Visit - Brand in Use *</Label>
         <Button type="button" variant="outline" className="w-full justify-start font-normal" onClick={() => setModals({ ...modals, brands: true })}>{siteVisitBrandInUse?.length ? siteVisitBrandInUse.join(', ') : 'Select brands...'}</Button>
         {errors.siteVisitBrandInUse && <p className="text-sm text-red-500 mt-1">{errors.siteVisitBrandInUse.message}</p>}
       </div>
-
       <Controller name="siteVisitStage" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="siteVisitStage">Site Visit Stage</Label><Input id="siteVisitStage" {...field} value={field.value || ''} /></div>)} />
-
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Controller control={control} name="conversionFromBrand" render={({ field }) => (<div className="space-y-1"><Label>From Brand</Label><Select onValueChange={field.onChange} value={field.value || ''}><SelectTrigger><SelectValue placeholder="Select brand..." /></SelectTrigger><SelectContent>{BRANDS.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent></Select></div>)} />
         <Controller name="conversionQuantityValue" control={control} render={({ field }) => (<div className="space-y-1"><Label>Qty</Label><Input {...field} type="number" value={field.value ?? ''} onChange={e => field.onChange(e.target.valueAsNumber)} />{errors.conversionQuantityValue && <p className="text-sm text-red-500 mt-1">{errors.conversionQuantityValue.message}</p>}</div>)} />
         <Controller control={control} name="conversionQuantityUnit" render={({ field }) => (<div className="space-y-1"><Label>Unit</Label><Select onValueChange={field.onChange} value={field.value || ''}><SelectTrigger><SelectValue placeholder="Unit" /></SelectTrigger><SelectContent>{UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}</SelectContent></Select></div>)} />
       </div>
-
       <Controller name="associatedPartyName" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="associatedPartyName">Associated Party Name</Label><Input id="associatedPartyName" {...field} value={field.value || ''} /></div>)} />
-
       <div className="space-y-1">
         <Label>Influencer Type *</Label>
         <Button type="button" variant="outline" className="w-full justify-start font-normal" onClick={() => setModals({ ...modals, influencers: true })}>{influencerType?.length ? influencerType.join(', ') : 'Select influencers...'}</Button>
         {errors.influencerType && <p className="text-sm text-red-500 mt-1">{errors.influencerType.message}</p>}
       </div>
-
       <Controller name="serviceType" control={control} render={({ field }) => (<div className="space-y-1"><Label htmlFor="serviceType">Service Type</Label><Input id="serviceType" {...field} value={field.value || ''} /></div>)} />
       <Controller control={control} name="qualityComplaint" render={({ field }) => (<div className="space-y-1"><Label>Quality Complaint</Label><Select onValueChange={field.onChange} value={field.value || ''}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{QUALITY_COMPLAINT.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>)} />
       <Controller control={control} name="promotionalActivity" render={({ field }) => (<div className="space-y-1"><Label>Promotional Activity</Label><Select onValueChange={field.onChange} value={field.value || ''}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{PROMO_ACTIVITY.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>)} />
       <Controller control={control} name="channelPartnerVisit" render={({ field }) => (<div className="space-y-1"><Label>Channel Partner Visit</Label><Select onValueChange={field.onChange} value={field.value || ''}><SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger><SelectContent>{CHANNEL_PARTNER_VISIT.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div>)} />
-
       <Button type="submit" className="w-full h-12">Continue to Checkout</Button>
     </form>
   );
@@ -290,7 +348,7 @@ export default function TVRForm() {
     <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container flex h-14 items-center">
-          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button> {/* 👈 FIX: Changed to window.history.back() */}
+          <Button variant="ghost" size="icon" onClick={() => window.history.back()}><ArrowLeft className="h-4 w-4" /></Button>
           <h1 className="text-lg font-bold ml-2">Technical Visit Report</h1>
         </div>
       </header>
@@ -300,13 +358,11 @@ export default function TVRForm() {
       </main>
 
       <Dialog open={isCameraOpen} onOpenChange={setIsCameraOpen}>
-        <DialogContent><DialogHeader><DialogTitle>Take Selfie</DialogTitle></DialogHeader><video ref={videoRef} autoPlay playsInline className="w-full rounded-md" /><canvas ref={canvasRef} className="hidden" /><DialogFooter><Button onClick={handleCapture}>Capture Photo</Button></DialogFooter></DialogContent>
+        <DialogContent><DialogHeader><DialogTitle>Take Selfie</DialogTitle></DialogHeader><video ref={videoRef} autoPlay playsInline className="w-full rounded-md" /><canvas ref={canvasRef} className="hidden" /><DialogFooter><Button onClick={handleCapture} disabled={isUploading}>{isUploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Capture Photo"}</Button></DialogFooter></DialogContent>
       </Dialog>
-
       <Dialog open={modals.brands} onOpenChange={(open) => setModals(m => ({ ...m, brands: open }))}>
         <DialogContent><DialogHeader><DialogTitle>Select Brands in Use</DialogTitle></DialogHeader><div className="space-y-2 py-4">{BRANDS.map(brand => (<div key={brand} className="flex items-center space-x-2"><Checkbox id={brand} checked={siteVisitBrandInUse?.includes(brand)} onCheckedChange={(checked) => { const newBrands = checked ? [...(siteVisitBrandInUse || []), brand] : (siteVisitBrandInUse || []).filter(b => b !== brand); setValue('siteVisitBrandInUse', newBrands, { shouldValidate: true }); }} /><Label htmlFor={brand} className="font-normal">{brand}</Label></div>))}</div ><DialogFooter><DialogClose asChild><Button>Done</Button></DialogClose></DialogFooter></DialogContent>
       </Dialog>
-
       <Dialog open={modals.influencers} onOpenChange={(open) => setModals(m => ({ ...m, influencers: open }))}>
         <DialogContent><DialogHeader><DialogTitle>Select Influencer Type</DialogTitle></DialogHeader><div className="space-y-2 py-4">{INFLUENCERS.map(inf => (<div key={inf} className="flex items-center space-x-2"><Checkbox id={inf} checked={influencerType?.includes(inf)} onCheckedChange={(checked) => { const newInfluencers = checked ? [...(influencerType || []), inf] : (influencerType || []).filter(i => i !== inf); setValue('influencerType', newInfluencers, { shouldValidate: true }); }} /><Label htmlFor={inf} className="font-normal">{inf}</Label></div>))}</div><DialogFooter><DialogClose asChild><Button>Done</Button></DialogClose></DialogFooter></DialogContent>
       </Dialog>
