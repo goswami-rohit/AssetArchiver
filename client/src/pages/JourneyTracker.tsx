@@ -182,7 +182,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const [pjps, setPjps] = useState<PJP[]>([]);
   const [isLoadingLocation, setIsLoadingLocation] = useState(false);
 
-  const [tripStatus, setTripStatus] = useState<'idle' | 'active' | 'completed'>('idle');
+  const [tripStatus, setTripStatus] = useState<'pending' | 'started' | 'completed' | 'canceled'>('pending');
   const [activeTripData, setActiveTripData] = useState<TripData | null>(null);
   const [distance, setDistance] = useState<number>(0); // meters
   const [duration, setDuration] = useState<number>(0); // seconds
@@ -201,6 +201,9 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
   const trackingPointsRef = useRef<Array<{ lat: number; lng: number; timestamp: string }>>([]);
 
   const selectedPJP = (location as any).state?.selectedPJP;
+  const [pendingPjp, setPendingPjp] = useState<PJP | null>(null);
+  // chosen by the user from the dropdown (pjp id)
+  const [activePjpId, setActivePjpId] = useState<string | null>(null);
 
   /* ===============================
      Radar SDK Initialization (kept)
@@ -295,7 +298,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   useEffect(() => {
     const handleVisibility = async () => {
-      if (document.visibilityState === "visible" && tripStatus === 'active' && !wakeLockRef.current) {
+      if (document.visibilityState === "visible" && tripStatus === 'started' && !wakeLockRef.current) {
         await requestWakeLock();
       }
     };
@@ -316,7 +319,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         longitude: selectedPJP.dealerLongitude || 0,
       };
       setSelectedDealer(dealer);
-      setTripStatus('idle');
+      setTripStatus('pending');
     }
   }, [selectedPJP]);
 
@@ -349,13 +352,18 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
             const dealerInfo = dealersMap.get(p.areaToBeVisited);
             return {
               ...p,
-              dealerName: dealerInfo?.name || p.dealerName || 'Unknown Dealer',
-              dealerAddress: dealerInfo?.address || p.dealerAddress || 'Location TBD',
+              dealerName: dealerInfo?.name || p.dealerName || 'Dealer Name',
+              dealerAddress: dealerInfo?.address || p.dealerAddress || 'Location Name',
               dealerLatitude: dealerInfo?.latitude ?? p.dealerLatitude,
               dealerLongitude: dealerInfo?.longitude ?? p.dealerLongitude,
             };
           });
           setPjps(enrichedPjps);
+
+          // === NEW: capture first "pending" PJP for this user (if any)
+          const foundPending = enrichedPjps.find(p => (p.status ?? '').toLowerCase() === 'pending') ?? null;
+          setPendingPjp(foundPending);
+
         } else {
           throw new Error(pjpResult.error || "Failed to fetch PJPs.");
         }
@@ -462,14 +470,34 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       setDistance(0);
       setDuration(0);
 
+      const journeyId = `${userId}-${Date.now()}`;
       setActiveTripData({
-        journeyId: `${userId}-${Date.now()}`,
+        journeyId,
         dbJourneyId: -1,
         dealer: selectedDealer,
         radarTrip: null
       });
-      setTripStatus('active');
+      setTripStatus('started');
       setSuccess('Journey started! 🚀');
+
+      // Decide which PJP to update — priority: activePjpId (user-chosen) -> selectedPJP (routing) -> fallback pendingPjp
+      const pjpToPatchId = activePjpId ?? selectedPJP?.id ?? pendingPjp?.id ?? null;
+
+      if (!pjpToPatchId) {
+        console.warn('startTrip: no PJP id resolved to PATCH (user did not choose a PJP and no pending PJP found)');
+      } else {
+        try {
+          await fetch(`${BASE_URL}/api/pjp/${pjpToPatchId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'active', journeyId })
+          });
+          // optimistic local update so UI shows "active" immediately
+          setPjps(prev => prev.map(p => p.id === pjpToPatchId ? { ...p, status: 'active', journeyId } : p));
+        } catch (patchErr) {
+          console.warn('Failed to PATCH PJP status to active', patchErr);
+        }
+      }
 
       // PHASE 2 loop
       startTrackingLoop();
@@ -632,14 +660,14 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       ? (Math.round((Number(distance) / 1000) * 1000) / 1000).toString()
       : null;
 
-    // ✅ Correct schema-matching payload
+    // Correct schema-matching payload
     // final payload exactly matching sample (camelCase)
     const payload = {
       // required
       userId: userId ? Number(userId) : null,
       latitude,                                // number (7-decimals) or null
       longitude,                              // number (7-decimals) or null
-     // recordedAt: nowIso,                                   // Date object
+      // recordedAt: nowIso,                                   // Date object
       // optional numerics
       accuracy: null,
       speed: null,
@@ -669,7 +697,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
       destLng: destLng,
     };
 
-    console.log("📦 Final payload to POST:", payload);
+    //console.log("Final payload to POST:", payload);
 
     try {
       const resp = await fetch(`${BASE_URL}/api/geotracking`, {
@@ -682,11 +710,32 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
         console.warn('Geo-tracking POST failed', resp.status, json);
         toast.error('Unable to persist journey summary (saved locally).');
       } else {
-        console.info('Geo-tracking saved ✅:', json?.data ?? json);
+        //console.info('Geo-tracking saved :', json?.data ?? json);
       }
     } catch (postErr) {
       console.warn('Network error posting geo-tracking final payload', postErr);
       toast.error('Network error while saving journey summary.');
+    }
+
+    // Decide which PJP to mark complete (same priority logic as startTrip)
+    const pjpToPatchId = activePjpId ?? selectedPJP?.id ?? pendingPjp?.id ?? null;
+
+    if (pjpToPatchId) {
+      try {
+        await fetch(`${BASE_URL}/api/pjp/${pjpToPatchId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'complete', completedAt: new Date().toISOString() })
+        });
+        // optimistic local update
+        setPjps(prev => prev.map(p => p.id === pjpToPatchId ? { ...p, status: 'complete', completedAt: new Date() } : p));
+        // cleanup the active selection so it doesn't unintentionally get used again
+        if (activePjpId === pjpToPatchId) setActivePjpId(null);
+      } catch (patchErr) {
+        console.warn('Failed to PATCH PJP status to complete', patchErr);
+      }
+    } else {
+      console.warn('completeTrip: no resolved PJP id to PATCH');
     }
 
     setTripStatus('completed');
@@ -701,7 +750,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
 
   const startNewJourney = () => {
     stopTrackingLoop();
-    setTripStatus('idle');
+    setTripStatus('pending');
     setActiveTripData(null);
     setSelectedDealer(null);
     setDistance(0);
@@ -752,7 +801,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           />
         </div>
 
-        {tripStatus === 'idle' && (
+        {tripStatus === 'pending' && (
           selectedDealer ? (
             <div className="mx-4 mb-4 border-0 shadow-xl p-6 bg-background/95 backdrop-blur-md rounded-lg">
               <h2 className="text-xl font-bold text-center mb-4">Ready to Start Journey</h2>
@@ -789,6 +838,11 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
                     latitude: pjp.dealerLatitude || 0,
                     longitude: pjp.dealerLongitude || 0,
                   });
+                  // remember which PJP the user chose
+                  setActivePjpId(pjp.id);
+                } else {
+                  // if the dropdown gives a dealer id instead of a pjp id (defensive), clear active choice
+                  setActivePjpId(null);
                 }
               }}
               onStartTrip={startTrip}
@@ -796,7 +850,7 @@ export default function JourneyTracker({ onBack }: { onBack?: () => void }) {
           )
         )}
 
-        {tripStatus === 'active' && activeTripData && (
+        {tripStatus === 'started' && activeTripData && (
           <ModernActiveTripCard
             dealer={activeTripData.dealer}
             distance={Math.round(distance)} // meters

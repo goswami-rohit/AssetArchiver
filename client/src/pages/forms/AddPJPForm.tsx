@@ -122,7 +122,7 @@ export default function AddPJPForm() {
       planDate: new Date(),
       areaToBeVisited: '', // FIX: Empty string as default, will be replaced with ID
       description: '',
-      status: 'planned',
+      status: 'pending',
     },
   });
 

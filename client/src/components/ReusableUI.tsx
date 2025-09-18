@@ -261,7 +261,7 @@ export const PROMO_ACTIVITY = [
 export const CHANNEL_PARTNER_VISIT = [
   "Dealer Visit", "Sub dealer", "Authorized retailers", "Other Brand counters",
 ];
-export const PJP_STATUS = ["planned", "active", "completed", "cancelled"] as const;
+export const PJP_STATUS = ["pending", "started", "completed", "cancelled"] as const;
 
 type Dealer = {
   id: number | string;
@@ -383,12 +383,12 @@ export async function fetchCompanyByUserId(userId: number) {
 // MODERN JOURNEY TRACKER UI COMPONENTS
 // --------------------
 
-export const JourneyStatusBadge = ({ status }: { status: 'idle' | 'active' | 'completed' }) => (
+export const JourneyStatusBadge = ({ status }: { status: 'pending' | 'started' | 'completed' | 'canceled' }) => (
   <Badge
-    variant={status === 'active' ? 'destructive' : status === 'completed' ? 'default' : 'secondary'}
+    variant={status === 'started' ? 'destructive' : status === 'completed' ? 'default' : 'secondary'}
     className="animate-pulse"
   >
-    {status === 'active' ? '● Live' : status === 'completed' ? '✓ Done' : 'Ready'}
+    {status === 'started' ? '● Live' : status === 'completed' ? '✓ Done' : 'Ready'}
   </Badge>
 );
 
@@ -396,7 +396,7 @@ export const ModernJourneyHeader = ({
   status,
   onBack
 }: {
-  status: 'idle' | 'active' | 'completed';
+  status: 'pending' | 'started' | 'completed' | 'canceled';
   onBack?: () => void;
 }) => (
   <div className="flex items-center justify-between p-4 bg-background/95 backdrop-blur-md border-b border-border/50">

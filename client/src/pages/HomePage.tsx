@@ -104,7 +104,6 @@ export default function HomePage() {
 
   // --- Fetch PJPs ---
   useEffect(() => {
-    // ... no changes to this useEffect ...
     if (!user?.id) return;
     const fetchPJPs = async () => {
       setIsLoadingPJPs(true);
@@ -124,10 +123,15 @@ export default function HomePage() {
             dealerResults.forEach(res => {
               if (res.success) dealersMap.set(res.data.id, res.data);
             });
-            const enrichedPjps = pjps.map((p: PJP) => ({
+
+            // Only keep pending or active PJPs
+            const filteredPjps = pjps.filter(
+              (p) => p.status?.toLowerCase() === 'pending' || p.status?.toLowerCase() === 'active'
+            );
+            const enrichedPjps = filteredPjps.map((p: PJP) => ({
               ...p,
-              dealerName: dealersMap.get(p.areaToBeVisited)?.name || 'Unknown Dealer',
-              dealerAddress: dealersMap.get(p.areaToBeVisited)?.address || 'Location TBD',
+              dealerName: dealersMap.get(p.areaToBeVisited)?.name || 'Dealer Name',
+              dealerAddress: dealersMap.get(p.areaToBeVisited)?.address || 'Location Name',
             }));
             setTodayPJPs(enrichedPjps);
           } else {
@@ -194,7 +198,7 @@ export default function HomePage() {
 
         <LiquidGlassCard>
           <div className="flex justify-between gap-4">
-            {/* ✅ UPDATED BUTTON LOGIC */}
+            {/* UPDATED BUTTON LOGIC - handeled by data fetched from db directly */}
             <Button
               onClick={() => handleAttendanceAction('in')}
               disabled={isLoadingAttendance || attendanceStatus === 'in'}

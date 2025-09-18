@@ -112,8 +112,8 @@ export default function ProfilePage() {
           competitionData
         ] = await Promise.all([
           safeFetch(`${BASE_URL}/api/dealers?userId=${user.id}`),
-          safeFetch(`${BASE_URL}/api/pjp/user/${user.id}?status=Completed`),
-          safeFetch(`${BASE_URL}/api/daily-tasks/user/${user.id}?status=Completed`),
+          safeFetch(`${BASE_URL}/api/pjp/user/${user.id}?status=complete`),
+          safeFetch(`${BASE_URL}/api/daily-tasks/user/${user.id}?status=complete`),
           safeFetch(`${BASE_URL}/api/daily-visit-reports/user/${user.id}?startDate=${today}&endDate=${today}`),
           safeFetch(`${BASE_URL}/api/technical-visit-reports/user/${user.id}?startDate=${today}&endDate=${today}`),
           safeFetch(`${BASE_URL}/api/competition-reports/user/${user.id}?startDate=${today}&endDate=${today}`)
