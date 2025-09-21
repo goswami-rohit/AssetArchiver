@@ -1,3 +1,5 @@
+// server/integrations/radar.ts
+
 // src/integrations/radar.ts
 import dotenv from "dotenv";
 dotenv.config();
@@ -95,3 +97,4 @@ export const radar = {
     getGeofence,
   },
 };
+

@@ -10,6 +10,8 @@ import {
 import DVRForm from "@/pages/forms/DVRForm";
 import TVRForm from "@/pages/forms/TVRForm";
 import SalesOrderForm from "@/pages/forms/SalesOrderForm";
+import { BASE_URL } from '@/components/ReusableUI';
+import { io, Socket } from "socket.io-client";
 
 type Flow = "dvr" | "tvr" | "salesOrder" | null;
 
@@ -41,70 +43,219 @@ const MiniActionButton: React.FC<{
 );
 
 const ChatInterface: React.FC = () => {
+  // --- UI state
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [flow, setFlow] = useState<Flow>(null);
   const [miniActionsVisible, setMiniActionsVisible] = useState(false);
+
+  // --- refs
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  // --- socket ref
+  const socketRef = useRef<Socket | null>(null);
+
   useEffect(() => {
-    // keep chat scrolled to bottom
+    // auto-scroll to bottom when messages change
     messagesRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, flow]);
 
-  // initial quick actions shown when fresh (messages empty)
-  const initialQuickActionsVisible = messages.length === 0;
+  const MCP_SERVER_URL: string = (import.meta.env.VITE_MCP_SERVER_URL as string);
 
-  const sendMessage = useCallback(async () => {
-    const trimmed = input.trim();
-    if (!trimmed) return;
+  const buildUrl = (path: string) => {
+    if (!MCP_SERVER_URL) return path;
+    return `${MCP_SERVER_URL.replace(/\/+$/, "")}${path}`;
+  };
 
-    // hide starter quick actions once user interacts
-    setMiniActionsVisible(false);
-
-    setIsLoading(true);
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      content: trimmed,
-      sender: "user",
-      timestamp: new Date(),
-    };
-    setMessages((m) => [...m, userMsg]);
-    setInput("");
-    inputRef.current?.focus();
+  // --- Socket setup: connect to BASE_URL if provided and wire incoming messages
+  useEffect(() => {
+    if (!BASE_URL) return;
 
     try {
-      await new Promise((r) => setTimeout(r, 350)); // small UX delay
-      const aiMsg: Message = {
-        id: String(Date.now() + 1),
-        content: `AI reply to: ${trimmed}`,
-        sender: "ai",
+      const socket = io(BASE_URL, {
+        autoConnect: true,
+        transports: ["websocket", "polling"],
+      });
+      socketRef.current = socket;
+
+      const onConnect = () => {
+        console.log("Connected to bot socket:", BASE_URL);
+      };
+
+      const onDisconnect = (reason: any) => {
+        console.warn("Bot socket disconnected:", reason);
+      };
+
+      const onError = (err: any) => {
+        console.error("Bot socket error:", err);
+      };
+
+      socket.on("connect", onConnect);
+      socket.on("disconnect", onDisconnect);
+      socket.on("connect_error", onError);
+
+      // Incoming messages from the hosted telegram bot (bridge emits 'telegram:message')
+      socket.on("telegram:message", (payload: any) => {
+        getMessage(payload);
+      });
+
+      return () => {
+        socket.off("connect", onConnect);
+        socket.off("disconnect", onDisconnect);
+        socket.off("connect_error", onError);
+        socket.off("telegram:message");
+        socket.disconnect();
+        socketRef.current = null;
+      };
+    } catch (err) {
+      console.error("Failed to initialize socket to BASE_URL", err);
+      socketRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once
+
+  // --- getMessage: convert incoming socket payload into Message and append
+  const getMessage = useCallback((payload: any) => {
+    if (!payload) return;
+    const text = (payload.text ?? payload.message ?? payload.content ?? "").toString();
+    if (!text) return;
+
+    const aiMsg: Message = {
+      id: String(Date.now() + Math.floor(Math.random() * 1000)),
+      content: text,
+      sender: "ai",
+      timestamp: new Date(),
+    };
+    setMessages((m) => [...m, aiMsg]);
+  }, []);
+
+  // --- Send message: prefers socket emission to BASE_URL, falls back to HTTP MCP_SERVER_URL if configured.
+  // If neither available, posts an explicit error message to chat.
+  const sendMessage = useCallback(
+    async (opts?: { suppressQuickActionHide?: boolean }) => {
+      const trimmed = input.trim();
+      if (!trimmed) return;
+
+      if (!opts?.suppressQuickActionHide) setMiniActionsVisible(false);
+
+      setIsLoading(true);
+
+      const userMsg: Message = {
+        id: String(Date.now()),
+        content: trimmed,
+        sender: "user",
         timestamp: new Date(),
       };
-      setMessages((m) => [...m, aiMsg]);
-    } catch (err) {
-      setMessages((m) => [
-        ...m,
-        {
+      setMessages((m) => [...m, userMsg]);
+      setInput("");
+      inputRef.current?.focus();
+
+      try {
+        // If a hosted bot socket exists and is connected, prefer socket emission to BASE_URL
+        if (BASE_URL && socketRef.current && socketRef.current.connected) {
+          await new Promise<void>((resolve, reject) => {
+            socketRef.current!.emit("web:sendMessage", { text: trimmed }, (ack: any) => {
+              if (ack && ack.ok === false) {
+                reject(new Error(ack.error || "bot_send_failed"));
+              } else {
+                resolve();
+              }
+            });
+
+            // If server never ACKs, we still resolve after 8s to avoid hanging UI
+            setTimeout(() => resolve(), 8000);
+          });
+
+          // Wait for actual reply via 'telegram:message' emitted by the server.
+          return;
+        }
+
+        // If socket is not available but MCP_SERVER_URL exists, use HTTP endpoint
+        if (MCP_SERVER_URL) {
+          const res = await fetch(buildUrl("/api/chat"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              message: trimmed,
+            }),
+          });
+
+          if (!res.ok) {
+            let serverMsg = `Server error ${res.status}`;
+            try {
+              const errBody = await res.json();
+              if (errBody?.error) serverMsg += `: ${errBody.error}`;
+            } catch { }
+            throw new Error(serverMsg);
+          }
+
+          const data = await res.json();
+
+          let replyText: string | undefined;
+          if (typeof data.reply === "string") replyText = data.reply;
+          else if (typeof data.message === "string") replyText = data.message;
+          else if (data.data && typeof data.data.message === "string") replyText = data.data.message;
+          else if (Array.isArray(data.messages) && data.messages.length > 0) {
+            data.messages.forEach((m: any) =>
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: String(m.id ?? Date.now()),
+                  content: String(m.content ?? ""),
+                  sender: m.sender === "user" ? "user" : "ai",
+                  timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+                },
+              ])
+            );
+          } else {
+            replyText = typeof data === "string" ? data : JSON.stringify(data);
+          }
+
+          if (replyText) {
+            const aiMsg: Message = {
+              id: String(Date.now() + 1),
+              content: replyText,
+              sender: "ai",
+              timestamp: new Date(),
+            };
+            setMessages((m) => [...m, aiMsg]);
+          }
+          return;
+        }
+
+        // Neither socket nor HTTP endpoint available -> explicit error message
+        const errorMessage: Message = {
           id: String(Date.now() + 2),
-          content: "Error: failed to send message.",
+          content: `❌ Error: No socket connection to bot and no MCP_SERVER_URL configured.`,
           sender: "ai",
           timestamp: new Date(),
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [input]);
+        };
+        setMessages((m) => [...m, errorMessage]);
+      } catch (err: any) {
+        console.error("sendMessage failed:", err);
+        const errorMessage: Message = {
+          id: String(Date.now() + 3),
+          content: `❌ Error: ${err?.message ?? "Failed to send message"}`,
+          sender: "ai",
+          timestamp: new Date(),
+        };
+        setMessages((m) => [...m, errorMessage]);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [input, MCP_SERVER_URL]
+  );
 
+  // --- Flow handlers
   const openFlow = useCallback((f: Flow) => {
     setFlow(f);
     setMiniActionsVisible(false);
   }, []);
-
   const closeFlow = useCallback(() => setFlow(null), []);
 
   return (
@@ -241,8 +392,8 @@ const ChatInterface: React.FC = () => {
 
               {/* === Vertical popover: stacked buttons above the Plus === */}
               {miniActionsVisible && (
-                <div className="absolute bottom-full mb-3 left-4 md:left-1/2 md:transform md:-translate-x-1/2 z-60 pointer-events-auto" 
-                style={{ minWidth: 160 }}>
+                <div className="absolute bottom-full mb-3 left-4 md:left-1/2 md:transform md:-translate-x-1/2 z-60 pointer-events-auto"
+                  style={{ minWidth: 160 }}>
                   <div className="bg-slate-900/95 border border-white/6 rounded-xl p-2 shadow-lg flex flex-col gap-2 items-stretch">
                     <button
                       onClick={() => { openFlow("dvr"); setMiniActionsVisible(false); }}
@@ -293,7 +444,7 @@ const ChatInterface: React.FC = () => {
             {/* send */}
             <div className="flex-shrink-0">
               <button
-                onClick={sendMessage}
+                onClick={() => void sendMessage()}
                 disabled={!input.trim() || isLoading}
                 className="w-12 h-12 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-center shadow disabled:opacity-50"
               >
