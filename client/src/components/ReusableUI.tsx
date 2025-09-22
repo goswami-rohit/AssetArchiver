@@ -261,7 +261,8 @@ export const PROMO_ACTIVITY = [
 export const CHANNEL_PARTNER_VISIT = [
   "Dealer Visit", "Sub dealer", "Authorized retailers", "Other Brand counters",
 ];
-export const PJP_STATUS = ["pending", "started", "completed", "cancelled"] as const;
+//export const PJP_STATUS = ["pending", "started", "completed", "cancelled"] as const;
+export const PJP_STATUS = ["pending"] as const;
 
 type Dealer = {
   id: number | string;
